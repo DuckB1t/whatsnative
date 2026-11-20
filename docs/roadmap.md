@@ -337,9 +337,11 @@
   than to anything here; the alternative — not dropping — is the one thing
   this path exists to do.
 
-- **Group video is drawn but not reachable.** `call_card/video.rs` carries a
-  participant grid the library's group calls would fill; 1:1 is what the card
-  routes to today.
+- **Group calls are routed and drawn, but not live-validated.** The library's
+  transaction-ordered roster snapshots now reach `call_card/video.rs`, and a
+  group chat's call buttons place a `StartGroup` call. Real group calls have
+  not been placed or answered in this workspace: that needs explicit consent
+  on the paired account. Name resolution for the ringing card is still open.
 - **Only some failures reach the person who asked.** `app/notices.rs` is the
   transient surface the app had been missing: one sentence, expiring on its
   own, changing no state, drawn by the root over whatever screen is up — the
