@@ -248,8 +248,8 @@ document and has no privileged access.
 
 ## Known limitations
 
-* Group calls and choosing an audio output device are drawn but disabled.
-* Spacing does not yet follow the rem scale, so the UI ignores base-font zoom.
+* Group calls are drawn but not yet reachable in the UI. (1:1 voice and video
+  work; the protocol stack already supports groups.)
 * A page's plugins share its single agent rather than getting a thread each;
   attaching it to an `oxidezapd` gives each one a thread. See
   [the web front end](#the-web-front-end).
