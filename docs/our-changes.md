@@ -67,6 +67,9 @@ marks the old glibc/version figures as measurements from specific builds.
 2. Resolve the group's display name for the ringing card (the offer only has
    the caller's push name).
 3. Keyring/secret-service option for identity keys (keep one-file store default).
-4. rem-scale audit for absolute `px()` literals in GUI. **In progress.**
+4. ~~rem-scale audit~~ ✅ Audited 116 bare `px()` calls in GUI components/views:
+   all design sizes already use `metrics.*()`. The remaining ones are decoded
+   media geometry, scale-invariant zero/hairline thresholds, or test fixtures —
+   no changes needed. GUI tests: 679 passed, 14 ignored.
 5. Branding / app id / desktop file rename — keep crate names to minimize diff.
 6. ~~Packaging smoke tests~~ ✅ (above); audit and benchmarks still open.
