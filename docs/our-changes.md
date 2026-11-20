@@ -49,14 +49,24 @@ answering a group call needs no client-side work. The drawn participant grid
 is still unreachable — that needs participants exposed from the library's
 call registry across session → daemon → GUI, not just a flag.
 
+### 2. Linux package staging smoke test
+
+CI checked that deb/rpm/AppImage files exist, but nothing checked the FHS tree
+they are built from. `packaging/linux/smoke-test.sh` now verifies, with only a
+POSIX shell: the three binaries co-located and executable in `usr/bin`, a
+desktop entry and AppStream metadata whose ids agree and have no unsubstituted
+`@VERSION@`/`@DATE@`, and the seven hicolor PNGs. Wired into `build.yml` after
+`package.sh` on both Linux runners. `docs/linux-packaging.md` documents it and
+marks the old glibc/version figures as measurements from specific builds.
+
 ## Planned (see plan file)
 
 1. Group video: expose participants from the library registry and route the card
    to the drawn grid. Start group calls from an existing group via
-   `voip().group_call_by_id()`.
+   `voip().group_call_by_id()`. **In progress.**
 2. Resolve the group's display name for the ringing card (the offer only has
    the caller's push name).
 3. Keyring/secret-service option for identity keys (keep one-file store default).
-4. rem-scale audit for absolute `px()` literals in GUI.
+4. rem-scale audit for absolute `px()` literals in GUI. **In progress.**
 5. Branding / app id / desktop file rename — keep crate names to minimize diff.
-6. Packaging smoke tests, audit, benchmarks.
+6. ~~Packaging smoke tests~~ ✅ (above); audit and benchmarks still open.
