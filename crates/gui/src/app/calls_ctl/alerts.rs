@@ -135,6 +135,7 @@ mod call_alert_tests {
             call_id: id.into(),
             caller_name: "Example".into(),
             caller_jid: "999000@s.whatsapp.net".into(),
+            group_jid: None,
             is_video: true,
             is_offline: false,
             received_at: wacore::time::now_utc(),

@@ -448,6 +448,7 @@ mod tests {
                 call_id: "BEFORE-DROP".into(),
                 caller_name: "Example".into(),
                 caller_jid: "999000@s.whatsapp.net".into(),
+                group_jid: None,
                 is_video: false,
                 is_offline: false,
                 received_at: wacore::time::now_utc(),

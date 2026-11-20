@@ -50,14 +50,22 @@ impl CallLog {
     pub(crate) fn observe(&mut self, event: &UiEvent, hub: &StateHub) {
         match event {
             UiEvent::IncomingCall(call) => {
-                let chat_jid = call.caller_jid.clone();
+                // A group offer arrives from a person, not from the group.
+                // Filing it under their chat would show a group call in a 1:1
+                // conversation, so the group is the chat and the person stays
+                // the caller. Both answers are on the event now.
+                let chat_jid = call
+                    .group_jid
+                    .clone()
+                    .unwrap_or_else(|| call.caller_jid.clone());
+                let is_group = call.group_jid.is_some() || is_group_jid(&call.caller_jid);
                 self.interim.insert(
                     call.call_id.clone(),
                     InterimCall {
                         chat_jid,
                         caller_jid: call.caller_jid.clone(),
                         is_video: call.is_video,
-                        is_group: is_group_jid(&call.caller_jid),
+                        is_group,
                         incoming: true,
                         started_ms: now_ms(),
                         connected_ms: None,
@@ -196,6 +204,7 @@ mod tests {
             call_id: id.to_string(),
             caller_name: "Maria".to_string(),
             caller_jid: "559900000001@s.whatsapp.net".to_string(),
+            group_jid: None,
             is_video: false,
             is_offline: false,
             received_at: wacore::time::now_utc(),
@@ -215,6 +224,33 @@ mod tests {
         assert_eq!(entries[0].outcome, "missed");
         assert_eq!(entries[0].caller_jid, "559900000001@s.whatsapp.net");
         assert_eq!(entries[0].duration_seconds, None);
+    }
+
+    /// A group offer names the person who started it, but the group is the
+    /// conversation it belongs to. Both halves have to reach the log or a
+    /// group call turns up in somebody's 1:1 history.
+    #[test]
+    fn a_group_call_is_logged_under_the_group() {
+        let hub = StateHub::new();
+        let mut log = CallLog::new();
+        log.observe(
+            &UiEvent::IncomingCall(IncomingCall {
+                call_id: "group-call".to_string(),
+                caller_name: "Maria".to_string(),
+                caller_jid: "559900000001@s.whatsapp.net".to_string(),
+                group_jid: Some("120363000000000001@g.us".to_string()),
+                is_video: false,
+                is_offline: false,
+                received_at: wacore::time::now_utc(),
+            }),
+            &hub,
+        );
+        log.observe(&UiEvent::CallEnded("group-call".to_string()), &hub);
+        let entries = log.list(10);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_group);
+        assert_eq!(entries[0].chat_jid, "120363000000000001@g.us");
+        assert_eq!(entries[0].caller_jid, "559900000001@s.whatsapp.net");
     }
 
     /// An answered call is connected, with a duration.
