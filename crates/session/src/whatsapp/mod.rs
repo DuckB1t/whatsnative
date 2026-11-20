@@ -1911,6 +1911,13 @@ impl WhatsAppClient {
                         let _ = ui_tx.send(UiEvent::CallEnded(call_id.clone()));
                     }
                 }
+                // Group membership is authoritative in the library by the
+                // time this event reaches us. The roster is republished as a
+                // refresh of the call already on screen, never as a new
+                // offer, and only when this session actually knows the call.
+                CallAction::GroupUpdate { update } => {
+                    calls.observe_group_update(update, client.clone(), names.clone(), &ui_tx);
+                }
                 _ => {}
             },
             Event::MissedCall(missed) => {

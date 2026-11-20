@@ -19,7 +19,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::call::{CallId, IncomingCall, OutgoingCall, OutgoingCallState};
+use super::call::{
+    CallGroup, CallId, CallParticipantRef, IncomingCall, OutgoingCall, OutgoingCallState,
+};
 use super::system_notice::{CallOutcome, format_duration};
 use super::video::{CallVideo, VideoStream};
 
@@ -51,6 +53,10 @@ pub struct ActiveCall {
     pub is_outgoing: bool,
     pub started_at: DateTime<Utc>,
     pub muted: bool,
+    /// Group identity and roster, carried through from whichever ringing
+    /// stage became active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<CallGroup>,
 }
 
 impl ActiveCall {
@@ -120,6 +126,46 @@ impl Stage {
             Self::Outgoing(call) => &call.recipient_name,
             Self::Active(call) => &call.peer_name,
         }
+    }
+
+    /// The group identity and roster this call belongs to, if it is one.
+    pub fn group(&self) -> Option<&CallGroup> {
+        match self {
+            Self::Incoming(call) => call.group.as_ref(),
+            Self::Outgoing(call) => call.group.as_ref(),
+            Self::Active(call) => call.group.as_ref(),
+        }
+    }
+
+    /// Replace the group roster without changing the call's identity or
+    /// stage. Used only for a redelivery naming a call already held here.
+    ///
+    /// The library numbers roster snapshots. Name resolution happens on a
+    /// spawned task, so two snapshots can finish in the opposite order to the
+    /// one the server sent them in; an older transaction must not put the
+    /// participant grid back. An identity-only refresh has no transaction and
+    /// cannot replace a roster the state already holds.
+    fn refresh_group(&mut self, group: CallGroup) -> bool {
+        let slot = match self {
+            Self::Incoming(call) => &mut call.group,
+            Self::Outgoing(call) => &mut call.group,
+            Self::Active(call) => &mut call.group,
+        };
+        if let Some(current) = slot.as_ref() {
+            if group.transaction_id.is_none() && current.transaction_id.is_some() {
+                return false;
+            }
+            if let (Some(current_tx), Some(new_tx)) = (current.transaction_id, group.transaction_id)
+                && new_tx < current_tx
+            {
+                return false;
+            }
+            if *current == group {
+                return false;
+            }
+        }
+        *slot = Some(group);
+        true
     }
 
     pub fn call_id(&self) -> &str {
@@ -300,6 +346,31 @@ impl CallState {
         self.stage.as_ref().and_then(Stage::active)
     }
 
+    /// The group identity and roster of the call on screen, if it is one.
+    pub fn group(&self) -> Option<&CallGroup> {
+        self.stage.as_ref().and_then(Stage::group)
+    }
+
+    /// The group JID of the call on screen, in the tuple-shaped public API.
+    pub fn group_jid(&self) -> Option<&str> {
+        self.group().map(|group| group.group_jid.as_str())
+    }
+
+    /// The roster of the call on screen, in the tuple-shaped public API.
+    pub fn group_roster(&self) -> Vec<CallParticipantRef<'_>> {
+        self.group().map(CallGroup::roster).unwrap_or_default()
+    }
+
+    /// The transaction that produced the current group roster.
+    pub fn group_transaction_id(&self) -> Option<u32> {
+        self.group().and_then(|group| group.transaction_id)
+    }
+
+    /// The media mode the current group roster announced.
+    pub fn group_media(&self) -> Option<&str> {
+        self.group().and_then(|group| group.media.as_deref())
+    }
+
     pub fn has_incoming(&self) -> bool {
         self.incoming().is_some()
     }
@@ -327,18 +398,28 @@ impl CallState {
     pub fn set_incoming(&mut self, call: IncomingCall) -> Admission {
         // Redelivered signaling must not park a call behind itself, including
         // after it was accepted and its stage became active.
-        if self
+        if let Some(stage) = self
             .stage
-            .as_ref()
-            .is_some_and(|stage| stage.call_id() == call.call_id)
+            .as_mut()
+            .filter(|stage| stage.call_id() == call.call_id)
         {
+            // Group snapshots are published as another event naming the call
+            // already on screen. They must not ring it again, but dropping
+            // their roster would leave the participant grid empty for the
+            // rest of the call.
+            if let Some(group) = call.group {
+                stage.refresh_group(group);
+            }
             return Admission::Ringing;
         }
-        if self
+        if let Some(waiting) = self
             .waiting
-            .as_ref()
-            .is_some_and(|waiting| waiting.call_id() == &call.call_id)
+            .as_mut()
+            .filter(|waiting| waiting.call_id() == &call.call_id)
         {
+            if let Some(group) = call.group {
+                waiting.call_mut().group = Some(group);
+            }
             return Admission::Parked;
         }
         let Some(stage) = &self.stage else {
@@ -555,6 +636,7 @@ impl CallState {
             is_outgoing: matches!(stage, Stage::Outgoing(_)),
             started_at: wacore::time::now_utc(),
             muted: false,
+            group: stage.group().cloned(),
         };
         self.stage = Some(Stage::Active(active));
         true
@@ -603,6 +685,7 @@ impl CallState {
             is_outgoing: false,
             started_at: wacore::time::now_utc(),
             muted: false,
+            group: call.group.clone(),
         }));
     }
 
@@ -904,6 +987,83 @@ mod tests {
     use super::*;
     use wacore::types::call::{CallAction, IncomingCall as WaIncomingCall};
     use wacore_binary::jid::Jid;
+
+    fn group_for(id: &str) -> CallGroup {
+        CallGroup {
+            group_jid: format!("{id}@g.us"),
+            participants: vec![super::super::call::CallParticipant {
+                jid: "member@example.invalid".to_string(),
+                name: Some("Member".to_string()),
+                state: Some("connected".to_string()),
+                participant_type: None,
+                error: None,
+            }],
+            transaction_id: Some(1),
+            media: Some("audio".to_string()),
+        }
+    }
+
+    #[test]
+    fn group_roster_refreshes_the_call_it_names_without_ringing_again() {
+        let mut state = CallState::default();
+        let first = incoming("GROUP").with_group(group_for("GROUP"));
+        state.set_incoming(first.clone());
+        assert_eq!(state.group().map(|g| g.transaction_id), Some(Some(1)));
+
+        let second = first.clone().with_group(CallGroup {
+            transaction_id: Some(2),
+            participants: Vec::new(),
+            ..group_for("GROUP")
+        });
+        assert_eq!(state.set_incoming(second.clone()), Admission::Ringing);
+        assert_eq!(state.group().map(|g| g.transaction_id), Some(Some(2)));
+        assert!(state.waiting().is_none());
+
+        assert!(state.connect(&"GROUP".to_string()));
+        assert_eq!(
+            state
+                .active()
+                .and_then(|c| c.group.as_ref())
+                .map(|g| g.transaction_id),
+            Some(Some(2))
+        );
+
+        let third = second.with_group(CallGroup {
+            transaction_id: Some(3),
+            ..group_for("GROUP")
+        });
+        assert_eq!(state.set_incoming(third), Admission::Ringing);
+        assert_eq!(state.group().map(|g| g.transaction_id), Some(Some(3)));
+    }
+
+    #[test]
+    fn a_late_older_group_snapshot_does_not_rewind_the_roster() {
+        let mut state = CallState::default();
+        let first = incoming("GROUP").with_group(group_for("GROUP"));
+        state.set_incoming(first.clone());
+
+        let newer = first.clone().with_group(CallGroup {
+            transaction_id: Some(9),
+            ..group_for("GROUP")
+        });
+        state.set_incoming(newer);
+
+        let stale = first.with_group(CallGroup {
+            transaction_id: Some(2),
+            ..group_for("GROUP")
+        });
+        assert_eq!(state.set_incoming(stale), Admission::Ringing);
+        assert_eq!(state.group().and_then(|g| g.transaction_id), Some(9));
+    }
+
+    #[test]
+    fn direct_calls_still_have_no_group_after_a_snapshot_round_trip() {
+        let mut state = CallState::default();
+        state.set_outgoing(outgoing("DIRECT"));
+        let restored: CallState =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        assert!(restored.group().is_none());
+    }
 
     #[test]
     fn remote_video_before_acceptance_survives_only_its_call() {

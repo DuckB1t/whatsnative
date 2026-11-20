@@ -60,7 +60,11 @@ impl Bridge {
                 }
             );
         if ended_pairing || (action.needs_network() && !self.hub.connection().is_connected()) {
-            if let Action::Call(CallAction::Start { placeholder_id, .. }) = &action {
+            if let Action::Call(
+                CallAction::Start { placeholder_id, .. }
+                | CallAction::StartGroup { placeholder_id, .. },
+            ) = &action
+            {
                 self.hub
                     .calls(|calls| calls.mark_unrecorded(placeholder_id));
                 self.hub.republish_calls();
@@ -1558,7 +1562,11 @@ impl Bridge {
             // window has already drawn must not be left to disappear on the
             // next snapshot, which is what a front end writes down as an
             // attempt nobody answered.
-            if let Action::Call(CallAction::Start { placeholder_id, .. }) = &action {
+            if let Action::Call(
+                CallAction::Start { placeholder_id, .. }
+                | CallAction::StartGroup { placeholder_id, .. },
+            ) = &action
+            {
                 self.hub
                     .calls(|calls| calls.mark_unrecorded(placeholder_id));
                 self.hub.republish_calls();
@@ -1784,13 +1792,16 @@ impl Bridge {
                 let _camera_admission = if matches!(
                     &action,
                     CallAction::Start { video: true, .. }
+                        | CallAction::StartGroup { video: true, .. }
                         | CallAction::Accept { .. }
                         | CallAction::SetVideo { enabled: true, .. }
                 ) {
                     match self.devices.release_for_call() {
                         Ok(admission) => Some(admission),
                         Err(error) => {
-                            if let CallAction::Start { placeholder_id, .. } = &action {
+                            if let CallAction::Start { placeholder_id, .. }
+                            | CallAction::StartGroup { placeholder_id, .. } = &action
+                            {
                                 self.hub
                                     .calls(|calls| calls.mark_unrecorded(placeholder_id));
                             }
@@ -1846,6 +1857,41 @@ impl Bridge {
                             ));
                         });
                         client.start_call(&jid, video, placeholder_id);
+                    }
+                    CallAction::StartGroup {
+                        group_jid,
+                        video,
+                        placeholder_id,
+                    } => {
+                        if self.hub.call_state().is_busy() {
+                            self.hub
+                                .calls(|calls| calls.mark_unrecorded(&placeholder_id));
+                            self.hub.republish_calls();
+                            return CommandOutcome::Refused(
+                                "a call is already up; end it before placing another".to_string(),
+                            );
+                        }
+                        let name = self
+                            .hub
+                            .chat(&group_jid)
+                            .map_or_else(|| group_jid.clone(), |chat| chat.name);
+                        self.hub.calls(|calls| {
+                            calls.set_outgoing(
+                                oxidezap_core::OutgoingCall::new(
+                                    placeholder_id.clone(),
+                                    group_jid.clone(),
+                                    name,
+                                    video,
+                                )
+                                .for_group_roster(
+                                    group_jid.clone(),
+                                    Vec::new(),
+                                    None,
+                                    None,
+                                ),
+                            );
+                        });
+                        client.start_group_call(&group_jid, video, placeholder_id);
                     }
                     // Answering brings the media up here, so the call is live
                     // from this moment: waiting for an event that only fires

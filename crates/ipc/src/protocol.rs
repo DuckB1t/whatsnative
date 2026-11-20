@@ -329,7 +329,7 @@ pub enum DaemonEvent {
     /// accepting a call brings the media up here and there is no later event
     /// to replay, so a second window would otherwise keep ringing an offer
     /// that the first one answered.
-    CallsChanged(CallState),
+    CallsChanged(Box<CallState>),
     /// Who this device is linked as.
     ///
     /// It reaches a client in the [`DaemonMessage::Hello`] snapshot too, but
@@ -1393,6 +1393,14 @@ pub enum CallAction {
         video: bool,
         placeholder_id: String,
     },
+    /// Place a call bound to a group. The library resolves the member roster
+    /// at start time, so the group JID is the only address the requester has
+    /// to supply.
+    StartGroup {
+        group_jid: String,
+        video: bool,
+        placeholder_id: String,
+    },
     Accept {
         call_id: String,
     },
@@ -1586,6 +1594,21 @@ mod tests {
     }
 
     #[test]
+    fn a_group_start_roundtrips_its_group_jid() {
+        let action = CallAction::StartGroup {
+            group_jid: "120363000000000001@g.us".into(),
+            video: false,
+            placeholder_id: "local-call".into(),
+        };
+        let encoded = serde_json::to_string(&action).unwrap();
+        assert_eq!(
+            serde_json::from_str::<CallAction>(&encoded).unwrap(),
+            action
+        );
+        assert!(encoded.contains("120363000000000001@g.us"));
+    }
+
+    #[test]
     fn video_recovery_roundtrips_call_and_direction() {
         for stream in [
             oxidezap_core::VideoStream::Local,
@@ -1689,7 +1712,7 @@ mod tests {
             DaemonEvent::ChatRemoved {
                 jid: "559900000001@s.whatsapp.net".into(),
             },
-            DaemonEvent::CallsChanged(CallState::default()),
+            DaemonEvent::CallsChanged(Box::default()),
             DaemonEvent::AccountChanged(AccountIdentity::default()),
             // The one that could not be written. Not an empty vector: an
             // empty sequence is still a sequence, so it fails identically,

@@ -293,7 +293,11 @@ use std::path::PathBuf;
 /// the file had been staged.
 ///
 /// 44 adds the Composer plugin slot to published widget trees and actions.
-pub const PROTOCOL_VERSION: u32 = 44;
+///
+/// 45 adds `CallAction::StartGroup`, which places a call bound to a group JID.
+/// An older daemon has no such action and would refuse the request after the
+/// front end had already drawn its placeholder.
+pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

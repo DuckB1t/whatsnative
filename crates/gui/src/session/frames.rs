@@ -438,7 +438,7 @@ impl<'a> Frames<'a> {
                 DaemonEvent::CallsChanged(calls) => {
                     self.applied = version;
                     self.follow_calls(&calls);
-                    self.publish(FromDaemon::Calls(Box::new(calls)))?;
+                    self.publish(FromDaemon::Calls(calls))?;
                 }
                 _ => {
                     self.applied = version;
@@ -1285,7 +1285,7 @@ mod tests {
                 frames
                     .apply(DaemonMessage::Update {
                         version: StateVersion::INITIAL.next(),
-                        event: Box::new(DaemonEvent::CallsChanged(states[0].clone())),
+                        event: Box::new(DaemonEvent::CallsChanged(Box::new(states[0].clone()))),
                     })
                     .is_continue()
             );
@@ -1297,7 +1297,7 @@ mod tests {
                 version = version.next();
                 let message = DaemonMessage::Update {
                     version,
-                    event: Box::new(DaemonEvent::CallsChanged(calls)),
+                    event: Box::new(DaemonEvent::CallsChanged(Box::new(calls))),
                 };
                 assert!(frames.apply(message).is_continue());
             }
@@ -1444,7 +1444,7 @@ mod tests {
                 frames
                     .apply(DaemonMessage::Update {
                         version: StateVersion::INITIAL.next(),
-                        event: Box::new(DaemonEvent::CallsChanged(calls)),
+                        event: Box::new(DaemonEvent::CallsChanged(Box::new(calls))),
                     })
                     .is_continue()
             );
@@ -1514,7 +1514,7 @@ mod tests {
                 frames
                     .apply(DaemonMessage::Update {
                         version: StateVersion::INITIAL.next(),
-                        event: Box::new(DaemonEvent::CallsChanged(enabled)),
+                        event: Box::new(DaemonEvent::CallsChanged(Box::new(enabled))),
                     })
                     .is_continue()
             );
@@ -1528,7 +1528,7 @@ mod tests {
                         frames
                             .apply(DaemonMessage::Update {
                                 version: StateVersion::INITIAL.next().next(),
-                                event: Box::new(DaemonEvent::CallsChanged(next.clone())),
+                                event: Box::new(DaemonEvent::CallsChanged(Box::new(next.clone()))),
                             })
                             .is_continue()
                     );
@@ -1653,7 +1653,7 @@ mod tests {
             frames
                 .apply(DaemonMessage::Update {
                     version: StateVersion::INITIAL.next(),
-                    event: Box::new(DaemonEvent::CallsChanged(CallState::default())),
+                    event: Box::new(DaemonEvent::CallsChanged(Box::default())),
                 })
                 .is_continue()
         );
@@ -1687,7 +1687,7 @@ mod tests {
             frames
                 .apply(DaemonMessage::Update {
                     version,
-                    event: Box::new(DaemonEvent::CallsChanged(CallState::default())),
+                    event: Box::new(DaemonEvent::CallsChanged(Box::default())),
                 })
                 .is_continue()
         );
@@ -1763,7 +1763,7 @@ mod tests {
             frames
                 .apply(DaemonMessage::Update {
                     version,
-                    event: Box::new(DaemonEvent::CallsChanged(calls.clone())),
+                    event: Box::new(DaemonEvent::CallsChanged(Box::new(calls.clone()))),
                 })
                 .is_continue()
         );
@@ -1781,7 +1781,7 @@ mod tests {
             frames
                 .apply(DaemonMessage::Update {
                     version: version.next(),
-                    event: Box::new(DaemonEvent::CallsChanged(calls)),
+                    event: Box::new(DaemonEvent::CallsChanged(Box::new(calls))),
                 })
                 .is_continue()
         );
@@ -1823,7 +1823,7 @@ mod tests {
             frames
                 .apply(DaemonMessage::Update {
                     version,
-                    event: Box::new(DaemonEvent::CallsChanged(CallState::default())),
+                    event: Box::new(DaemonEvent::CallsChanged(Box::default())),
                 })
                 .is_continue()
         );

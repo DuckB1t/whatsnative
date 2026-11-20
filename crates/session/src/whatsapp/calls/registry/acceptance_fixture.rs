@@ -396,6 +396,7 @@ pub async fn outgoing_accept_events(case: OutgoingAcceptCase) -> Vec<UiEvent> {
         &mut call_events,
         calls.clone(),
         ui.clone(),
+        None,
     ));
     if matches!(
         case,
@@ -665,6 +666,7 @@ mod tests {
                 &mut queue,
                 calls.clone(),
                 ui.clone(),
+                None,
             ));
             if before_activation {
                 assert!(whatsapp_rust::futures::poll!(watching.as_mut()).is_pending());

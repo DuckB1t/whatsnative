@@ -766,6 +766,9 @@ pub struct CallsArgs {
     /// Maximum calls to list
     #[usage(long, default = "50")]
     pub limit: usize,
+    /// Show the last known group roster beside each call
+    #[usage(long)]
+    pub participants: bool,
 }
 
 #[derive(Args)]

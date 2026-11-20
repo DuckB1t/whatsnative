@@ -7,6 +7,122 @@ use wacore::types::call::{CallAction, IncomingCall as WaIncomingCall};
 /// Call ids are plain strings on the wire (and in the voip facade).
 pub type CallId = String;
 
+/// One group participant as plain data, in the shape the session and front
+/// ends exchange: JID, resolved name, connection state, participant type, error.
+pub type CallParticipantRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<u32>,
+);
+
+/// The borrowed view of [`CallParticipantRow`] returned when reading a roster.
+pub type CallParticipantRef<'a> = (
+    &'a str,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<u32>,
+);
+
+/// One person in a group call's authoritative roster.
+///
+/// The library's roster names a participant by JID and, for some snapshots,
+/// by connection state. A display name is deliberately optional: it is
+/// resolved on the session side from the same address book every other
+/// surface uses, and a roster that arrives before the lookup has finished is
+/// still worth drawing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallParticipant {
+    pub jid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<u32>,
+}
+
+/// The authoritative group identity and roster of one call.
+///
+/// A group offer carries its group JID but not its roster; the roster arrives
+/// later in transaction-ordered snapshots owned by the library. Both are kept
+/// together here so a front end attaching mid-call gets one answer rather
+/// than a group id and a stale participant list that have to be joined up by
+/// convention.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallGroup {
+    pub group_jid: String,
+    #[serde(default)]
+    pub participants: Vec<CallParticipant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transaction_id: Option<u32>,
+    /// The roster's own media mode (`audio` or `video`), when the snapshot
+    /// supplied one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<String>,
+}
+
+impl CallGroup {
+    pub fn new(group_jid: impl Into<String>) -> Self {
+        Self {
+            group_jid: group_jid.into(),
+            participants: Vec::new(),
+            transaction_id: None,
+            media: None,
+        }
+    }
+
+    /// The roster as the plain tuples the session and front ends exchange.
+    ///
+    /// Keeping the tuple shape on the public constructor means a caller does
+    /// not have to name this type through the crate's re-export list.
+    #[must_use]
+    pub fn from_roster(
+        group_jid: impl Into<String>,
+        participants: Vec<CallParticipantRow>,
+        transaction_id: Option<u32>,
+        media: Option<String>,
+    ) -> Self {
+        Self {
+            group_jid: group_jid.into(),
+            participants: participants
+                .into_iter()
+                .map(
+                    |(jid, name, state, participant_type, error)| CallParticipant {
+                        jid,
+                        name,
+                        state,
+                        participant_type,
+                        error,
+                    },
+                )
+                .collect(),
+            transaction_id,
+            media,
+        }
+    }
+
+    /// The roster in the tuple shape used by [`Self::from_roster`].
+    pub fn roster(&self) -> Vec<CallParticipantRef<'_>> {
+        self.participants
+            .iter()
+            .map(|p| {
+                (
+                    p.jid.as_str(),
+                    p.name.as_deref(),
+                    p.state.as_deref(),
+                    p.participant_type.as_deref(),
+                    p.error,
+                )
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutgoingCallState {
     Initiating,
@@ -24,6 +140,12 @@ pub struct OutgoingCall {
     pub is_video: bool,
     pub state: OutgoingCallState,
     pub initiated_at: DateTime<Utc>,
+    /// Group identity and roster, for a call bound to a group.
+    ///
+    /// Additive and defaulted on the wire: a 1:1 call leaves it out, and a
+    /// frame from an older daemon still reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<CallGroup>,
 }
 
 impl OutgoingCall {
@@ -40,7 +162,32 @@ impl OutgoingCall {
             is_video,
             state: OutgoingCallState::Initiating,
             initiated_at: wacore::time::now_utc(),
+            group: None,
         }
+    }
+
+    /// Bind this placement to a group before it goes out.
+    #[must_use]
+    pub fn for_group(mut self, group: CallGroup) -> Self {
+        self.group = Some(group);
+        self
+    }
+
+    /// Bind this placement to a group using the tuple roster shape.
+    #[must_use]
+    pub fn for_group_roster(
+        self,
+        group_jid: impl Into<String>,
+        participants: Vec<CallParticipantRow>,
+        transaction_id: Option<u32>,
+        media: Option<String>,
+    ) -> Self {
+        self.for_group(CallGroup::from_roster(
+            group_jid,
+            participants,
+            transaction_id,
+            media,
+        ))
     }
 
     pub fn initial(&self) -> char {
@@ -84,6 +231,14 @@ pub struct IncomingCall {
     /// on the wire so a frame from an older daemon still reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_jid: Option<String>,
+    /// Authoritative group roster, once one has arrived.
+    ///
+    /// Group control signals reach the session after the library has applied
+    /// them. They are republished on this same event with the same call id;
+    /// [`CallState::set_incoming`](crate::CallState::set_incoming) recognises
+    /// the redelivery and refreshes this field rather than ringing again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<CallGroup>,
     pub is_video: bool,
     pub is_offline: bool,
     pub received_at: DateTime<Utc>,
@@ -118,6 +273,7 @@ impl IncomingCall {
             caller_name,
             caller_jid,
             group_jid,
+            group: None,
             is_video,
             is_offline: offer.offline,
             received_at: offer.timestamp.unwrap_or_else(wacore::time::now_utc),
@@ -126,6 +282,31 @@ impl IncomingCall {
 
     pub fn initial(&self) -> char {
         self.caller_name.chars().next().unwrap_or('?')
+    }
+
+    /// Attach the roster learned after the offer, for a refresh event.
+    #[must_use]
+    pub fn with_group(mut self, group: CallGroup) -> Self {
+        self.group_jid = Some(group.group_jid.clone());
+        self.group = Some(group);
+        self
+    }
+
+    /// Attach a roster using the plain tuple shape.
+    #[must_use]
+    pub fn with_group_roster(
+        self,
+        group_jid: impl Into<String>,
+        participants: Vec<CallParticipantRow>,
+        transaction_id: Option<u32>,
+        media: Option<String>,
+    ) -> Self {
+        self.with_group(CallGroup::from_roster(
+            group_jid,
+            participants,
+            transaction_id,
+            media,
+        ))
     }
 }
 
@@ -190,5 +371,33 @@ mod tests {
         }"#;
         let call: IncomingCall = serde_json::from_str(json).expect("old frame still reads");
         assert_eq!(call.group_jid, None);
+        assert_eq!(call.group, None);
+    }
+
+    #[test]
+    fn a_roster_refresh_carries_the_group_it_names() {
+        let group = CallGroup {
+            group_jid: "120363000000000001@g.us".to_string(),
+            participants: vec![CallParticipant {
+                jid: "member@example.invalid".to_string(),
+                name: Some("Member".to_string()),
+                state: Some("connected".to_string()),
+                participant_type: None,
+                error: None,
+            }],
+            transaction_id: Some(7),
+            media: Some("audio".to_string()),
+        };
+        let call = IncomingCall::new(
+            "c4",
+            "Maria".into(),
+            "a@s.whatsapp.net".into(),
+            false,
+            &offer("c4", None),
+        )
+        .with_group(group.clone());
+
+        assert_eq!(call.group_jid.as_deref(), Some(group.group_jid.as_str()));
+        assert_eq!(call.group, Some(group));
     }
 }

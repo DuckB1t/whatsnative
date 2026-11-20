@@ -17,8 +17,10 @@ use crate::video::LocalVideo;
 use oxidezap_audio::open_call_audio;
 use std::time::Duration;
 use whatsapp_rust::voip::{
-    CallEvent, CallHandle, CallTermination, KeyframeUrgency, VideoState, VideoUpgradeToken,
+    CallEvent, CallHandle, CallTermination, GroupBoundCall, KeyframeUrgency,
+    OutgoingCall as VoipOutgoingCall, VideoState, VideoUpgradeToken,
 };
+use whatsapp_rust::wacore::types::group_call::GroupCallUpdate;
 
 #[cfg(all(feature = "test-support", not(target_family = "wasm")))]
 pub mod acceptance_fixture;
@@ -44,6 +46,132 @@ fn ringable_offer(offer: &WaIncomingCall, now_ms: i64) -> bool {
         && offer.timestamp.is_some_and(|timestamp| {
             now_ms.saturating_sub(timestamp.timestamp_millis()) <= MAX_RINGABLE_OFFER_AGE_MS
         })
+}
+
+/// Where an outgoing call is being placed. The group arm uses the library's
+/// roster-resolving builder rather than calling every member by hand.
+enum PlaceTarget {
+    Direct(String),
+    Group(String),
+}
+
+impl PlaceTarget {
+    fn label(&self) -> &str {
+        match self {
+            Self::Direct(jid) | Self::Group(jid) => jid,
+        }
+    }
+}
+
+/// One of the two builder types the library exposes for outgoing calls.
+///
+/// Both take the same media endpoints and both yield the same handle; this
+/// enum keeps the shared placement path from growing a second copy of the
+/// cancellation, camera and watcher logic.
+enum OutgoingChoice<'a> {
+    Direct(VoipOutgoingCall<'a>),
+    Group(GroupBoundCall<'a>),
+}
+
+impl OutgoingChoice<'_> {
+    fn audio(
+        self,
+        mic: async_channel::Receiver<Vec<i16>>,
+        speaker: async_channel::Sender<Vec<i16>>,
+    ) -> Self {
+        match self {
+            Self::Direct(call) => Self::Direct(call.audio(mic, speaker)),
+            Self::Group(call) => Self::Group(call.audio(mic, speaker)),
+        }
+    }
+
+    fn video(self, endpoints: crate::video::Endpoints) -> Self {
+        match self {
+            Self::Direct(call) => Self::Direct(call.video(endpoints.source, endpoints.sink)),
+            Self::Group(call) => Self::Group(call.video(endpoints.source, endpoints.sink)),
+        }
+    }
+
+    async fn start(self) -> Result<CallHandle, whatsapp_rust::CallError> {
+        match self {
+            Self::Direct(call) => call.start().await,
+            Self::Group(call) => call.start().await,
+        }
+    }
+}
+
+/// The parts of a group offer needed to publish a roster refresh later.
+struct GroupIdentity {
+    call_id: String,
+    caller_jid: String,
+    caller_name: String,
+    group_jid: String,
+    is_video: bool,
+}
+
+fn group_identity_from_offer(offer: &WaIncomingCall) -> Option<GroupIdentity> {
+    let CallAction::Offer {
+        call_id,
+        group_jid: Some(group),
+        ..
+    } = &offer.action
+    else {
+        return None;
+    };
+    Some(GroupIdentity {
+        call_id: call_id.clone(),
+        caller_jid: offer.from.to_non_ad_string(),
+        caller_name: offer
+            .notify
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| fallback_chat_name(&offer.from)),
+        group_jid: group.to_non_ad_string(),
+        is_video: offered_video(offer),
+    })
+}
+
+/// What a live call needs in order to republish a group roster as a refresh
+/// of the call already on screen.
+#[derive(Clone)]
+struct GroupRefresh {
+    call_id: String,
+    caller_jid: String,
+    caller_name: String,
+    group_jid: String,
+    is_video: bool,
+    client: Arc<Client>,
+    names: Arc<NameBook>,
+}
+
+impl GroupRefresh {
+    /// Resolve the roster's names and publish one refresh event.
+    fn publish(&self, update: &GroupCallUpdate, ui_sender: &UiEventSender) {
+        let refresh = self.clone();
+        let update = update.clone();
+        let ui_sender = ui_sender.clone();
+        crate::exec::spawn(async move {
+            send_group_snapshot(&update, &refresh, &ui_sender).await;
+        });
+    }
+}
+
+fn group_refresh_from_offer(
+    offer: &WaIncomingCall,
+    client: Arc<Client>,
+    names: Arc<NameBook>,
+) -> Option<GroupRefresh> {
+    let identity = group_identity_from_offer(offer)?;
+    Some(GroupRefresh {
+        call_id: identity.call_id,
+        caller_jid: identity.caller_jid,
+        caller_name: identity.caller_name,
+        group_jid: identity.group_jid,
+        is_video: identity.is_video,
+        client,
+        names,
+    })
 }
 
 fn direct_peer_video(state: VideoState) -> Option<bool> {
@@ -442,6 +570,52 @@ impl CallRegistry {
             return false;
         }
         ui.send(UiEvent::IncomingCall(call)).is_ok()
+    }
+
+    /// Whether this session already knows the call a group snapshot names.
+    ///
+    /// Group controls are delivered as `IncomingCall` events even when they
+    /// are not offers. Publishing one for a call we never saw would invent a
+    /// ringing card, so the roster refresh is only forwarded to a call that
+    /// is pending, connecting or live here.
+    fn has_call(&self, call_id: &str) -> bool {
+        let calls = self.calls.lock().expect("call registry poisoned");
+        calls.pending.contains_key(call_id)
+            || calls.in_flight.contains(call_id)
+            || calls.active.contains_key(call_id)
+            || calls.outgoing.contains_key(call_id)
+    }
+
+    /// Fold an authoritative roster delivered before the call handle exists.
+    ///
+    /// Once there is a handle the same snapshot arrives on its event stream
+    /// and [`GroupRefresh::publish`] handles it. The signaling event still
+    /// has to be answered here for the window that is ringing while the
+    /// microphone is opening.
+    pub(in crate::whatsapp) fn observe_group_update(
+        &self,
+        update: &GroupCallUpdate,
+        client: Arc<Client>,
+        names: Arc<NameBook>,
+        ui: &UiEventSender,
+    ) {
+        if update.group_jid.is_none() || !self.has_call(&update.call_id) {
+            return;
+        }
+        let refresh = GroupRefresh {
+            call_id: update.call_id.clone(),
+            caller_jid: update.call_creator.to_non_ad_string(),
+            caller_name: fallback_chat_name(&update.call_creator),
+            group_jid: update
+                .group_jid
+                .as_ref()
+                .expect("group JID checked above")
+                .to_non_ad_string(),
+            is_video: update.media.eq_ignore_ascii_case("video"),
+            client,
+            names,
+        };
+        refresh.publish(update, ui);
     }
 
     /// Take a ringing offer and mark its acceptance as in flight, together.
@@ -1375,6 +1549,54 @@ struct VideoIntent {
     on: bool,
 }
 
+/// Publish one authoritative roster as a refresh of the call it names.
+///
+/// The event is still `IncomingCall` because that is the existing shape that
+/// carries group identity across the daemon socket. The id is one the daemon
+/// already holds, so folding it refreshes the roster rather than ringing a
+/// second time.
+async fn send_group_snapshot(
+    update: &GroupCallUpdate,
+    refresh: &GroupRefresh,
+    ui_sender: &UiEventSender,
+) {
+    let group_jid = update
+        .group_jid
+        .as_ref()
+        .map_or_else(|| refresh.group_jid.clone(), |jid| jid.to_non_ad_string());
+    let mut participants = Vec::with_capacity(update.participants.len());
+    for participant in &update.participants {
+        let name = refresh
+            .names
+            .known(&refresh.client, &participant.jid, None)
+            .await;
+        participants.push((
+            participant.jid.to_non_ad_string(),
+            name,
+            participant.state.clone(),
+            participant.participant_type.clone(),
+            participant.error,
+        ));
+    }
+    let call = IncomingCall {
+        call_id: refresh.call_id.clone(),
+        caller_name: refresh.caller_name.clone(),
+        caller_jid: refresh.caller_jid.clone(),
+        group_jid: Some(group_jid.clone()),
+        group: None,
+        is_video: refresh.is_video,
+        is_offline: false,
+        received_at: wacore::time::now_utc(),
+    }
+    .with_group_roster(
+        group_jid,
+        participants,
+        Some(update.transaction_id),
+        Some(update.media.clone()),
+    );
+    let _ = ui_sender.send(UiEvent::IncomingCall(call));
+}
+
 impl WhatsAppClient {
     /// Accept an incoming call: signaling, callKey decrypt, relay connect and
     /// the audio engine are all inside `client.voip().accept(..)`; this side
@@ -1414,15 +1636,15 @@ impl WhatsAppClient {
                 calls: calls.clone(),
                 call_id: call_id.clone(),
             };
-            let Some(client) = session
-                .lock()
-                .await
-                .as_ref()
-                .map(|live| live.client.clone())
-            else {
-                error!("Client not available for accepting call");
-                return;
+            let (client, names) = {
+                let guard = session.lock().await;
+                let Some(live) = guard.as_ref() else {
+                    error!("Client not available for accepting call");
+                    return;
+                };
+                (live.client.clone(), live.names.clone())
             };
+            let mut group_refresh = group_refresh_from_offer(&offer, client.clone(), names);
             let (mic, speaker, audio_facts) = match open_call_audio().await {
                 Ok(audio) => audio,
                 Err(err) => {
@@ -1496,6 +1718,12 @@ impl WhatsAppClient {
             }
 
             let answered_with_video = endpoints.is_some();
+            // The offer may have asked for video and the camera still have
+            // failed to open. The roster refresh must describe the call as it
+            // was actually answered, not as it was requested.
+            if let Some(refresh) = &mut group_refresh {
+                refresh.is_video = answered_with_video;
+            }
             let voip = client.voip();
             let accept = voip.accept(&offer).audio(mic, speaker);
             let accept = match endpoints {
@@ -1605,7 +1833,7 @@ impl WhatsAppClient {
                     if answered_with_video && offered_video(&offer) && calls.camera_on(&call_id) {
                         Self::announce_video(&ui_sender, &call_id, VideoStream::Remote, true);
                     }
-                    Self::watch_call(handle, calls.clone(), ui_sender.clone());
+                    Self::watch_call(handle, calls.clone(), ui_sender.clone(), group_refresh);
                 }
                 Err(e) => {
                     error!("Failed to start call media for {}: {}", call_id, e);
@@ -2193,7 +2421,7 @@ impl WhatsAppClient {
     }
 
     /// Place an outgoing 1:1 call. Device discovery, callKey encrypt, offer
-    /// send and the relay/engine lifecycle are inside `client.voip().call(..)`.
+    /// send and the relay/engine lifecycle are inside the voip façade.
     ///
     /// `is_video` reaches the wire: the offer itself says which kind of call
     /// this is, and it says so because the endpoints were attached before it
@@ -2201,13 +2429,36 @@ impl WhatsAppClient {
     /// voice call rather than not placed at all — the point of the call is to
     /// reach the person.
     pub fn start_call(&self, recipient_jid_str: &str, is_video: bool, placeholder_id: String) {
+        self.place_call(
+            PlaceTarget::Direct(recipient_jid_str.to_string()),
+            is_video,
+            placeholder_id,
+        );
+    }
+
+    /// Place a call bound to an existing group.
+    ///
+    /// The library resolves the current roster at `start()`, excluding this
+    /// account, so a two-person group still rings its one other member. From
+    /// the media plane onwards this is the same call as any other: the only
+    /// difference is the identity published to the window and the roster that
+    /// arrives on the handle's event stream.
+    pub fn start_group_call(&self, group_jid_str: &str, is_video: bool, placeholder_id: String) {
+        self.place_call(
+            PlaceTarget::Group(group_jid_str.to_string()),
+            is_video,
+            placeholder_id,
+        );
+    }
+
+    fn place_call(&self, target: PlaceTarget, is_video: bool, placeholder_id: String) {
         let session = self.session.clone();
         let calls = self.calls.clone();
         let ui_sender = self.ui_sender.clone();
         let publish = self.video_publisher();
         let lost = self.camera_lost();
         let picture_lost = self.picture_lost();
-        let recipient_jid = recipient_jid_str.to_string();
+        let recipient_jid = target.label().to_string();
 
         // Before the spawn, on the caller's thread, for the same reason a
         // mute request is stamped there: spawning is not sequencing. A user
@@ -2255,14 +2506,13 @@ impl WhatsAppClient {
                     return;
                 }
             };
-            let Some(client) = session
-                .lock()
-                .await
-                .as_ref()
-                .map(|live| live.client.clone())
-            else {
-                notify_failure("client not available".to_string()).await;
-                return;
+            let (client, names) = {
+                let guard = session.lock().await;
+                let Some(live) = guard.as_ref() else {
+                    notify_failure("client not available".to_string()).await;
+                    return;
+                };
+                (live.client.clone(), live.names.clone())
             };
             let (mic, speaker, audio_facts) = match open_call_audio().await {
                 Ok(audio) => audio,
@@ -2307,9 +2557,13 @@ impl WhatsAppClient {
             let camera_id = local.as_ref().map(LocalVideo::camera_id);
 
             let voip = client.voip();
-            let outgoing = voip.call(&jid).audio(mic, speaker);
+            let outgoing = match target {
+                PlaceTarget::Direct(_) => OutgoingChoice::Direct(voip.call(&jid)),
+                PlaceTarget::Group(_) => OutgoingChoice::Group(voip.group_call_by_id(&jid)),
+            }
+            .audio(mic, speaker);
             let outgoing = match endpoints {
-                Some(endpoints) => outgoing.video(endpoints.source, endpoints.sink),
+                Some(endpoints) => outgoing.video(endpoints),
                 None => outgoing,
             };
 
@@ -2344,7 +2598,7 @@ impl WhatsAppClient {
                     let handle = Arc::new(handle);
                     // A secondary cache lookup can fail after the offer was sent. The handle
                     // retains the resolved target independently of an early answering device.
-                    let target = handle.initial_peer_jid().clone();
+                    let target_jid = handle.initial_peer_jid().clone();
                     // Cancelled while still connecting: the UI only knew the
                     // placeholder id, so the rename and the note are answered
                     // together, under one lock. As two steps there is a
@@ -2397,7 +2651,31 @@ impl WhatsAppClient {
                         // already out.
                         calls.hold_camera(&call_id, local).await;
                     }
-                    Self::watch_call(handle.clone(), calls.clone(), ui_sender.clone());
+                    let group_refresh = match &target {
+                        PlaceTarget::Group(group_jid) => {
+                            let caller_jid = handle.call_creator().to_non_ad_string();
+                            let caller_name = names
+                                .known(&client, handle.call_creator(), None)
+                                .await
+                                .unwrap_or_else(|| fallback_chat_name(handle.call_creator()));
+                            Some(GroupRefresh {
+                                call_id: call_id.clone(),
+                                caller_jid: caller_jid.clone(),
+                                caller_name: caller_name.clone(),
+                                group_jid: group_jid.clone(),
+                                is_video: endpoints_attached,
+                                client: client.clone(),
+                                names: names.clone(),
+                            })
+                        }
+                        PlaceTarget::Direct(_) => None,
+                    };
+                    Self::watch_call(
+                        handle.clone(),
+                        calls.clone(),
+                        ui_sender.clone(),
+                        group_refresh.clone(),
+                    );
                     // The rename first: everything after it is addressed by
                     // the id the server gave the call, and a front end told
                     // its camera was on under an id it has not adopted yet
@@ -2414,7 +2692,29 @@ impl WhatsAppClient {
                         // conversation's record as a video call.
                         is_video: endpoints_attached,
                     });
-                    calls.outgoing_ready(&call_id, &handle, target, camera_id);
+                    // The started event names the server id; a refresh under
+                    // the same id adds the group identity without making a
+                    // second ringing card.
+                    if let Some(refresh) = &group_refresh {
+                        let identity = IncomingCall {
+                            call_id: call_id.clone(),
+                            caller_name: refresh.caller_name.clone(),
+                            caller_jid: refresh.caller_jid.clone(),
+                            group_jid: Some(refresh.group_jid.clone()),
+                            group: None,
+                            is_video: endpoints_attached,
+                            is_offline: false,
+                            received_at: wacore::time::now_utc(),
+                        }
+                        .with_group_roster(
+                            refresh.group_jid.clone(),
+                            Vec::new(),
+                            None,
+                            None,
+                        );
+                        let _ = ui_sender.send(UiEvent::IncomingCall(identity));
+                    }
+                    calls.outgoing_ready(&call_id, &handle, target_jid, camera_id);
                 }
                 Err(e) => {
                     if let Some(local) = local {
@@ -2562,20 +2862,35 @@ impl WhatsAppClient {
     /// One entry point rather than two spawns at every call site, because
     /// every path that produces a handle owes both — a call watched for its
     /// ending but not its events is one whose camera nobody turns off.
-    fn watch_call(handle: Arc<CallHandle>, calls: CallRegistry, ui_sender: UiEventSender) {
-        Self::watch_call_events(handle.clone(), calls.clone(), ui_sender.clone());
+    fn watch_call(
+        handle: Arc<CallHandle>,
+        calls: CallRegistry,
+        ui_sender: UiEventSender,
+        group_refresh: Option<GroupRefresh>,
+    ) {
+        Self::watch_call_events(
+            handle.clone(),
+            calls.clone(),
+            ui_sender.clone(),
+            group_refresh,
+        );
         Self::watch_call_end(handle, calls, ui_sender);
     }
 
     /// The call's own event stream: what the peer says about its video, and
     /// what the network says about ours.
-    fn watch_call_events(handle: Arc<CallHandle>, calls: CallRegistry, ui_sender: UiEventSender) {
+    fn watch_call_events(
+        handle: Arc<CallHandle>,
+        calls: CallRegistry,
+        ui_sender: UiEventSender,
+        group_refresh: Option<GroupRefresh>,
+    ) {
         let Some(mut events) = handle.take_events() else {
             warn!("call {}: event receiver already acquired", handle.call_id());
             return;
         };
         crate::exec::spawn(async move {
-            Self::run_call_events(handle, &mut events, calls, ui_sender).await;
+            Self::run_call_events(handle, &mut events, calls, ui_sender, group_refresh).await;
         });
     }
 
@@ -2584,10 +2899,20 @@ impl WhatsAppClient {
         events: &mut whatsapp_rust::voip::CallEvents,
         calls: CallRegistry,
         ui_sender: UiEventSender,
+        group_refresh: Option<GroupRefresh>,
     ) {
         let call_id = handle.call_id().to_string();
         while let Ok(event) = events.recv().await {
             match event {
+                // The server owns the group roster, and this is its ordered
+                // snapshot. Republish it under the call already on screen:
+                // the state folds a repeated id into a roster refresh rather
+                // than ringing the call a second time.
+                CallEvent::GroupUpdated(update) => {
+                    if let Some(refresh) = &group_refresh {
+                        refresh.publish(&update, &ui_sender);
+                    }
+                }
                 event @ CallEvent::PeerVideoStateChanged { .. } => {
                     calls.peer_video_event(&handle, event, &ui_sender).await;
                 }
@@ -3000,6 +3325,47 @@ fn log_termination(call_id: &str, outcome: CallTermination) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_group_offer_prepares_a_roster_refresh() {
+        let caller: Jid = "999000@s.whatsapp.net".parse().unwrap();
+        let group: Jid = "120363000000000001@g.us".parse().unwrap();
+        let offer = WaIncomingCall::builder()
+            .from(caller.clone())
+            .stanza_id("group-offer".to_string())
+            .timestamp(wacore::time::now_utc())
+            .offline(false)
+            .action(CallAction::Offer {
+                call_id: "group-offer".to_string(),
+                call_creator: caller.clone(),
+                caller_pn: None,
+                caller_country_code: None,
+                device_class: None,
+                joinable: true,
+                is_video: false,
+                audio: Vec::new(),
+                group_jid: Some(group.clone()),
+            })
+            .build();
+        let identity =
+            group_identity_from_offer(&offer).expect("a group offer carries its identity");
+        assert_eq!(identity.call_id, "group-offer");
+        assert_eq!(identity.group_jid, group.to_non_ad_string());
+        assert_eq!(identity.caller_jid, caller.to_non_ad_string());
+        assert!(!identity.is_video);
+    }
+
+    #[test]
+    fn an_acceptance_still_opening_media_counts_as_a_known_call() {
+        let registry = CallRegistry::default();
+        registry
+            .calls
+            .lock()
+            .expect("call registry poisoned")
+            .in_flight
+            .insert("accepting".to_string());
+        assert!(registry.has_call("accepting"));
+    }
 
     fn replay_offer(id: &str) -> Arc<WaIncomingCall> {
         let jid: Jid = "999000@s.whatsapp.net".parse().unwrap();

@@ -414,7 +414,7 @@ impl StateStore {
             // Not the usual route in — [`Self::change_calls`] is — but the
             // state it names is the state this holds, so applying it here
             // keeps one field with one writer.
-            DaemonEvent::CallsChanged(calls) => inner.calls = calls.clone(),
+            DaemonEvent::CallsChanged(calls) => inner.calls = calls.as_ref().clone(),
             DaemonEvent::AccountChanged(account) => {
                 inner.account = Some(account.clone());
             }
@@ -450,7 +450,7 @@ impl StateStore {
         inner.version = inner.version.next();
         Some(Published {
             version: inner.version,
-            event: DaemonEvent::CallsChanged(inner.calls.clone()),
+            event: DaemonEvent::CallsChanged(Box::new(inner.calls.clone())),
             tray: inner.tray_state(),
             claim: claim(),
         })
@@ -468,7 +468,7 @@ impl StateStore {
         inner.version = inner.version.next();
         Published {
             version: inner.version,
-            event: DaemonEvent::CallsChanged(inner.calls.clone()),
+            event: DaemonEvent::CallsChanged(Box::new(inner.calls.clone())),
             tray: inner.tray_state(),
             claim: claim(),
         }

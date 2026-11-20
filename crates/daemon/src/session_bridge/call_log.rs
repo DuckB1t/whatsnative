@@ -11,7 +11,7 @@ use std::collections::{HashMap, VecDeque};
 use wacore_binary::jid::{Jid, JidExt as _};
 
 use oxidezap_core::UiEvent;
-use oxidezap_wire::dto::CallEventDto;
+use oxidezap_wire::dto::{CallEventDto, CallParticipantDto};
 
 use crate::state::StateHub;
 
@@ -25,6 +25,10 @@ struct InterimCall {
     caller_jid: String,
     is_video: bool,
     is_group: bool,
+    group_jid: Option<String>,
+    participants: Vec<CallParticipantDto>,
+    group_transaction_id: Option<u32>,
+    group_media: Option<String>,
     incoming: bool,
     started_ms: u64,
     connected_ms: Option<u64>,
@@ -59,6 +63,45 @@ impl CallLog {
                     .clone()
                     .unwrap_or_else(|| call.caller_jid.clone());
                 let is_group = call.group_jid.is_some() || is_group_jid(&call.caller_jid);
+                let group = call.group.as_ref();
+                let participants: Vec<CallParticipantDto> = group
+                    .map(|group| {
+                        group
+                            .participants
+                            .iter()
+                            .map(|p| CallParticipantDto {
+                                jid: p.jid.clone(),
+                                name: p.name.clone(),
+                                state: p.state.clone(),
+                                participant_type: p.participant_type.clone(),
+                                error: p.error,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(existing) = self.interim.get_mut(&call.call_id) {
+                    // A roster refresh is an `IncomingCall` event under an id
+                    // the log already holds. It must not turn an outgoing
+                    // call into a missed one or restart its clock.
+                    if let Some(group) = group {
+                        // Name resolution can let an older snapshot finish
+                        // last. Keep the newest transaction in the history
+                        // too, not just in the live state.
+                        let stale = match (existing.group_transaction_id, group.transaction_id) {
+                            (Some(current), Some(new)) => new < current,
+                            (Some(_), None) => true,
+                            _ => false,
+                        };
+                        if !stale {
+                            existing.group_jid = Some(group.group_jid.clone());
+                            existing.participants = participants;
+                            existing.group_transaction_id = group.transaction_id;
+                            existing.group_media = group.media.clone();
+                            existing.is_group = true;
+                        }
+                    }
+                    return;
+                }
                 self.interim.insert(
                     call.call_id.clone(),
                     InterimCall {
@@ -66,6 +109,10 @@ impl CallLog {
                         caller_jid: call.caller_jid.clone(),
                         is_video: call.is_video,
                         is_group,
+                        group_jid: call.group_jid.clone(),
+                        participants,
+                        group_transaction_id: group.and_then(|g| g.transaction_id),
+                        group_media: group.and_then(|g| g.media.clone()),
                         incoming: true,
                         started_ms: now_ms(),
                         connected_ms: None,
@@ -86,6 +133,10 @@ impl CallLog {
                         caller_jid,
                         is_video: *is_video,
                         is_group: is_group_jid(recipient_jid),
+                        group_jid: is_group_jid(recipient_jid).then(|| recipient_jid.clone()),
+                        participants: Vec::new(),
+                        group_transaction_id: None,
+                        group_media: None,
                         incoming: false,
                         started_ms: now_ms(),
                         connected_ms: None,
@@ -176,6 +227,10 @@ fn dto_of(call: InterimCall, duration_seconds: Option<u32>) -> CallEventDto {
         timestamp_ms: call.started_ms as i64,
         is_video: call.is_video,
         is_group: call.is_group,
+        group_jid: call.group_jid,
+        participants: call.participants,
+        group_transaction_id: call.group_transaction_id,
+        group_media: call.group_media,
         duration_seconds,
         outcome: String::new(),
     }
@@ -205,6 +260,7 @@ mod tests {
             caller_name: "Maria".to_string(),
             caller_jid: "559900000001@s.whatsapp.net".to_string(),
             group_jid: None,
+            group: None,
             is_video: false,
             is_offline: false,
             received_at: wacore::time::now_utc(),
@@ -239,6 +295,7 @@ mod tests {
                 caller_name: "Maria".to_string(),
                 caller_jid: "559900000001@s.whatsapp.net".to_string(),
                 group_jid: Some("120363000000000001@g.us".to_string()),
+                group: None,
                 is_video: false,
                 is_offline: false,
                 received_at: wacore::time::now_utc(),
@@ -251,6 +308,55 @@ mod tests {
         assert!(entries[0].is_group);
         assert_eq!(entries[0].chat_jid, "120363000000000001@g.us");
         assert_eq!(entries[0].caller_jid, "559900000001@s.whatsapp.net");
+    }
+
+    /// A group roster is published under the id of a call the daemon already
+    /// knows. It must add the roster, not replace an outgoing call with a
+    /// second ringing card.
+    #[test]
+    fn a_group_roster_refresh_keeps_an_outgoing_call_outgoing() {
+        let hub = StateHub::new();
+        let mut log = CallLog::new();
+        log.observe(
+            &UiEvent::OutgoingCallStarted {
+                call_id: "group-out".to_string(),
+                recipient_jid: "120363000000000001@g.us".to_string(),
+                placeholder_id: "p".to_string(),
+                is_video: false,
+            },
+            &hub,
+        );
+        let refresh = IncomingCall {
+            call_id: "group-out".to_string(),
+            caller_name: "Ada".to_string(),
+            caller_jid: "550000000001@s.whatsapp.net".to_string(),
+            group_jid: Some("120363000000000001@g.us".to_string()),
+            group: None,
+            is_video: false,
+            is_offline: false,
+            received_at: wacore::time::now_utc(),
+        }
+        .with_group_roster(
+            "120363000000000001@g.us",
+            vec![(
+                "550000000002@s.whatsapp.net".to_string(),
+                Some("Grace".to_string()),
+                Some("connected".to_string()),
+                None,
+                None,
+            )],
+            Some(3),
+            Some("audio".to_string()),
+        );
+        log.observe(&UiEvent::IncomingCall(refresh), &hub);
+        log.observe(&UiEvent::CallEnded("group-out".to_string()), &hub);
+
+        let entries = log.list(10);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].outcome, "cancelled");
+        assert_eq!(entries[0].group_transaction_id, Some(3));
+        assert_eq!(entries[0].participants.len(), 1);
+        assert_eq!(entries[0].participants[0].name.as_deref(), Some("Grace"));
     }
 
     /// An answered call is connected, with a duration.

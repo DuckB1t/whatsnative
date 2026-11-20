@@ -1625,14 +1625,26 @@ fn execute_command(
             let resp = client.request(ClientRequest::ListCalls { limit: c.limit })?;
             if let DaemonResponse::Calls { calls } = resp {
                 print_result(output_mode, &calls, |items| {
-                    println!("{:<24} {:<10} DURATION", "CALLER", "OUTCOME");
+                    println!(
+                        "{:<24} {:<24} {:<10} DURATION",
+                        "CALLER", "GROUP", "OUTCOME"
+                    );
                     for call in items {
                         println!(
-                            "{:<24} {:<10} {}s",
+                            "{:<24} {:<24} {:<10} {}s",
                             call.caller_jid,
+                            call.group_jid.as_deref().unwrap_or("-"),
                             call.outcome,
                             call.duration_seconds.unwrap_or(0)
                         );
+                        if c.participants {
+                            for person in &call.participants {
+                                println!(
+                                    "    {}",
+                                    person.name.as_deref().unwrap_or(person.jid.as_str())
+                                );
+                            }
+                        }
                     }
                 });
             }

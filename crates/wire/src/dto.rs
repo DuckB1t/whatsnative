@@ -185,6 +185,24 @@ pub struct ProfileDto {
     pub is_business: Option<bool>,
 }
 
+/// One participant in a group call's authoritative roster.
+///
+/// The name is optional because the library's snapshot carries only a JID and
+/// the session resolves labels against its address book; an unresolved label
+/// is still a participant worth showing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallParticipantDto {
+    pub jid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<u32>,
+}
+
 /// Call event metadata in chat history.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallEventDto {
@@ -194,6 +212,16 @@ pub struct CallEventDto {
     pub timestamp_ms: i64,
     pub is_video: bool,
     pub is_group: bool,
+    /// The group this call belonged to, when it was a group call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_jid: Option<String>,
+    /// The last roster the session saw, in transaction order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub participants: Vec<CallParticipantDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_transaction_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_media: Option<String>,
     pub duration_seconds: Option<u32>,
     pub outcome: String, // "connected", "missed", "declined", "cancelled"
 }
@@ -251,4 +279,23 @@ pub struct DoctorDto {
     pub database_bytes: u64,
     pub media_cache_dir: String,
     pub media_cache_bytes: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CallEventDto;
+
+    #[test]
+    fn a_call_from_an_older_daemon_needs_no_group_fields() {
+        let json = r#"{
+            "id":"c1","chat_jid":"a@s.whatsapp.net","caller_jid":"a@s.whatsapp.net",
+            "timestamp_ms":1,"is_video":false,"is_group":false,
+            "duration_seconds":null,"outcome":"missed"
+        }"#;
+        let call: CallEventDto = serde_json::from_str(json).expect("old frame still reads");
+        assert_eq!(call.group_jid, None);
+        assert!(call.participants.is_empty());
+        assert_eq!(call.group_transaction_id, None);
+        assert_eq!(call.group_media, None);
+    }
 }

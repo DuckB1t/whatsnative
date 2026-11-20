@@ -135,7 +135,7 @@ async fn outgoing_accept_handler_reaches_daemon_wire() {
                 };
                 assert_eq!(next, version.next(), "{case:?}");
                 version = next;
-                state = calls;
+                state = *calls;
             }
             assert_eq!(state, bridge.hub.call_state(), "{case:?}");
         }
@@ -571,6 +571,7 @@ fn a_ringing_call_is_state_a_new_window_can_attach_to() {
         caller_name: "Alice".into(),
         caller_jid: "1@s.whatsapp.net".into(),
         group_jid: None,
+        group: None,
         is_video: false,
         is_offline: false,
         received_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
@@ -644,6 +645,7 @@ fn a_lost_connection_does_not_leave_the_call_stage_standing() {
         caller_name: "Alice".into(),
         caller_jid: "1@s.whatsapp.net".into(),
         group_jid: None,
+        group: None,
         is_video: false,
         is_offline: false,
         received_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
@@ -671,6 +673,7 @@ fn a_mute_the_peer_was_never_told_about_is_corrected_in_the_state() {
         caller_name: "Alice".into(),
         caller_jid: "1@s.whatsapp.net".into(),
         group_jid: None,
+        group: None,
         is_video: false,
         is_offline: false,
         received_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
@@ -711,6 +714,7 @@ fn a_call_answered_on_another_device_says_so_in_the_state() {
         caller_name: "Alice".into(),
         caller_jid: "1@s.whatsapp.net".into(),
         group_jid: None,
+        group: None,
         is_video: false,
         is_offline: false,
         received_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
@@ -769,6 +773,7 @@ fn a_third_offer_is_declined_by_the_daemon() {
             caller_name: "Someone".into(),
             caller_jid: format!("{id}@s.whatsapp.net"),
             group_jid: None,
+            group: None,
             is_video: false,
             is_offline: false,
             received_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
