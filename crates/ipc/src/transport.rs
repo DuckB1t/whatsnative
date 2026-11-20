@@ -297,7 +297,11 @@ use std::path::PathBuf;
 /// 45 adds `CallAction::StartGroup`, which places a call bound to a group JID.
 /// An older daemon has no such action and would refuse the request after the
 /// front end had already drawn its placeholder.
-pub const PROTOCOL_VERSION: u32 = 45;
+///
+/// 46 adds the legacy blocklist requests and their addressed reply. An older
+/// daemon would not recognise `Blocklist`, `Block` or `Unblock`, so a front end
+/// that draws a blocklist pane must not attach to one.
+pub const PROTOCOL_VERSION: u32 = 46;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

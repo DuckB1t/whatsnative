@@ -314,6 +314,11 @@ impl WhatsAppApp {
             // open has changed the number it is about to show.
             self.refresh_storage_usage(cx);
         }
+        if section == SettingsSection::Privacy {
+            // The list lives on the server. Read it on arrival so a block
+            // placed from another device is visible here too.
+            self.refresh_blocklist(cx);
+        }
         if section == SettingsSection::Plugins {
             self.refresh_installed_plugins(cx);
         }

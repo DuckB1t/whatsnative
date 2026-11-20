@@ -1,8 +1,9 @@
 //! Messages exchanged over the socket.
 
 use oxidezap_core::{
-    AccountId, CallState, CallVideoFrame, Chat, ChatMessage, DownloadableMedia, GroupHierarchy,
-    GroupRoster, LogLevel, OutgoingMedia, PluginAction, PluginSurface, QuotedMessage, UiEvent,
+    AccountId, BlockedContact, CallState, CallVideoFrame, Chat, ChatMessage, DownloadableMedia,
+    GroupHierarchy, GroupRoster, LogLevel, OutgoingMedia, PluginAction, PluginSurface,
+    QuotedMessage, UiEvent,
 };
 use serde::{Deserialize, Serialize};
 
@@ -502,6 +503,16 @@ pub enum DaemonMessage {
     /// it. It is not state either — nothing here changes when it arrives, and
     /// a front end that never asks is never sent one.
     GroupMembers { id: RequestId, roster: GroupRoster },
+    /// The account's block list, answering [`ClientRequest::Blocklist`].
+    ///
+    /// A named field rather than a newtype: this enum is internally tagged,
+    /// and serde cannot put a tag beside a JSON array. The list is the whole
+    /// answer to one request, not published state — a front end that never
+    /// asks is never sent one, and one that asks twice gets it twice.
+    Blocklist {
+        id: RequestId,
+        entries: Vec<BlockedContact>,
+    },
     /// A module was installed, and the id it claimed.
     ///
     /// Addressed to the client that asked, like a page of history: the id is
@@ -954,6 +965,16 @@ pub struct GroupMembers {
     pub jid: String,
 }
 
+/// The address a block or unblock names.
+///
+/// A PN or a LID, never a group or a broadcast: the server's blocklist stanza
+/// needs a user address, and a front end that typed anything else is owed a
+/// refusal rather than a request the daemon guesses at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockTarget {
+    pub jid: String,
+}
+
 pub use oxidezap_core::AvatarDemand;
 
 /// Ask the daemon/session to ensure profile pictures for the given chats.
@@ -1173,6 +1194,25 @@ pub enum ClientRequest {
     /// only goes to the network when the server has said its snapshot is
     /// stale.
     GroupMembers(GroupMembers),
+    /// Read the account's block list.
+    ///
+    /// Answered with [`DaemonMessage::Blocklist`] under this request's id.
+    /// The server owns the list, so this is a network read rather than a query
+    /// against the local store; the window asks when the blocklist pane opens
+    /// and again after a change, and never receives one unasked.
+    Blocklist,
+    /// Put one address on the account's block list.
+    ///
+    /// This *does* change the account on WhatsApp: unlike almost every other
+    /// front end request, the daemon carries it out against the live
+    /// connection. Answered with [`DaemonMessage::Accepted`] once the server
+    /// has taken the IQ, and with an error under the same id when it has not —
+    /// the change is real either way, so the ask is correlated rather than
+    /// fire-and-forget.
+    Block(BlockTarget),
+    /// Take one address off the account's block list. The other half of
+    /// [`ClientRequest::Block`], with the same answer and the same rule.
+    Unblock(BlockTarget),
     /// Ask what this account is taking up on disk.
     ///
     /// Answered with [`DaemonMessage::Storage`] under the request's id. The
@@ -2242,6 +2282,22 @@ mod tests {
                 r#"{"request":"group_members","jid":"120363000000000001@g.us"}"#.to_string(),
             ),
             (
+                ClientRequest::Blocklist,
+                r#"{"request":"blocklist"}"#.to_string(),
+            ),
+            (
+                ClientRequest::Block(BlockTarget {
+                    jid: "15555550100@s.whatsapp.net".into(),
+                }),
+                r#"{"request":"block","jid":"15555550100@s.whatsapp.net"}"#.to_string(),
+            ),
+            (
+                ClientRequest::Unblock(BlockTarget {
+                    jid: "100000000000001@lid".into(),
+                }),
+                r#"{"request":"unblock","jid":"100000000000001@lid"}"#.to_string(),
+            ),
+            (
                 ClientRequest::InstallPlugin(InstallPlugin {
                     file_name: "autoreply.wasm".into(),
                     upload: "u-plugin-1".into(),
@@ -2385,6 +2441,47 @@ mod tests {
             serde_json::from_str::<DaemonMessage>(&line).unwrap(),
             answered
         );
+    }
+
+    /// A block list is the answer to one request, in a named field: this enum
+    /// is internally tagged, so a sequence beside the tag cannot be written.
+    /// The entries are synthetic, and the absent optional fields are part of
+    /// the shape both ends agreed on.
+    #[test]
+    fn a_blocklist_survives_both_directions_of_the_wire() {
+        let answered = DaemonMessage::Blocklist {
+            id: 12,
+            entries: vec![
+                BlockedContact {
+                    jid: "15555550100@s.whatsapp.net".into(),
+                    name: Some("Ana".into()),
+                    blocked_at: Some(1_700_000_000),
+                },
+                BlockedContact {
+                    jid: "100000000000001@lid".into(),
+                    name: None,
+                    blocked_at: None,
+                },
+            ],
+        };
+        let line = serde_json::to_string(&answered).expect("an answer is writable");
+        assert_eq!(
+            line,
+            r#"{"type":"blocklist","id":12,"entries":[{"jid":"15555550100@s.whatsapp.net","name":"Ana","blocked_at":1700000000},{"jid":"100000000000001@lid"}]}"#,
+            "a blocklist changed shape on the wire"
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).unwrap(),
+            answered
+        );
+
+        let empty = DaemonMessage::Blocklist {
+            id: 13,
+            entries: Vec::new(),
+        };
+        let line = serde_json::to_string(&empty).unwrap();
+        assert!(line.contains(r#""entries":[]"#), "{line}");
+        assert_eq!(serde_json::from_str::<DaemonMessage>(&line).unwrap(), empty);
     }
 
     /// Every send accepts a frame that leaves `local_id` out.

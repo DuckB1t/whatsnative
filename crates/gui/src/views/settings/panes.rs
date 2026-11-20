@@ -11,6 +11,7 @@ use gpui::{
 };
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::input::Input;
 use gpui_component::{Disableable as _, Icon, IconName, Selectable as _, Sizable as _};
 
 use oxidezap_core::LogLevel;
@@ -31,7 +32,7 @@ pub fn render(
         SettingsSection::Account => account(app, entity, metrics, cx),
         SettingsSection::Notifications => notifications(metrics, cx),
         SettingsSection::AudioVideo => super::devices::render(app, entity.clone(), metrics, cx),
-        SettingsSection::Privacy => privacy(entity.clone(), metrics, cx),
+        SettingsSection::Privacy => privacy(app, entity.clone(), metrics, cx),
         SettingsSection::Storage => storage(app, entity, metrics, cx),
         SettingsSection::Advanced => advanced(entity, metrics, cx),
         SettingsSection::Plugins => plugins(app, entity, metrics, cx),
@@ -433,7 +434,12 @@ fn notifications(metrics: Metrics, cx: &App) -> AnyElement {
     .into_any_element()
 }
 
-fn privacy(entity: Entity<WhatsAppApp>, metrics: Metrics, cx: &App) -> AnyElement {
+fn privacy(
+    app: &WhatsAppApp,
+    entity: Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -464,6 +470,11 @@ fn privacy(entity: Entity<WhatsAppApp>, metrics: Metrics, cx: &App) -> AnyElemen
                         .text_color(cx.theme().muted_foreground)
                         .child(crate::tr!(PrivacyGuidance)),
                 ),
+            metrics,
+        ))
+        .child(group(
+            label(crate::tr!(BlockedContacts), metrics, cx),
+            blocklist(app, entity.clone(), metrics, cx),
             metrics,
         ))
         .child(group(
@@ -503,6 +514,125 @@ fn privacy(entity: Entity<WhatsAppApp>, metrics: Metrics, cx: &App) -> AnyElemen
             metrics,
         ))
         .into_any_element()
+}
+
+/// The account's block list, and the two ways to change it.
+///
+/// The list is server state: it is read on arrival at this pane and after every
+/// change, and the last answer is kept while a new read is on the way. Nothing
+/// here guesses at the rows — a failed read says so rather than drawing an
+/// empty list over contacts that are still blocked.
+fn blocklist(
+    app: &WhatsAppApp,
+    entity: Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let entries = app.blocklist_entries();
+    let loaded = app.blocklist_loaded();
+    let busy = app.blocklist_busy();
+
+    let rows = if !loaded {
+        pending(crate::tr!(LoadingBlocklist), metrics, cx).into_any_element()
+    } else if entries.is_empty() {
+        pending(crate::tr!(NoBlockedContacts), metrics, cx).into_any_element()
+    } else {
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .rounded(metrics.radius_md())
+            .overflow_hidden()
+            .bg(cx.theme().secondary)
+            .border_1()
+            .border_color(cx.theme().border)
+            .children(entries.iter().enumerate().map(|(ix, contact)| {
+                let is_last = ix + 1 == entries.len();
+                let jid = contact.jid.clone();
+                let label = contact.label().to_string();
+                let row_entity = entity.clone();
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(metrics.space_lg())
+                    .px(metrics.space_lg())
+                    .py(metrics.space_lg())
+                    .when(!is_last, |el| {
+                        el.border_b_1().border_color(cx.theme().border)
+                    })
+                    .child(
+                        parts::one_line()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(metrics.text_secondary())
+                            .text_color(cx.theme().foreground)
+                            .child(label),
+                    )
+                    .child(
+                        Button::new(format!("unblock-{jid}"))
+                            .label(crate::tr!(Unblock))
+                            .outline()
+                            .cursor_pointer()
+                            .on_click(move |_, _window, cx| {
+                                let jid = jid.clone();
+                                row_entity.update(cx, |app, cx| app.unblock_contact(jid, cx));
+                            }),
+                    )
+                    .into_any_element()
+            }))
+            .into_any_element()
+    };
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(metrics.space_lg())
+        .child(
+            div()
+                .text_size(metrics.text_small())
+                .text_color(cx.theme().muted_foreground)
+                .child(crate::tr!(BlockedContactsGuidance)),
+        )
+        .child(rows)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(metrics.space_md())
+                .children(
+                    app.blocklist_field()
+                        .map(|field| Input::new(field).w_full()),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(metrics.space_md())
+                .child({
+                    let refresh_entity = entity.clone();
+                    Button::new("blocklist-refresh")
+                        .label(crate::tr!(RefreshBlocklist))
+                        .outline()
+                        .disabled(busy)
+                        .when(!busy, |button| button.cursor_pointer())
+                        .on_click(move |_, _window, cx| {
+                            refresh_entity.update(cx, |app, cx| app.refresh_blocklist(cx));
+                        })
+                })
+                .child({
+                    let block_entity = entity.clone();
+                    Button::new("blocklist-block")
+                        .label(crate::tr!(BlockContact))
+                        .cursor_pointer()
+                        .on_click(move |_, window, cx| {
+                            block_entity.update(cx, |app, cx| app.block_contact(window, cx));
+                        })
+                }),
+        )
 }
 
 fn storage(

@@ -324,6 +324,56 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        ClientRequest::Blocklist => {
+            let id = match addressed(id, "a block list needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::Blocklist {
+                    id,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::Block(request) => {
+            let id = match addressed(id, "a block needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::Block {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::Unblock(request) => {
+            let id = match addressed(id, "an unblock needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::Unblock {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::ForgetSession => acted(
             dispatch(
                 hub,

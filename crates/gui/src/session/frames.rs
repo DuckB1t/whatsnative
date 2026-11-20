@@ -265,6 +265,13 @@ impl<'a> Frames<'a> {
                 }
                 self.publish(FromDaemon::Members(roster))?;
             }
+            DaemonMessage::Blocklist { id, entries } => {
+                if take_pending(self.pending, id).is_none() {
+                    debug!("a block list arrived for {id}, which nobody is waiting on");
+                    return ControlFlow::Continue(());
+                }
+                self.publish(FromDaemon::Blocklist(entries))?;
+            }
             DaemonMessage::Downloaded { id, key } => {
                 let Some(waiting) = take_pending(self.pending, id) else {
                     debug!("a download answer arrived for {id}, which nobody is waiting on");

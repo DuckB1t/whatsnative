@@ -120,6 +120,26 @@ pub enum Action {
         request: oxidezap_ipc::GroupMembers,
         answer_to: Outbox,
     },
+    /// The account's block list. The server owns it, so this is a network read
+    /// answered on `answer_to` rather than a query against the local store.
+    Blocklist {
+        id: RequestId,
+        answer_to: Outbox,
+    },
+    /// Change the account's block list. A real WhatsApp mutation, so the
+    /// answer comes back only after the IQ, under `id` — a fire-and-forget
+    /// acknowledgement would leave the window drawing a change that had not
+    /// happened.
+    Block {
+        id: RequestId,
+        request: oxidezap_ipc::BlockTarget,
+        answer_to: Outbox,
+    },
+    Unblock {
+        id: RequestId,
+        request: oxidezap_ipc::BlockTarget,
+        answer_to: Outbox,
+    },
     /// Wipe local state so the user can pair again, or retire the account for
     /// good. The daemon owns the store, so it is the only process that may
     /// purge it. See [`AccountDisposition`] for what each choice leaves

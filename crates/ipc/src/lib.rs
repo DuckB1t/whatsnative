@@ -56,9 +56,9 @@ pub use link::Link;
 pub use oxidezap_wire as wire;
 #[cfg(feature = "legacy-protocol")]
 pub use protocol::{
-    AccountIdentity, AccountOverview, AccountStatus, AccountsSnapshot, AvatarDemand, CallAction,
-    CallDeviceAction, CallDeviceReply, CameraPreviewFrame, ChatSummary, ClientRequest, ClientScope,
-    ConnectionState, DaemonEvent, DaemonMessage, Download, EditMessage, EnsureAvatars,
+    AccountIdentity, AccountOverview, AccountStatus, AccountsSnapshot, AvatarDemand, BlockTarget,
+    CallAction, CallDeviceAction, CallDeviceReply, CameraPreviewFrame, ChatSummary, ClientRequest,
+    ClientScope, ConnectionState, DaemonEvent, DaemonMessage, Download, EditMessage, EnsureAvatars,
     GroupMembers, InstallPlugin, LoadChats, LoadMessages, MarkAudioPlayed, MarkRead,
     MarkStatusWatched, MessagePreview, PageCursor, PairingCode, ProtocolError, PublishStatusMedia,
     Request, RequestId, RevokeMessage, SendAudio, SendMedia, SendReaction, SendText, StateSnapshot,

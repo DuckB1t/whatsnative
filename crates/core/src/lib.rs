@@ -22,6 +22,7 @@ pub mod fixtures;
 mod account;
 mod app_state;
 mod avatar;
+mod blocklist;
 mod call;
 mod call_devices;
 mod calls;
@@ -49,6 +50,7 @@ pub use account::{AccountId, InvalidAccountId};
 pub use app_state::{AppState, CachedQrCode, Fault, Issued, Lifetime, Recovery};
 pub use avatar::AvatarDemand;
 pub use avatar::cache_key as avatar_cache_key;
+pub use blocklist::{BlockedContact, normalize_block_target};
 pub use call::{
     CallGroup, CallId, CallParticipant, CallParticipantRef, CallParticipantRow, IncomingCall,
     OutgoingCall, OutgoingCallState,

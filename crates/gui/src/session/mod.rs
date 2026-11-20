@@ -193,6 +193,15 @@ pub enum FromDaemon {
     },
     /// Who is in a group, for the header that asked.
     Members(oxidezap_core::GroupRoster),
+    /// The account's block list, for the Privacy pane that asked for it.
+    ///
+    /// A whole list rather than a delta: the server owns it, nothing here can
+    /// reconstruct it, and the pane keeps the last answer while a new one is
+    /// on the way.
+    Blocklist(Vec<oxidezap_core::BlockedContact>),
+    /// A block list that never arrived. The pane stops waiting and says why
+    /// rather than drawing an empty list over a read that failed.
+    BlocklistLost { detail: String },
     /// A roster that never arrived, so the header stops waiting on it.
     ///
     /// Named by the group rather than carrying an error, like a page: a
@@ -378,6 +387,10 @@ enum Awaiting {
     Members {
         jid: String,
     },
+    /// The account's block list. Held in flight like a roster: the Privacy
+    /// pane asks once on arrival and after a change, and a refusal is what
+    /// lets it ask again.
+    Blocklist,
     /// A page of history. The timeline holds a request in flight so it does
     /// not ask twice for the same one, and a refusal is what releases it.
     Page {
@@ -412,7 +425,7 @@ impl Awaiting {
             // Nor is a page: the view that asked for it is holding a request
             // open and only an answer closes it. A roster is held the same
             // way, by the same window.
-            Self::Page { .. } | Self::Members { .. } => false,
+            Self::Page { .. } | Self::Members { .. } | Self::Blocklist => false,
         }
     }
 
@@ -506,6 +519,14 @@ impl Awaiting {
                 log::warn!("a group's members did not arrive: {detail}");
                 if let Some(events) = events {
                     let _ = events.send(FromDaemon::MembersLost { jid });
+                }
+            }
+            Self::Blocklist => {
+                log::warn!("the block list did not arrive: {detail}");
+                if let Some(events) = events {
+                    let _ = events.send(FromDaemon::BlocklistLost {
+                        detail: detail.to_string(),
+                    });
                 }
             }
             // The ring is already down over these. Nothing durable exists, so
@@ -1620,6 +1641,39 @@ impl SessionHandle {
             ClientRequest::GroupMembers(oxidezap_ipc::GroupMembers { jid: jid.clone() }),
             Awaiting::Members { jid },
         );
+    }
+
+    /// Ask the daemon for the account's block list.
+    ///
+    /// The answer arrives as [`FromDaemon::Blocklist`] and a refusal as
+    /// [`FromDaemon::BlocklistLost`]. Both release the one request the pane
+    /// holds, so a failed read can be tried again from the pane itself.
+    pub fn load_blocklist(&self) {
+        self.ask(ClientRequest::Blocklist, Awaiting::Blocklist);
+    }
+
+    /// Block one address, answered under the request's id.
+    ///
+    /// Correlated rather than told: this changes the account on WhatsApp, and
+    /// the pane must not clear the Add field or claim success until the server
+    /// has taken the IQ.
+    pub fn block(&self, jid: String) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::Block(oxidezap_ipc::BlockTarget { jid }),
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Unblock one address, answered on the same terms as [`Self::block`].
+    pub fn unblock(&self, jid: String) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::Unblock(oxidezap_ipc::BlockTarget { jid }),
+            Awaiting::Mutation(tx),
+        );
+        rx
     }
 
     pub fn mark_status_watched(&self, message_ids: Vec<String>) {

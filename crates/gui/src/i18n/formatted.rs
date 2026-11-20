@@ -38,4 +38,7 @@ formatted_catalog! {
     file_empty(file_name) => ("{file_name} is empty.", "{file_name} está vazio.");
     file_too_big(file_name, size, maximum) => ("{file_name} is {size} and the most that can be sent is {maximum}.", "{file_name} tem {size}, mas o limite de envio é {maximum}.");
     selection_full(file_name, maximum) => ("{file_name} did not fit: one trip to the file chooser can carry {maximum} in total. Send it on its own.", "{file_name} excede o limite total de {maximum} por seleção. Envie o arquivo separadamente.");
+    blocklist_failed(error) => ("Could not load blocked contacts: {error}", "Não foi possível carregar os contatos bloqueados: {error}");
+    block_failed(error) => ("Could not block that address: {error}", "Não foi possível bloquear esse endereço: {error}");
+    unblock_failed(error) => ("Could not unblock that contact: {error}", "Não foi possível desbloquear esse contato: {error}");
 }

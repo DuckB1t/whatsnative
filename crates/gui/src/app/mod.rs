@@ -7,6 +7,7 @@
 //! - `calls`: Call state management (incoming/outgoing)
 
 mod attaching;
+mod blocklist;
 mod body;
 mod call_devices;
 mod calls;
@@ -993,6 +994,9 @@ pub struct WhatsAppApp {
     /// answer is on the way does not ask again. Emptied by the answer, or by
     /// the refusal that stands in for one.
     rosters_in_flight: std::collections::HashSet<String>,
+    /// The account's block list, as the daemon last answered, and the one
+    /// request the Privacy pane keeps in flight. See [`blocklist`].
+    blocklist: blocklist::BlocklistState,
     /// System notices whose conversation has not arrived yet.
     ///
     /// "You were added to a group" reaches this window before the group does,
@@ -1384,6 +1388,18 @@ impl WhatsAppApp {
                     FromDaemon::MembersLost { jid } => entity.update(cx, |app, _cx| {
                         app.rosters_in_flight.remove(&jid);
                     }),
+                    // The whole list, as the daemon answered. The pane keeps
+                    // the last one while a new ask is on the way, so a refresh
+                    // never blanks the rows somebody is reading.
+                    FromDaemon::Blocklist(entries) => entity.update(cx, |app, cx| {
+                        app.adopt_blocklist(entries, cx);
+                    }),
+                    // A refusal releases the one request and says why, rather
+                    // than leaving the pane waiting on an answer that is not
+                    // coming.
+                    FromDaemon::BlocklistLost { detail } => entity.update(cx, |app, cx| {
+                        app.blocklist_failed(&detail, cx);
+                    }),
                     // A stream, not an event: the newest picture replaces
                     // the one before it and nothing is queued.
                     FromDaemon::CallFrames => entity.update(cx, |app, cx| {
@@ -1534,6 +1550,7 @@ impl WhatsAppApp {
             name_cache: HashMap::new(),
             group_rosters: HashMap::new(),
             rosters_in_flight: std::collections::HashSet::new(),
+            blocklist: blocklist::BlocklistState::default(),
             pending_notices: HashMap::new(),
             video_players: HashMap::new(),
             video_update_task: None,
@@ -2459,6 +2476,9 @@ impl WhatsAppApp {
         // The header went on saying a contact was online for as long as the
         // window stayed open.
         self.presence = PresenceRegistry::new();
+        // The block list belongs to the account being left. Keeping it would
+        // draw another account's blocked contacts the next time Settings opens.
+        self.reset_blocklist();
         // The composer may have said this window was typing. `composing_chat`
         // names a chat in the account being left, and the view's own timeout
         // would send its `paused` down whatever session comes next — after

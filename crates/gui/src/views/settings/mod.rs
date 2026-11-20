@@ -46,6 +46,9 @@ pub fn render_settings_view(
     // had nowhere to hold what was typed and drew no box at all — the one
     // screen where it matters most.
     app.sync_plugin_fields(window, cx);
+    // The Privacy pane's Add field needs a window to own its focus state.
+    // Built here, where there always is one, rather than from the pane.
+    app.ensure_blocklist_field(window, cx);
 
     let layout = app.responsive_layout(window, cx);
     let metrics = *layout.metrics();

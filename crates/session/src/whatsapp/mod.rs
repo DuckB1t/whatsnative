@@ -16,6 +16,9 @@ mod convert;
 /// Pairing a companion device by phone-number code.
 mod auth;
 
+/// The account's server-owned block list, read and changed on request.
+mod blocklist;
+
 /// The inbound commit hook that makes the chat store the ack durability point.
 mod durability;
 

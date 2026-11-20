@@ -225,6 +225,17 @@ catalog! {
     OpenRetainedHistory => ("Open retained history", "Abrir histórico salvo");
     Notifications => ("NOTIFICATIONS", "NOTIFICAÇÕES");
     Encryption => ("ENCRYPTION", "CRIPTOGRAFIA");
+    BlockedContacts => ("BLOCKED CONTACTS", "CONTATOS BLOQUEADOS");
+    BlockedContactsGuidance => ("This list belongs to your WhatsApp account, not to this device. Blocking or unblocking changes it on WhatsApp's servers.", "Esta lista pertence à sua conta do WhatsApp, não a este dispositivo. Bloquear ou desbloquear altera os servidores do WhatsApp.");
+    NoBlockedContacts => ("No blocked contacts yet.", "Nenhum contato bloqueado ainda.");
+    LoadingBlocklist => ("loading blocked contacts…", "carregando contatos bloqueados…");
+    BlockTargetJid => ("Phone number or JID", "Número ou JID");
+    BlockContact => ("Block", "Bloquear");
+    Blocked => ("Blocked", "Bloqueado");
+    Unblock => ("Unblock", "Desbloquear");
+    Unblocked => ("Unblocked", "Desbloqueado");
+    RefreshBlocklist => ("Refresh", "Atualizar");
+    BlockedInvalidTarget => ("Enter a phone number, or a PN or LID JID. Groups and channels cannot be blocked.", "Digite um número, ou um JID PN ou LID. Grupos e canais não podem ser bloqueados.");
     StartOver => ("START OVER", "RECOMEÇAR");
     ClearDataAndPairAgain => ("Clear data and pair again", "Apagar dados e vincular novamente");
     OnDisk => ("ON DISK", "NO DISCO");

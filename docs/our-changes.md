@@ -99,6 +99,34 @@ green; GUI 680 passed, 14 ignored.
 place or answer one on the paired account (see the consent boundary in the
 plan). Only synthetic fixtures were exercised.
 
+### 4. Block list in Settings → Privacy
+
+**Problem.** The account's server-owned block list was unreachable from any
+front end: upstream `client.blocking()` existed, but the repo had no domain
+type, IPC action or UI for it. Blocked contacts are safety state, so guessing
+one from chats or contacts would be wrong.
+
+**Change.**
+- `core::BlockedContact` `{ jid, name, blocked_at }` is the domain type and the
+  wire shape; `label()` falls back to the JID and `normalize_block_target()`
+  validates input (bare numbers become PN JIDs; PN/LID JIDs accepted; device
+  suffixes stripped; groups/newsletters/malformed input refused).
+- `session/whatsapp/blocklist.rs` wraps `get_blocklist`, `block` and `unblock`,
+  resolving names locally and keeping the exact server JID so Unblock sends
+  the right address and namespace.
+- IPC adds `ClientRequest::{Blocklist, Block, Unblock}` and a correlated
+  `DaemonMessage::Blocklist { id, entries }`; **protocol version 46**.
+  Block/unblock are correlated `ask`s, not `tell`s — they mutate the real
+  account and must report a refusal. Mutations answer after the server IQ;
+  the fetch is single-flight so a second click cannot strand a waiter.
+- Settings → Privacy lists blocked JIDs with Unblock buttons, an Add-by-JID
+  field and a Refresh button. The list is re-read on pane arrival and after
+  each successful mutation. Errors use the existing notice surface; EN/PT
+  strings added to the i18n catalog.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace test suite all
+green; GUI 680 passed, 14 ignored. No real block/unblock was performed.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

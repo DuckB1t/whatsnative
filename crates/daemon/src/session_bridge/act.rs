@@ -539,6 +539,83 @@ impl Bridge {
                 });
                 None
             }
+            Action::Blocklist { id, answer_to } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.blocklist();
+                oxidezap_session::spawn(async move {
+                    let answer = match task.await {
+                        Ok(Ok(entries)) => Ok(DaemonMessage::Blocklist { id, entries }),
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(_) => Err(ProtocolError::NoSession {
+                            detail: "the session stopped before the block list arrived".to_string(),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::Block {
+                id,
+                request: oxidezap_ipc::BlockTarget { jid },
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.block(jid);
+                oxidezap_session::spawn(async move {
+                    let answer = match task.await {
+                        Ok(Ok(())) => Ok(DaemonMessage::Accepted { id: Some(id) }),
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(_) => Err(ProtocolError::NoSession {
+                            detail: "the session stopped before the block was sent".to_string(),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::Unblock {
+                id,
+                request: oxidezap_ipc::BlockTarget { jid },
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.unblock(jid);
+                oxidezap_session::spawn(async move {
+                    let answer = match task.await {
+                        Ok(Ok(())) => Ok(DaemonMessage::Accepted { id: Some(id) }),
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(_) => Err(ProtocolError::NoSession {
+                            detail: "the session stopped before the unblock was sent".to_string(),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::Wire {
                 id,
                 request,
@@ -1743,12 +1820,17 @@ impl Bridge {
                 jid,
                 through_message_id,
             }) => self.mark_read(client, &jid, through_message_id.as_deref()),
-            // Answered from a task of its own. See `begin_slow`.
+            // Answered from a task of its own. See `begin_slow`. The blocklist
+            // ones are network work rather than store reads, but they share the
+            // same rule: the command loop must not wait for an IQ.
             Action::MarkAudioPlayed(_)
             | Action::MarkStatusWatched(_)
             | Action::LoadMessages { .. }
             | Action::LoadChats { .. }
-            | Action::GroupMembers { .. } => {
+            | Action::GroupMembers { .. }
+            | Action::Blocklist { .. }
+            | Action::Block { .. }
+            | Action::Unblock { .. } => {
                 CommandOutcome::Refused("a store read reached the wrong path".to_string())
             }
             Action::Typing(oxidezap_ipc::Typing { jid, composing }) => {
