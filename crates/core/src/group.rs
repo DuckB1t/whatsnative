@@ -8,6 +8,22 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Whether a JID addresses a WhatsApp group rather than a user, broadcast
+/// list or newsletter.
+///
+/// Parsing is deliberately strict: an address that cannot be parsed is not a
+/// call target at all, so it must never be sent down the group path just
+/// because it happens to end in `@g.us`. One helper for every front end —
+/// the toolbar gate, the optimistic outgoing card and the request sent to the
+/// daemon must all agree on what a group is.
+#[must_use]
+pub fn is_group_jid(jid: &str) -> bool {
+    jid.parse::<wacore_binary::jid::Jid>().is_ok_and(|parsed| {
+        use wacore_binary::jid::JidExt as _;
+        parsed.is_group()
+    })
+}
+
 /// The members of one group.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupRoster {
@@ -43,5 +59,20 @@ impl GroupRoster {
     #[must_use]
     pub fn size(&self) -> usize {
         self.members.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_group_jid;
+
+    #[test]
+    fn only_a_parsed_group_address_is_a_group() {
+        assert!(is_group_jid("120363012345678901@g.us"));
+        assert!(!is_group_jid("5521999999999@s.whatsapp.net"));
+        assert!(!is_group_jid("5521999999999@lid"));
+        assert!(!is_group_jid("status@broadcast"));
+        assert!(!is_group_jid("newsletter@g.us@invalid"));
+        assert!(!is_group_jid("not a jid"));
     }
 }

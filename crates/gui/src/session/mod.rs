@@ -1635,8 +1635,26 @@ impl SessionHandle {
     }
 
     pub fn start_call(&self, jid: &str, is_video: bool, placeholder_id: String) {
+        // A group is one call with a roster, not N calls to its members. The
+        // daemon resolves the roster from the JID, so every caller can come
+        // through this one entry point — including the camera-preview path,
+        // which returns here with only the JID after the user confirms.
+        if oxidezap_core::is_group_jid(jid) {
+            self.start_group_call(jid, is_video, placeholder_id);
+            return;
+        }
         self.call(CallAction::Start {
             jid: jid.to_string(),
+            video: is_video,
+            placeholder_id,
+        });
+    }
+
+    /// Place a call bound to an existing group. The daemon resolves the
+    /// member roster, so only the group JID is sent.
+    pub fn start_group_call(&self, jid: &str, is_video: bool, placeholder_id: String) {
+        self.call(CallAction::StartGroup {
+            group_jid: jid.to_string(),
             video: is_video,
             placeholder_id,
         });

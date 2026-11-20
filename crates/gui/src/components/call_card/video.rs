@@ -1,9 +1,8 @@
 //! The video and group layouts.
 //!
 //! The video one is what a call with a camera on either side is drawn as; the
-//! group grid is still a placeholder, because the card is one object across
-//! every kind of call and the shape a group call takes is a decision worth
-//! making before the week the library gains it.
+//! group grid is the same card with the authoritative participant roster in
+//! place of the single peer pane.
 //!
 //! A pane draws the newest frame it has and nothing else. There is no
 //! "connecting" spinner over a picture and no last frame kept after a camera
@@ -23,7 +22,7 @@ use crate::app::WhatsAppApp;
 use crate::components::parts;
 use crate::components::{Avatar, ProductIcon};
 use crate::theme::Metrics;
-use oxidezap_core::{ActiveCall, VideoStream};
+use oxidezap_core::{ActiveCall, CallParticipantRef, VideoStream};
 
 use super::active::live_header;
 
@@ -174,13 +173,12 @@ fn waiting_for(
 
 /// A group call: a grid of participants, the speaker ringed.
 ///
-/// Unreachable today, and kept because the grid is the decision — where the
-/// controls live, how a speaker is marked, where "add" goes — and it is
-/// cheaper to make now than to retrofit around a shipped audio card.
-#[allow(dead_code)]
+/// The roster is authoritative and transaction-ordered on the daemon side;
+/// by the time it reaches here a late snapshot cannot rewind it. An
+/// unresolved name falls back to the JID rather than hiding a participant.
 pub fn active_group(
     call: &ActiveCall,
-    participants: &[(String, String)],
+    participants: &[CallParticipantRef<'_>],
     entity: Entity<WhatsAppApp>,
     metrics: Metrics,
     app: &WhatsAppApp,
@@ -207,11 +205,9 @@ pub fn active_group(
                 .flex()
                 .flex_wrap()
                 .gap(metrics.space_md())
-                .children(
-                    participants
-                        .iter()
-                        .map(|(jid, name)| participant_tile(jid, name, metrics, cx)),
-                ),
+                .children(participants.iter().map(|(jid, name, _, _, _)| {
+                    participant_tile(jid, name.unwrap_or(jid), metrics, cx)
+                })),
         )
         .child(video_controls(call, entity, metrics, app, cx))
 }
@@ -260,9 +256,9 @@ fn placeholder(label: &str, metrics: Metrics, cx: &App) -> impl IntoElement + us
 /// The control row a video or group call carries.
 ///
 /// The camera is the one control here that does something. Screen share and
-/// add-participant are drawn disabled for the same reason the group layout
-/// exists: the library does not do them yet, and a control that silently does
-/// nothing is worse than one that says why.
+/// add-participant have protocol support but no user path here yet, so they
+/// stay disabled: a control that silently does nothing is worse than one that
+/// says why.
 fn video_controls(
     call: &ActiveCall,
     entity: Entity<WhatsAppApp>,
@@ -333,7 +329,7 @@ fn video_controls(
             round(
                 "call-grid",
                 ProductIcon::Grid.into(),
-                crate::tr!(GroupCallsAreNotSupportedYet),
+                crate::tr!(ScreenSharingIsNotAvailableYet),
             )
             .disabled(true),
         )
@@ -341,7 +337,7 @@ fn video_controls(
             round(
                 "call-add",
                 ProductIcon::UserPlus.into(),
-                crate::tr!(GroupCallsAreNotSupportedYet),
+                crate::tr!(AddingPeopleIsNotAvailableYet),
             )
             .disabled(true),
         )

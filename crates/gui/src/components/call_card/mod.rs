@@ -26,7 +26,7 @@ use crate::components::parts;
 use crate::responsive::ResponsiveLayout;
 use crate::theme::Metrics;
 use gpui::AppContext as _;
-use oxidezap_core::{ActiveCall, CallState, Stage};
+use oxidezap_core::{ActiveCall, CallGroup, CallState, Stage};
 
 use super::ProductIcon;
 
@@ -251,6 +251,14 @@ fn expanded_card(
         }
         Stage::Outgoing(call) => {
             ringing::outgoing(call, entity.clone(), metrics, cx).into_any_element()
+        }
+        // A group call has a roster even with every camera off: the grid is
+        // the call, not a video accessory. It takes precedence over the 1:1
+        // video and audio bodies so a group that gains a camera does not
+        // silently drop the rest of its participants.
+        Stage::Active(call) if stage.group().is_some() => {
+            let roster = stage.group().map(CallGroup::roster).unwrap_or_default();
+            video::active_group(call, &roster, entity.clone(), metrics, app, cx).into_any_element()
         }
         Stage::Active(call) if call.shows_video() => {
             let waiting_height = if app.call_state(cx).waiting().is_some() {

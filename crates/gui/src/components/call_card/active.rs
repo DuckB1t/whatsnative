@@ -332,7 +332,7 @@ fn controls(
             round(
                 "call-add",
                 ProductIcon::UserPlus.into(),
-                crate::tr!(GroupCallsAreNotSupportedYet),
+                crate::tr!(AddingPeopleIsNotAvailableYet),
             )
             .disabled(true),
         ))

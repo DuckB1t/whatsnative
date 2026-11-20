@@ -18,12 +18,17 @@ use oxidezap_core::{Availability, Chat, GroupRoster, TypingSummary};
 
 use super::{Avatar, ProductIcon, parts};
 
-/// Only plain PN/LID user JIDs can receive a call (not groups, broadcast
-/// lists, status or newsletters).
+/// Only plain PN/LID user JIDs can receive a direct call (not broadcast
+/// lists, status or newsletters). Groups are callable too, through the
+/// group-roster path rather than a call to every member by hand.
 fn is_callable_user(jid: &str) -> bool {
     jid.parse::<wacore_binary::jid::Jid>()
         .map(|j| j.is_pn() || j.is_lid())
         .unwrap_or(false)
+}
+
+fn is_callable_group(jid: &str) -> bool {
+    oxidezap_core::is_group_jid(jid)
 }
 
 /// How many names a group's line carries before it starts counting instead.
@@ -288,11 +293,10 @@ fn render_actions(
     metrics: Metrics,
     _cx: &App,
 ) -> impl IntoElement + use<> {
-    // Calls are 1:1 only: gate on a parsed PN/LID user JID, since !is_group
-    // alone would still offer calls to status/broadcast and newsletter rows.
-    // Offline is as much a reason a call cannot be placed as the JID being a
-    // group: both mean the button would do nothing.
-    let callable = is_callable_user(&chat.jid) && can_send;
+    // Gate on a parsed PN/LID user JID or a group JID: anything else would
+    // still offer calls to status/broadcast and newsletter rows. Offline is
+    // as much a reason a call cannot be placed as an uncallable JID.
+    let callable = (is_callable_user(&chat.jid) || is_callable_group(&chat.jid)) && can_send;
     let call_jid = chat.jid.clone();
     let video_jid = chat.jid.clone();
     let overflow_jid = chat.jid.clone();
@@ -481,6 +485,25 @@ mod tests {
 
     fn direct() -> Chat {
         Chat::new("5521999999999@s.whatsapp.net".to_string())
+    }
+
+    /// A group is a call target now, but not every JID is: broadcast and
+    /// status rows must keep hiding both buttons.
+    #[test]
+    fn only_user_and_group_jids_offer_call_buttons() {
+        assert!(is_callable_user("5521999999999@s.whatsapp.net"));
+        assert!(is_callable_user("5521999999999@lid"));
+        assert!(is_callable_group("120363012345678901@g.us"));
+        assert!(!is_callable_group("5521999999999@s.whatsapp.net"));
+        assert!(!is_callable_user("120363012345678901@g.us"));
+        assert!(!is_callable_user("status@broadcast"));
+        assert!(!is_callable_group("status@broadcast"));
+        assert!(!is_callable_user("not a jid"));
+        assert!(!is_callable_group("not a jid"));
+        assert!(
+            oxidezap_core::is_group_jid("120363012345678901@g.us"),
+            "the toolbar gate, the outgoing card and the request must agree"
+        );
     }
 
     fn typing(name: &str) -> TypingSummary {

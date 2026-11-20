@@ -115,7 +115,8 @@ catalog! {
     TurnTheCameraOn => ("Turn the camera on", "Ligar câmera");
     Unmute => ("Unmute", "Ativar microfone");
     Mute => ("Mute", "Silenciar microfone");
-    GroupCallsAreNotSupportedYet => ("Group calls are not supported yet", "Chamadas em grupo ainda não estão disponíveis");
+    ScreenSharingIsNotAvailableYet => ("Screen sharing is not available yet", "Compartilhar tela ainda não está disponível");
+    AddingPeopleIsNotAvailableYet => ("Adding people to a call is not available yet", "Adicionar pessoas à chamada ainda não está disponível");
     EndCall => ("End call", "Encerrar chamada");
     DeclineTheWaitingCall => ("Decline the waiting call", "Recusar chamada em espera");
     IncomingCall => ("incoming call", "chamada recebida");

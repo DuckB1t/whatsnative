@@ -45,9 +45,8 @@ as a 1:1 call in that person's chat.
 
 **Not changed:** the library's generic `voip.accept()` already handles group
 roster, relay and key epochs (`AcceptCall::start` checks `incoming.group`), so
-answering a group call needs no client-side work. The drawn participant grid
-is still unreachable — that needs participants exposed from the library's
-call registry across session → daemon → GUI, not just a flag.
+answering a group call needs no client-side work. The participant grid this
+flag was needed for is now reachable — see change 3.
 
 ### 2. Linux package staging smoke test
 
@@ -59,17 +58,56 @@ desktop entry and AppStream metadata whose ids agree and have no unsubstituted
 `package.sh` on both Linux runners. `docs/linux-packaging.md` documents it and
 marks the old glibc/version figures as measurements from specific builds.
 
+### 3. Group calls: rosters, an entry point and the participant grid
+
+**Problem.** A group offer names the group but carries no participant list; the
+authoritative, transaction-ordered snapshots belong to the library's call
+registry. Nothing carried them past the session, and a group could be answered
+but never started from a group chat.
+
+**Change (protocol, commit `ca251b9`).**
+- `core::CallParticipant`, `CallGroup` and the tuple-shaped aliases
+  `CallParticipantRow` / `CallParticipantRef` carry the roster as one additive,
+  defaulted `group` field on outgoing, incoming, active and history call types.
+  Older daemon frames still deserialize; every group getter falls back to the
+  flat `group_jid` field.
+- `set_incoming` refreshes the roster of the call already on screen instead of
+  ringing again, and refuses snapshots older than the one already drawn so a
+  slow name lookup cannot rewind the grid.
+- New `CallAction::StartGroup` (protocol version **45**) reuses the shared
+  placement path and the library's roster-resolving `group_call_by_id()`.
+- `CallParticipantDto` and group columns in call history + `oxidezap-cli calls
+  --participants`. `DaemonEvent::CallsChanged` is boxed (serde-transparent) to
+  keep the event enum small.
+
+**Change (GUI, this commit).**
+- `core::is_group_jid` is the one predicate for "this address is a group". The
+  chat header gate, the optimistic outgoing card and `SessionHandle::start_call`
+  all use it, including the camera-preview confirmation that re-enters with
+  only the JID — no group flag to lose on that path.
+- Group JIDs now show the call buttons; both toolbar and overflow menu route
+  to one entry point. `SessionHandle::start_group_call` sends `StartGroup`.
+- `CallState::group_roster()` feeds the existing `active_group` grid. A
+  participant with no resolved name is drawn by JID. Screen-share and
+  add-participant stay visibly disabled with honest tooltips.
+
+**Gates.** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`, `cargo test --workspace --all-features` — all
+green; GUI 680 passed, 14 ignored.
+
+**Not done:** real group calls cannot be validated without explicit consent to
+place or answer one on the paired account (see the consent boundary in the
+plan). Only synthetic fixtures were exercised.
+
 ## Planned (see plan file)
 
-1. Group video: expose participants from the library registry and route the card
-   to the drawn grid. Start group calls from an existing group via
-   `voip().group_call_by_id()`. **In progress.**
+1. ~~Group call plumbing and grid~~ ✅ (above).
 2. Resolve the group's display name for the ringing card (the offer only has
    the caller's push name).
 3. Keyring/secret-service option for identity keys (keep one-file store default).
 4. ~~rem-scale audit~~ ✅ Audited 116 bare `px()` calls in GUI components/views:
    all design sizes already use `metrics.*()`. The remaining ones are decoded
    media geometry, scale-invariant zero/hairline thresholds, or test fixtures —
-   no changes needed. GUI tests: 679 passed, 14 ignored.
+   no changes needed. GUI tests: 680 passed, 14 ignored.
 5. Branding / app id / desktop file rename — keep crate names to minimize diff.
 6. ~~Packaging smoke tests~~ ✅ (above); audit and benchmarks still open.

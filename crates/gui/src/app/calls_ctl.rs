@@ -1076,8 +1076,14 @@ impl WhatsAppApp {
         self.calls.update(cx, |calls, _| calls.end_drag());
     }
 
-    /// Start a call to the specified JID.
+    /// Start a call to the specified JID, direct or group.
+    ///
+    /// The JID decides which it is. The camera-preview approval flow re-enters
+    /// here with only the JID and the video flag after a confirmation, so a
+    /// separate "group" argument would be lost on that path and leave a group
+    /// call with no roster identity on its outgoing card.
     pub fn start_call(&mut self, recipient_jid: String, is_video: bool, cx: &mut Context<Self>) {
+        let is_group = oxidezap_core::is_group_jid(&recipient_jid);
         let prepared_video =
             is_video && self.take_call_setup_approval(&recipient_jid, is_video, cx);
         // Offline is a read-only state, and the socket outlives it: the
@@ -1177,6 +1183,11 @@ impl WhatsAppApp {
             recipient_name,
             is_video,
         );
+        let call = if is_group {
+            call.for_group_roster(recipient_jid.clone(), Vec::new(), None, None)
+        } else {
+            call
+        };
         self.calls
             .update(cx, |calls, cx| calls.place_outgoing(call, cx));
 
