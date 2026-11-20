@@ -4,7 +4,8 @@ Besides the release archive, every Linux build in `build.yml` produces
 `oxidezap-<version>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm}` through
 `packaging/linux/package.sh`, and the nightly and tagged releases attach them
 next to the archives. `packaging-lint.yml` checks the scripts and metadata in
-seconds; `release-check.yml` builds the packages on every pull request.
+seconds; `release-check.yml` builds the packages on every pull request, and
+`build.yml` smoke-tests the staged tree that fed the packages.
 
 ## Why
 
@@ -22,8 +23,9 @@ The packaging is the one the Craft apps (PhotoCraft) ship: one script stages an
 FHS tree, nfpm builds the deb and rpm, appimagetool and the type2 runtime are
 downloaded at pinned SHA-256 digests. It builds on the same Ubuntu 22.04
 runners the archives do, and `package.sh` reads the glibc floor from the
-binaries (2.35 for the nightly of 2026-11-16) into the deb's and rpm's
-dependency on libc.
+binaries into the deb's and rpm's dependency on libc. Measured on the nightly
+of 2026-11-16 that floor was glibc 2.35 — a measurement of that build, not a
+constant; re-read it with `objdump -T` before relying on it.
 
 ## Decisions
 
@@ -35,9 +37,10 @@ dependency on libc.
   name the project owns (the GitHub organization).
 - **Package version.** A tag's version is the package version. A name that is
   not a version (`nightly`, `pr-<n>`) becomes a pre-release of the
-  `Cargo.toml` version with a UTC timestamp (`0.1.0~nightly.202611171200` in a
-  deb), so nightlies upgrade each other and sort below the release they lead
-  up to.
+  `Cargo.toml` version with a UTC timestamp — for example
+  `0.1.0~nightly.202611171200` in a deb (an example from a 2026-11-17 build,
+  not a fixed value) — so nightlies upgrade each other and sort below the
+  release they lead up to.
 - **Dependencies** are the libraries the binaries link (`objdump -p`) plus the
   ones they `dlopen` (Wayland, Vulkan or EGL); `packaging/linux/nfpm.yaml` lists
   them with the reasoning. The rpm names sonames, so one package resolves on
@@ -54,6 +57,25 @@ dependency on libc.
 - **No self-update to suppress.** The client has no self-install or update
   mechanism; `install-desktop.sh` belongs to the archive and is not shipped in
   the packages.
+
+## Smoke test
+
+`packaging/linux/smoke-test.sh` checks the staged FHS tree — the one
+`package.sh` builds under `$CARGO_TARGET_DIR/linux-package/root` and then hands
+to nfpm and appimagetool. It needs only a shell: three executable binaries
+co-located in `usr/bin`, a desktop entry and AppStream metadata whose ids agree
+with each other, no unsubstituted metainfo placeholders, and the seven hicolor
+PNGs. No external tools are involved.
+
+```bash
+packaging/linux/smoke-test.sh                   # the default staging tree
+packaging/linux/smoke-test.sh /path/to/stage    # or an extracted -fhs.tar.gz tree
+```
+
+`build.yml` runs it after `package.sh` on both Linux runners;
+`packaging-lint.yml` shellchecks it with the other packaging scripts. It is a
+structural check, not a substitute for `desktop-file-validate` or
+`appstreamcli validate`, which `package.sh` runs when those tools are present.
 
 ## Experimental Flatpak
 
