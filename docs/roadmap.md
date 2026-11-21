@@ -348,7 +348,9 @@
   other end of the scale from `AppState::Error`, which leaves the connected
   view and schedules a reconnect and is catastrophic for a save that did not
   start. A failed save and a failed recording go through it.
-  What still does not is most of what the *daemon* refused: a front end learns
+  Reactions, poll votes and plugin approvals are correlated `ask`s now: a
+  refusal takes the optimistic mark back and reaches that same window. What
+  still does not is most of the remaining *daemon* refusals: a front end learns
   only `Accepted`, and a refusal reaching the window would need a field on the
   wire. `SendFailed` is the one exception, and it is against a chat rather
   than against the request. A download is the second, and it is the shape the
