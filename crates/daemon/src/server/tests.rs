@@ -6,7 +6,7 @@
 //! filesystem for. The web half of this crate has tests of its own that run in
 //! a browser; see `plugins/web/tests.rs`.
 
-use oxidezap_ipc::{ClientScope, PROTOCOL_VERSION};
+use oxidezap_ipc::{CallAction, ClientScope, PROTOCOL_VERSION};
 use tokio::io::AsyncBufReadExt as _;
 
 use super::accept::{acquire_startup_lock, prepare_state_dir, reject};
@@ -1505,6 +1505,94 @@ fn the_local_actions_do_not_need_a_connection() {
             quoted: None,
         })
         .needs_network()
+    );
+}
+
+/// Previewing and joining a call link are account requests: both are answered
+/// by the live session, and neither is a local read that could be served while
+/// the account is unreachable.
+#[tokio::test]
+async fn call_link_requests_are_account_requests() {
+    let hub = connected_hub();
+    let plugins = no_plugins();
+    let token = "synthetic-link-token";
+
+    let (commands, taken) = bridge(CommandOutcome::Accepted);
+    let answer = handle_request(
+        Request {
+            id: Some(11),
+            request: ClientRequest::PreviewCallLink(oxidezap_ipc::PreviewCallLink {
+                token_or_url: token.into(),
+                media: oxidezap_core::CallLinkMedia::Video,
+            }),
+        },
+        &hub,
+        &plugins,
+        &commands,
+        &outbox(),
+    )
+    .await;
+    assert!(
+        answer.frame.is_none(),
+        "the preview arrives later under its id, not as an acknowledgement"
+    );
+    let action = taken.await.unwrap().unwrap();
+    assert!(action.needs_network(), "a preview reaches WhatsApp");
+    let Action::PreviewCallLink { id, request, .. } = &action else {
+        panic!("the preview did not reach the session: {action:?}");
+    };
+    assert_eq!(*id, 11);
+    assert_eq!(request.token_or_url, token);
+
+    let (commands, taken) = bridge(CommandOutcome::Accepted);
+    let answer = handle_request(
+        Request {
+            id: Some(12),
+            request: ClientRequest::Call(CallAction::JoinLink {
+                token_or_url: token.into(),
+                media: oxidezap_core::CallLinkMedia::Video,
+                placeholder_id: "synthetic-placeholder".into(),
+            }),
+        },
+        &hub,
+        &plugins,
+        &commands,
+        &outbox(),
+    )
+    .await;
+    assert!(matches!(
+        parse(answer.frame),
+        DaemonMessage::Accepted { id: Some(12) }
+    ));
+    let action = taken.await.unwrap().unwrap();
+    assert!(action.needs_network(), "joining a link reaches WhatsApp");
+    assert!(
+        matches!(&action, Action::Call(CallAction::JoinLink { .. })),
+        "the link reached the session as a call: {action:?}"
+    );
+}
+
+/// A link placement mirrors as an ordinary outgoing call under the fixed
+/// recipient. The token is an argument for the session, never a JID this side
+/// stores, and a link is not a group call.
+#[test]
+fn join_call_link_uses_the_ordinary_outgoing_placeholder() {
+    let token = "synthetic-link-token-not-a-jid";
+    let placeholder = "synthetic-placeholder";
+    let row =
+        Action::call_link_outgoing(placeholder.to_owned(), oxidezap_core::CallLinkMedia::Video);
+    assert_eq!(row.call_id, placeholder);
+    assert_eq!(row.recipient_jid, oxidezap_core::CALL_LINK_RECIPIENT_JID);
+    assert_eq!(row.recipient_name, oxidezap_core::CALL_LINK_RECIPIENT_NAME);
+    assert!(row.is_video, "a video link mirrors as a video call");
+    assert_eq!(row.group, None, "a link is not a group call");
+    assert_ne!(
+        row.recipient_jid, token,
+        "the token is never a recipient JID"
+    );
+    assert!(
+        !row.recipient_jid.contains("synthetic-link-token"),
+        "no part of the token was used as an address"
     );
 }
 

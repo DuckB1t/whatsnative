@@ -15,9 +15,10 @@ use super::super::*;
 // file's business alone: the session's own module has no use for one.
 use crate::video::LocalVideo;
 use oxidezap_audio::open_call_audio;
+use oxidezap_core::{CALL_LINK_RECIPIENT_JID, CallLinkMedia};
 use std::time::Duration;
 use whatsapp_rust::voip::{
-    CallEvent, CallHandle, CallTermination, GroupBoundCall, KeyframeUrgency,
+    CallEvent, CallHandle, CallLinkCall, CallTermination, GroupBoundCall, KeyframeUrgency,
     OutgoingCall as VoipOutgoingCall, VideoState, VideoUpgradeToken,
 };
 use whatsapp_rust::wacore::types::group_call::GroupCallUpdate;
@@ -49,28 +50,36 @@ fn ringable_offer(offer: &WaIncomingCall, now_ms: i64) -> bool {
 }
 
 /// Where an outgoing call is being placed. The group arm uses the library's
-/// roster-resolving builder rather than calling every member by hand.
+/// roster-resolving builder rather than calling every member by hand. A link
+/// arm carries an opaque invite: the token is neither a JID nor a label, and
+/// is only ever handed to the call service as itself.
 enum PlaceTarget {
     Direct(String),
     Group(String),
+    Link(String, CallLinkMedia),
 }
 
 impl PlaceTarget {
     fn label(&self) -> &str {
         match self {
             Self::Direct(jid) | Self::Group(jid) => jid,
+            // A link has no recipient address. Every card and failure under
+            // this placement is named by the constant instead, never by the
+            // token it was joined with.
+            Self::Link(_, _) => CALL_LINK_RECIPIENT_JID,
         }
     }
 }
 
-/// One of the two builder types the library exposes for outgoing calls.
+/// The builder types the library exposes for outgoing calls.
 ///
-/// Both take the same media endpoints and both yield the same handle; this
+/// All three take the same media endpoints and yield the same handle; this
 /// enum keeps the shared placement path from growing a second copy of the
 /// cancellation, camera and watcher logic.
 enum OutgoingChoice<'a> {
     Direct(VoipOutgoingCall<'a>),
     Group(GroupBoundCall<'a>),
+    Link(CallLinkCall<'a>),
 }
 
 impl OutgoingChoice<'_> {
@@ -82,6 +91,7 @@ impl OutgoingChoice<'_> {
         match self {
             Self::Direct(call) => Self::Direct(call.audio(mic, speaker)),
             Self::Group(call) => Self::Group(call.audio(mic, speaker)),
+            Self::Link(call) => Self::Link(call.audio(mic, speaker)),
         }
     }
 
@@ -89,6 +99,7 @@ impl OutgoingChoice<'_> {
         match self {
             Self::Direct(call) => Self::Direct(call.video(endpoints.source, endpoints.sink)),
             Self::Group(call) => Self::Group(call.video(endpoints.source, endpoints.sink)),
+            Self::Link(call) => Self::Link(call.video(endpoints.source, endpoints.sink)),
         }
     }
 
@@ -96,6 +107,7 @@ impl OutgoingChoice<'_> {
         match self {
             Self::Direct(call) => call.start().await,
             Self::Group(call) => call.start().await,
+            Self::Link(call) => call.start().await,
         }
     }
 }
@@ -2451,6 +2463,26 @@ impl WhatsAppClient {
         );
     }
 
+    /// Join a reusable call link under the card the front end already drew.
+    ///
+    /// The token is an opaque invite. It is carried to `place_call` as data and
+    /// handed to the call service as itself; it is never parsed as a JID and
+    /// never becomes the recipient any event is published under. The media
+    /// choice decides both the requested link mode and whether a camera is
+    /// mandatory: a video link cannot be downgraded to voice.
+    pub fn start_call_link(
+        &self,
+        token_or_url: String,
+        media: CallLinkMedia,
+        placeholder_id: String,
+    ) {
+        self.place_call(
+            PlaceTarget::Link(token_or_url, media),
+            media == CallLinkMedia::Video,
+            placeholder_id,
+        );
+    }
+
     fn place_call(&self, target: PlaceTarget, is_video: bool, placeholder_id: String) {
         let session = self.session.clone();
         let calls = self.calls.clone();
@@ -2459,6 +2491,9 @@ impl WhatsAppClient {
         let lost = self.camera_lost();
         let picture_lost = self.picture_lost();
         let recipient_jid = target.label().to_string();
+        // A video link's camera is part of what was offered, not an
+        // optional extra. Asked before `target` moves into the task.
+        let link_requires_video = matches!(&target, PlaceTarget::Link(_, CallLinkMedia::Video));
 
         // Before the spawn, on the caller's thread, for the same reason a
         // mute request is stamped there: spawning is not sequencing. A user
@@ -2499,12 +2534,20 @@ impl WhatsAppClient {
                 }
             };
 
-            let jid: Jid = match recipient_jid.parse() {
-                Ok(j) => j,
-                Err(e) => {
-                    notify_failure(format!("invalid JID: {e}")).await;
-                    return;
-                }
+            // Direct and group recipients are addresses and are parsed here.
+            // A link's token is an opaque invite: parsing it as a JID would
+            // send it down an address path and name every card, log line and
+            // failure after it. `recipient_jid` already holds the constant
+            // label for a link, and the token reaches only the call service.
+            let jid: Option<Jid> = match &target {
+                PlaceTarget::Link(_, _) => None,
+                PlaceTarget::Direct(_) | PlaceTarget::Group(_) => match recipient_jid.parse() {
+                    Ok(j) => Some(j),
+                    Err(e) => {
+                        notify_failure(format!("invalid JID: {e}")).await;
+                        return;
+                    }
+                },
             };
             let (client, names) = {
                 let guard = session.lock().await;
@@ -2535,6 +2578,16 @@ impl WhatsAppClient {
                 match video::open(video::slot(&placeholder_id), publish, lost, picture_lost).await {
                     Ok(video) => Some(video),
                     Err(err) => {
+                        // A voice downgrade is a kindness for a person whose
+                        // camera is broken. A video link names the media it
+                        // offers: without endpoints the join would be refused,
+                        // and placing it as voice would answer a different
+                        // invitation. Abandon under the placeholder, with the
+                        // constant recipient and no token in the notice.
+                        if link_requires_video {
+                            notify_failure(format!("video device setup failed: {err}")).await;
+                            return;
+                        }
                         warn!(
                             "Placing the call to {} without video: {err}",
                             observe_str(&recipient_jid)
@@ -2557,9 +2610,21 @@ impl WhatsAppClient {
             let camera_id = local.as_ref().map(LocalVideo::camera_id);
 
             let voip = client.voip();
-            let outgoing = match target {
-                PlaceTarget::Direct(_) => OutgoingChoice::Direct(voip.call(&jid)),
-                PlaceTarget::Group(_) => OutgoingChoice::Group(voip.group_call_by_id(&jid)),
+            let outgoing = match &target {
+                PlaceTarget::Direct(_) => OutgoingChoice::Direct(
+                    voip.call(jid.as_ref().expect("direct recipient parsed above")),
+                ),
+                PlaceTarget::Group(_) => OutgoingChoice::Group(
+                    voip.group_call_by_id(jid.as_ref().expect("group recipient parsed above")),
+                ),
+                // The only place the token is used: passed as the invite the
+                // call service will resolve, never as an address or a label.
+                PlaceTarget::Link(token, media) => OutgoingChoice::Link(voip.call_link(
+                    token,
+                    // The one mapping between the front end's media choice and
+                    // the call service's, shared with the preview path.
+                    crate::whatsapp::call_link::upstream_media(*media),
+                )),
             }
             .audio(mic, speaker);
             let outgoing = match endpoints {
@@ -2669,6 +2734,9 @@ impl WhatsAppClient {
                             })
                         }
                         PlaceTarget::Direct(_) => None,
+                        // A link joins group media without a chat roster to
+                        // refresh: its identity is the invite, not a group.
+                        PlaceTarget::Link(_, _) => None,
                     };
                     Self::watch_call(
                         handle.clone(),
@@ -3635,6 +3703,37 @@ mod tests {
         let newer = calls.begin_start("first");
         drop(guard);
         assert_eq!(calls.calls.lock().unwrap().starting["first"], newer);
+    }
+
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+    fn a_link_join_labels_the_placeholder_not_the_token() {
+        let token = "SYNTHETIC-LINK-TOKEN";
+        let placeholder = "link-placeholder";
+        let link = PlaceTarget::Link(token.to_string(), CallLinkMedia::Video);
+
+        // The placeholder is the id the card drew and the one a start is
+        // filed under; the recipient every event names is the constant label,
+        // never the invite. Neither one is derived from the token.
+        let calls = CallRegistry::default();
+        let stamp = calls.begin_start(placeholder);
+        assert_eq!(calls.calls.lock().unwrap().starting[placeholder], stamp);
+        assert_eq!(link.label(), CALL_LINK_RECIPIENT_JID);
+        assert_ne!(link.label(), placeholder);
+        assert!(!link.label().contains(token));
+        // The label is a stable recipient, not a JID parsed from the token.
+        assert!(link.label().parse::<Jid>().is_err());
+
+        // Direct and group placements still label themselves with the address
+        // they were given; only a link uses the constant.
+        assert_eq!(
+            PlaceTarget::Direct("15551234567@s.whatsapp.net".into()).label(),
+            "15551234567@s.whatsapp.net"
+        );
+        assert_eq!(
+            PlaceTarget::Group("200-group@g.us".into()).label(),
+            "200-group@g.us"
+        );
     }
 
     #[tokio::test]

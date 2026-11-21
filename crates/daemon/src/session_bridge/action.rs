@@ -74,6 +74,14 @@ pub enum Action {
         request: oxidezap_ipc::CallDeviceAction,
         answer_to: Outbox,
     },
+    /// Resolve a call link through the live session. Like an event creation,
+    /// the result *is* the answer, so it travels back on `answer_to` under
+    /// `id` rather than as an acknowledgement of a queued command.
+    PreviewCallLink {
+        id: RequestId,
+        request: oxidezap_ipc::PreviewCallLink,
+        answer_to: Outbox,
+    },
     /// A vote on a poll, by option index. Answered like typing: accepted
     /// means the session took it, and a vote it cannot cast (unknown poll,
     /// bad index, missing secret) is a log line rather than a state change.
@@ -350,6 +358,26 @@ impl Action {
                     | Self::GroupMembers { .. }
             ),
         }
+    }
+
+    /// The optimistic outgoing row for a call-link placement.
+    ///
+    /// A link is a token the session resolves, not an address this side
+    /// stores: it is never parsed as a JID and never looked up as a chat. The
+    /// mirror is an ordinary outgoing call under the fixed call-link
+    /// recipient, with no group identity. Kept beside the action it belongs
+    /// to so the executor and the test of that row share one spelling.
+    #[must_use]
+    pub(crate) fn call_link_outgoing(
+        placeholder_id: String,
+        media: oxidezap_core::CallLinkMedia,
+    ) -> oxidezap_core::OutgoingCall {
+        oxidezap_core::OutgoingCall::new(
+            placeholder_id,
+            oxidezap_core::CALL_LINK_RECIPIENT_JID.to_string(),
+            oxidezap_core::CALL_LINK_RECIPIENT_NAME.to_string(),
+            media == oxidezap_core::CallLinkMedia::Video,
+        )
     }
 }
 

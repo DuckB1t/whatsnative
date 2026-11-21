@@ -323,7 +323,13 @@ use std::path::PathBuf;
 /// successes and warnings as typed data. An older daemon knows none of the four
 /// requests, so a window drawing a community form must not attach to one that
 /// would refuse them.
-pub const PROTOCOL_VERSION: u32 = 50;
+///
+/// 51 adds call-link metadata preview (`ClientRequest::PreviewCallLink`,
+/// answered by `DaemonMessage::CallLinkPreview`) and link joining
+/// (`CallAction::JoinLink`). An older daemon knows neither frame and cannot
+/// answer those requests, so a window drawing a link preview must not attach
+/// to one.
+pub const PROTOCOL_VERSION: u32 = 51;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

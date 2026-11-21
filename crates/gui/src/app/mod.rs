@@ -10,6 +10,7 @@ mod attaching;
 mod blocklist;
 mod body;
 mod call_devices;
+mod call_link_dialog;
 mod calls;
 mod calls_ctl;
 mod channel_poll_dialog;
@@ -893,6 +894,10 @@ pub struct WhatsAppApp {
     /// it is honest feedback rather than a receipt: the daemon's correlated
     /// answer takes it back if the invitation could not be answered.
     attempted_event_rsvps: std::collections::HashMap<(String, String), EventRsvp>,
+    /// A call link being previewed before anybody agrees to join it. It holds
+    /// the pasted invite and the preview that answered it, and never the
+    /// invite token as something to draw.
+    call_link_dialog: Option<call_link_dialog::CallLinkDialog>,
     /// An event creation waiting for its fields or its answer. Taken as soon
     /// as the request is sent, so a second press cannot create two cards.
     event_dialog: Option<event_dialog::EventDraftDialog>,
@@ -1543,6 +1548,7 @@ impl WhatsAppApp {
             owed_reads: std::collections::HashSet::new(),
             attempted_poll_votes: std::collections::HashMap::new(),
             attempted_event_rsvps: std::collections::HashMap::new(),
+            call_link_dialog: None,
             event_dialog: None,
             channel_poll_dialog: None,
             community_dialog: None,
@@ -2422,6 +2428,7 @@ impl WhatsAppApp {
         self.owed_reads.clear();
         self.attempted_poll_votes.clear();
         self.attempted_event_rsvps.clear();
+        self.call_link_dialog = None;
         self.event_dialog = None;
         self.channel_poll_dialog = None;
         self.community_dialog = None;
@@ -2508,6 +2515,10 @@ impl WhatsAppApp {
             });
         }
         self.delete_confirmation = None;
+        // An unanswered invite preview belongs to the connection going away.
+        // Left alone it would reappear over the next account's conversation
+        // with a token from the old one still in its input.
+        self.call_link_dialog = None;
         self.pending_message_actions.clear();
         if self.recorder.read(cx).state() != RecordingState::Idle {
             self.cancel_recording(cx);
@@ -4527,6 +4538,7 @@ impl Render for WhatsAppApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.search
             .update(cx, |search, cx| search.refresh_language(window, cx));
+        self.retire_conflicting_call_link_dialog(cx);
         self.reconcile_media_owner(cx);
         self.observe_window_activation(window, cx);
         // First, because every dimension below resolves from the scale this
@@ -4583,7 +4595,13 @@ impl Render for WhatsAppApp {
                 app.open_settings(window, cx);
             }))
             .on_action(cx.listener(|app, _: &CloseOverlay, window, cx| {
-                app.close_overlay(window, cx);
+                // `close_overlay` lives outside this change, so the link form
+                // is dismissed at the one place every Escape reaches first.
+                // A press spent here is not also allowed to close a surface
+                // underneath the modal.
+                if !app.cancel_call_link_dialog(cx) {
+                    app.close_overlay(window, cx);
+                }
             }))
             .on_action(cx.listener(|app, _: &ReturnToCall, _window, cx| {
                 app.return_to_call(cx);
@@ -4683,6 +4701,18 @@ impl Render for WhatsAppApp {
             )
             .into_any_element()
         });
+        // The link form shares the deletion modal's focus handle: only one of
+        // these surfaces is ever up, and `sync_overlay_focus` already routes
+        // that handle's keyboard.
+        let call_link_dialog = self.call_link_dialog.as_ref().map(|dialog| {
+            call_link_dialog::render_call_link_dialog(
+                dialog,
+                cx.entity().clone(),
+                &self.message_delete_focus,
+                cx,
+            )
+            .into_any_element()
+        });
 
         // Outside the Settings-versus-conversation branch on purpose. The
         // card and the focus it takes were built by the conversation view
@@ -4697,12 +4727,14 @@ impl Render for WhatsAppApp {
         let event_dialog_open = event_dialog.is_some();
         let channel_poll_dialog_open = channel_poll_dialog.is_some();
         let community_dialog_open = community_dialog.is_some();
+        let call_link_dialog_open = call_link_dialog.is_some();
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
         let modal_open = paste_preview_open
             || message_delete_open
             || event_dialog_open
             || channel_poll_dialog_open
             || community_dialog_open
+            || call_link_dialog_open
             || media_viewer_open;
         let call_overlay = (connected && !modal_open)
             .then(|| render_call_overlay(self, window, cx))
@@ -4751,6 +4783,7 @@ impl Render for WhatsAppApp {
         .children(event_dialog)
         .children(channel_poll_dialog)
         .children(community_dialog)
+        .children(call_link_dialog)
         .children(call_overlay)
         .child(self.notices().clone())
         // Cached views report their surfaces in prepaint. Move focus after
@@ -4764,7 +4797,8 @@ impl Render for WhatsAppApp {
                         app.keyboard_surfaces.message_delete = message_delete_open
                             || event_dialog_open
                             || channel_poll_dialog_open
-                            || community_dialog_open;
+                            || community_dialog_open
+                            || call_link_dialog_open;
                     });
                     let entity = entity.downgrade();
                     window.defer(cx, move |window, cx| {

@@ -433,6 +433,13 @@ pub enum DaemonMessage {
         id: RequestId,
         result: Result<Box<CallDeviceReply>, String>,
     },
+    /// The metadata a call link resolved to, answering
+    /// [`ClientRequest::PreviewCallLink`]. Addressed to the client that asked:
+    /// it is what one window needs before it draws a preview, not state.
+    CallLinkPreview {
+        id: RequestId,
+        preview: oxidezap_core::CallLinkPreview,
+    },
     /// What this account occupies on disk, answering
     /// [`ClientRequest::StorageUsage`].
     Storage {
@@ -1073,6 +1080,17 @@ pub struct EnsureAvatars {
     pub items: Vec<AvatarDemand>,
 }
 
+/// Resolve a call link's metadata without joining it. See
+/// [`ClientRequest::PreviewCallLink`].
+///
+/// The token is link identity, so it travels only over the socket — never to
+/// a log or a UI label. Answered by [`DaemonMessage::CallLinkPreview`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewCallLink {
+    pub token_or_url: String,
+    pub media: oxidezap_core::CallLinkMedia,
+}
+
 /// What a client asks the daemon to do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case")]
@@ -1190,6 +1208,12 @@ pub enum ClientRequest {
     /// because it is one piece of state with two values.
     Typing(Typing),
     Call(CallAction),
+    /// Resolve a call link's metadata without joining it.
+    ///
+    /// A network read, answered by [`DaemonMessage::CallLinkPreview`] under
+    /// this request's id. It needs the account's connection but changes no
+    /// account state, so the default account-request classifier is right.
+    PreviewCallLink(PreviewCallLink),
     CallDevices(Box<CallDeviceAction>),
     /// Fetch media the daemon has not cached yet.
     ///
@@ -1576,6 +1600,15 @@ pub enum CallAction {
         video: bool,
         placeholder_id: String,
     },
+    /// Join a call by its link, with no recipient JID to resolve.
+    ///
+    /// The token is the call's identity; `placeholder_id` names the outgoing
+    /// card the front end drew before the server named the call.
+    JoinLink {
+        token_or_url: String,
+        media: oxidezap_core::CallLinkMedia,
+        placeholder_id: String,
+    },
     Accept {
         call_id: String,
     },
@@ -1805,6 +1838,84 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// The preview ask and its addressed answer both survive the wire. The
+    /// token is the link's identity, so it travels over the socket but has no
+    /// business in a log or a UI label; the test only ever uses a synthetic
+    /// one.
+    #[test]
+    fn call_link_preview_roundtrips() {
+        let ask = ClientRequest::PreviewCallLink(PreviewCallLink {
+            token_or_url: "TEST-CALL-LINK".into(),
+            media: oxidezap_core::CallLinkMedia::Video,
+        });
+        let line = serde_json::to_string(&Request::bare(ask.clone())).unwrap();
+        assert!(line.contains(r#""request":"preview_call_link""#), "{line}");
+        assert!(line.contains(r#""media":"video""#), "{line}");
+        assert_eq!(serde_json::from_str::<Request>(&line).unwrap().request, ask);
+
+        let preview = oxidezap_core::CallLinkPreview {
+            token: "TEST-CALL-LINK".into(),
+            media: oxidezap_core::CallLinkMedia::Video,
+            creator_jid: "15555550100@s.whatsapp.net".into(),
+            creator_pn: None,
+            waiting_room_enabled: true,
+            is_admin: false,
+        };
+        let answer = DaemonMessage::CallLinkPreview {
+            id: 7,
+            preview: preview.clone(),
+        };
+        let line = serde_json::to_string(&answer).unwrap();
+        assert!(line.contains(r#""type":"call_link_preview""#), "{line}");
+        assert!(!line.contains("creator_pn"), "{line}");
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).unwrap(),
+            answer
+        );
+
+        let with_pn = DaemonMessage::CallLinkPreview {
+            id: 8,
+            preview: oxidezap_core::CallLinkPreview {
+                creator_pn: Some("15555550999@s.whatsapp.net".into()),
+                ..preview
+            },
+        };
+        let line = serde_json::to_string(&with_pn).unwrap();
+        assert!(
+            line.contains(r#""creator_pn":"15555550999@s.whatsapp.net""#),
+            "{line}"
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).unwrap(),
+            with_pn
+        );
+    }
+
+    #[test]
+    fn join_link_roundtrips_token_media_and_placeholder() {
+        for (media, label) in [
+            (oxidezap_core::CallLinkMedia::Audio, "audio"),
+            (oxidezap_core::CallLinkMedia::Video, "video"),
+        ] {
+            let action = CallAction::JoinLink {
+                token_or_url: "TEST-CALL-LINK".into(),
+                media,
+                placeholder_id: "local-link-call".into(),
+            };
+            let encoded = serde_json::to_string(&action).unwrap();
+            assert_eq!(
+                serde_json::from_str::<CallAction>(&encoded).unwrap(),
+                action
+            );
+            assert!(encoded.contains("TEST-CALL-LINK"), "{encoded}");
+            assert!(encoded.contains("local-link-call"), "{encoded}");
+            assert!(
+                encoded.contains(&format!(r#""media":"{label}""#)),
+                "{encoded}"
+            );
+        }
     }
 
     /// One chat holds everybody's status updates, and watching one is

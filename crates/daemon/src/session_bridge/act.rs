@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use oxidezap_core::{CallOutcome, CommunityOperationResult};
+use oxidezap_core::{CallLinkMedia, CallOutcome, CommunityOperationResult};
 use oxidezap_ipc::{
     CallAction, ChatSummary, DaemonEvent, DaemonMessage, PageCursor, ProtocolError, RequestId,
 };
@@ -69,7 +69,8 @@ impl Bridge {
         if ended_pairing || (action.needs_network() && !self.hub.connection().is_connected()) {
             if let Action::Call(
                 CallAction::Start { placeholder_id, .. }
-                | CallAction::StartGroup { placeholder_id, .. },
+                | CallAction::StartGroup { placeholder_id, .. }
+                | CallAction::JoinLink { placeholder_id, .. },
             ) = &action
             {
                 self.hub
@@ -248,6 +249,40 @@ impl Bridge {
                     let result = match task.await {
                         Ok(Ok(created)) => Ok(DaemonMessage::EventCreated { id, created }),
                         other => mutation_answer(id, other),
+                    };
+                    answer_now(&answer_to, answered(id, result));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::PreviewCallLink {
+                id,
+                request,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let oxidezap_ipc::PreviewCallLink {
+                    token_or_url,
+                    media,
+                } = request;
+                let task = client.preview_call_link(token_or_url, media);
+                oxidezap_session::spawn(async move {
+                    // The preview is the answer, not a queued mutation's
+                    // acknowledgement. A token the server will not resolve is
+                    // a refusal the tap can act on; a session that vanished
+                    // mid-resolution is a different no.
+                    let result = match task.await {
+                        Ok(Ok(preview)) => Ok(DaemonMessage::CallLinkPreview { id, preview }),
+                        Ok(Err(detail)) => Err(ProtocolError::Refused { detail }),
+                        Err(error) => Err(ProtocolError::NoSession {
+                            detail: format!(
+                                "the session stopped before the call link preview arrived: {error}"
+                            ),
+                        }),
                     };
                     answer_now(&answer_to, answered(id, result));
                     let _ = reply.send(CommandOutcome::Accepted);
@@ -1918,7 +1953,8 @@ impl Bridge {
             // attempt nobody answered.
             if let Action::Call(
                 CallAction::Start { placeholder_id, .. }
-                | CallAction::StartGroup { placeholder_id, .. },
+                | CallAction::StartGroup { placeholder_id, .. }
+                | CallAction::JoinLink { placeholder_id, .. },
             ) = &action
             {
                 self.hub
@@ -1931,6 +1967,7 @@ impl Bridge {
         match action {
             Action::Wire { .. }
             | Action::CreateEvent { .. }
+            | Action::PreviewCallLink { .. }
             | Action::CreateChannelPoll { .. }
             | Action::CreateCommunity { .. }
             | Action::CreateCommunitySubgroup { .. }
@@ -2227,18 +2264,23 @@ impl Bridge {
             // replay: `OutgoingCallStarted` only renames one that already
             // exists. A window that attaches mid-call is served this.
             Action::Call(action) => {
-                let _camera_admission = if matches!(
-                    &action,
+                // A link's kind is carried by `media`, not by a `video` flag:
+                // the same camera admission a video placement gets.
+                let wants_camera = match &action {
                     CallAction::Start { video: true, .. }
-                        | CallAction::StartGroup { video: true, .. }
-                        | CallAction::Accept { .. }
-                        | CallAction::SetVideo { enabled: true, .. }
-                ) {
+                    | CallAction::StartGroup { video: true, .. }
+                    | CallAction::Accept { .. }
+                    | CallAction::SetVideo { enabled: true, .. } => true,
+                    CallAction::JoinLink { media, .. } => *media == CallLinkMedia::Video,
+                    _ => false,
+                };
+                let _camera_admission = if wants_camera {
                     match self.devices.release_for_call() {
                         Ok(admission) => Some(admission),
                         Err(error) => {
                             if let CallAction::Start { placeholder_id, .. }
-                            | CallAction::StartGroup { placeholder_id, .. } = &action
+                            | CallAction::StartGroup { placeholder_id, .. }
+                            | CallAction::JoinLink { placeholder_id, .. } = &action
                             {
                                 self.hub
                                     .calls(|calls| calls.mark_unrecorded(placeholder_id));
@@ -2330,6 +2372,34 @@ impl Bridge {
                             );
                         });
                         client.start_group_call(&group_jid, video, placeholder_id);
+                    }
+                    CallAction::JoinLink {
+                        token_or_url,
+                        media,
+                        placeholder_id,
+                    } => {
+                        if self.hub.call_state().is_busy() {
+                            // Same un-drawing as a 1:1 or group placement: the
+                            // window drew this stage before asking, and the
+                            // refusal rides no id it could match it to.
+                            self.hub
+                                .calls(|calls| calls.mark_unrecorded(&placeholder_id));
+                            self.hub.republish_calls();
+                            return CommandOutcome::Refused(
+                                "a call is already up; end it before placing another".to_string(),
+                            );
+                        }
+                        // The token goes only to the session. It is not a JID
+                        // and there is no chat to look its name up in: the row
+                        // is the ordinary outgoing placeholder under the fixed
+                        // call-link recipient, with no group identity.
+                        self.hub.calls(|calls| {
+                            calls.set_outgoing(Action::call_link_outgoing(
+                                placeholder_id.clone(),
+                                media,
+                            ));
+                        });
+                        client.start_call_link(token_or_url, media, placeholder_id);
                     }
                     // Answering brings the media up here, so the call is live
                     // from this moment: waiting for an event that only fires

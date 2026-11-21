@@ -26,6 +26,39 @@ pub type CallParticipantRef<'a> = (
     Option<u32>,
 );
 
+/// Opaque label used as the recipient of a call-link placement.
+///
+/// This is NOT a JID: it has no `@` and must never be parsed as one. A call
+/// link is identified by its token, not by an address, and treating this label
+/// as a JID would send it down the group or user address paths.
+pub const CALL_LINK_RECIPIENT_JID: &str = "call-link";
+
+/// Display name for a call-link placement in the call log and outgoing card.
+pub const CALL_LINK_RECIPIENT_NAME: &str = "Call link";
+
+/// Which media a call link offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallLinkMedia {
+    Audio,
+    Video,
+}
+
+/// The metadata a link resolves to, before the call is joined.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallLinkPreview {
+    /// The link identity. Never log this or show it in the UI: it is the
+    /// invite itself, and printing it shares the call with whoever can read
+    /// the log or see the screen.
+    pub token: String,
+    pub media: CallLinkMedia,
+    pub creator_jid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creator_pn: Option<String>,
+    pub waiting_room_enabled: bool,
+    pub is_admin: bool,
+}
+
 /// One person in a group call's authoritative roster.
 ///
 /// The library's roster names a participant by JID and, for some snapshots,

@@ -2,6 +2,8 @@
 
 /// Profile-picture metadata, resolved on its own lifecycle.
 mod avatar;
+/// Call-link metadata, read without joining a link or placing a call.
+mod call_link;
 /// Voice calls, which are the one part of the session a page cannot run.
 mod calls;
 /// Display names for special chats, resolved on their own lifecycle.

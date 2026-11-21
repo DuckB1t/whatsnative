@@ -165,6 +165,21 @@ impl<'a> Frames<'a> {
                     let _ = tx.send(result.map(|reply| *reply));
                 }
             }
+            // Addressed to the one window that asked: a call link's metadata
+            // is a preview, not state to fan out to every front end.
+            DaemonMessage::CallLinkPreview { id, preview } => {
+                match take_pending(self.pending, id) {
+                    Some(Awaiting::CallLinkPreview(tx)) => {
+                        let _ = tx.send(Ok(preview));
+                    }
+                    Some(waiting) => {
+                        self.fail(waiting, &Failure::permanent("unexpected call link preview"))
+                    }
+                    None => {
+                        debug!("a call link preview arrived for {id}, which nobody is waiting on")
+                    }
+                }
+            }
 
             // The first frame, and the only one that describes where things
             // already stand. A window opened while the daemon was already

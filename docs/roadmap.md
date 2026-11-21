@@ -337,6 +337,7 @@
   than to anything here; the alternative — not dropping — is the one thing
   this path exists to do.
 
+- **A call link can be previewed and joined, but neither has been live-validated.** The native modal resolves metadata, requires explicit consent and hands the pasted token to the library's link builder without ever treating it as a JID or a chat. What has not been exercised is the real admission path — waiting rooms, media attach and a live group roster — because joining a link on the paired account needs explicit consent. The same operation is not yet in the CLI/wire surface: protocol 51 is a GUI/IPC addition, so a terminal still has no `call-link` command.
 - **Group calls are routed and drawn, but not live-validated.** The library's
   transaction-ordered roster snapshots now reach `call_card/video.rs`, and a
   group chat's call buttons place a `StartGroup` call. Real group calls have

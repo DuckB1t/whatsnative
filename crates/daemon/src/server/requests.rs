@@ -362,6 +362,26 @@ pub(super) async fn handle_request(
             .await
         }
         ClientRequest::Call(action) => acted(dispatch(hub, commands, Action::Call(action)).await),
+        // Resolving a link is a read against the live account, and the preview
+        // is the answer rather than a queued command's acknowledgement: it
+        // comes back on this connection's outbox under the request's id.
+        ClientRequest::PreviewCallLink(request) => {
+            let id = match addressed(id, "a call link preview needs an id to answer under") {
+                Ok(id) => id,
+                Err(answer) => return answer,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::PreviewCallLink {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         // The bytes come back as `Downloaded` under this id, seconds later,
         // from the task the action spawns.
         ClientRequest::Download(request) => {
@@ -921,7 +941,10 @@ pub(super) async fn dispatch(
         // until the next snapshot dropped it, and disappearing is what a
         // front end writes down as an attempt that was never answered. The
         // bridge's busy refusal says the same thing one layer down.
-        if let Action::Call(CallAction::Start { placeholder_id, .. }) = &action {
+        if let Action::Call(
+            CallAction::Start { placeholder_id, .. } | CallAction::JoinLink { placeholder_id, .. },
+        ) = &action
+        {
             hub.calls(|calls| calls.mark_unrecorded(placeholder_id));
             hub.republish_calls();
         }

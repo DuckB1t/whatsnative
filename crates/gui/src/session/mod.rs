@@ -89,10 +89,10 @@ use std::sync::{Arc, Mutex};
 
 use log::error;
 use oxidezap_core::{
-    AccountId, CallState, ChannelPollCreated, ChannelPollDraft, ChannelReact, ChannelVotePoll,
-    Chat, ChatMessage, CommunityDraft, CommunityOperationResult, CreatedMessageRef,
-    DownloadableMedia, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest, QuotedMessage,
-    SubgroupDraft, UiEvent,
+    AccountId, CallLinkMedia, CallLinkPreview, CallState, ChannelPollCreated, ChannelPollDraft,
+    ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
+    CreatedMessageRef, DownloadableMedia, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest,
+    QuotedMessage, SubgroupDraft, UiEvent,
 };
 use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, RequestId};
 // The payload structs the protocol declares, named rather than glob-imported
@@ -100,8 +100,8 @@ use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, Request
 // request's own payload, built here and moved onto the wire unchanged.
 use oxidezap_ipc::{
     CreateEvent, Download, EditMessage, LoadChats, LoadMessages, MarkRead, MarkStatusWatched,
-    PostToChannel, RespondEvent, RevokeMessage, SendAudio, SendMedia, SendReaction, SendText,
-    Typing, VotePoll,
+    PostToChannel, PreviewCallLink, RespondEvent, RevokeMessage, SendAudio, SendMedia,
+    SendReaction, SendText, Typing, VotePoll,
 };
 use portable_atomic::AtomicU64;
 use tokio::sync::oneshot;
@@ -353,6 +353,9 @@ enum Awaiting {
     /// What this account occupies on disk, for the Storage pane.
     Storage(oneshot::Sender<StorageUsage>),
     CallDevices(oneshot::Sender<Result<oxidezap_ipc::CallDeviceReply, String>>),
+    /// The metadata a call link resolved to, for the preview form. Addressed
+    /// to the window that asked: it is a thing to look at, not shared state.
+    CallLinkPreview(oneshot::Sender<Result<CallLinkPreview, Failure>>),
     /// A message drawn before it was sent. On refusal it has to stop being
     /// pending, and the front end is the side that knows which bubble it is.
     Send {
@@ -438,6 +441,7 @@ impl Awaiting {
             Self::Download(tx) => tx.is_closed(),
             Self::Storage(tx) => tx.is_closed(),
             Self::CallDevices(tx) => tx.is_closed(),
+            Self::CallLinkPreview(tx) => tx.is_closed(),
             Self::Acted(tx) => tx.is_closed(),
             Self::Installed { tell, .. } => tell.is_closed(),
             Self::Removed(tx) => tx.is_closed(),
@@ -475,6 +479,9 @@ impl Awaiting {
             }
             Self::CallDevices(tx) => {
                 let _ = tx.send(Err(detail.to_string()));
+            }
+            Self::CallLinkPreview(tx) => {
+                let _ = tx.send(Err(failure.clone()));
             }
             Self::SyncedStickers(tx) => {
                 let _ = tx.send(Err(failure.clone()));
@@ -1909,6 +1916,28 @@ impl SessionHandle {
         );
     }
 
+    /// Resolve a call link without joining it.
+    ///
+    /// The pasted text goes to the daemon unchanged: a bare token is not a JID
+    /// and a whole URL is not something to rebuild here. The answer is private
+    /// to the window that asked, because it is metadata about an invite rather
+    /// than state every front end needs.
+    pub fn preview_call_link(
+        &self,
+        token_or_url: String,
+        media: CallLinkMedia,
+    ) -> oneshot::Receiver<Result<CallLinkPreview, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::PreviewCallLink(PreviewCallLink {
+                token_or_url,
+                media,
+            }),
+            Awaiting::CallLinkPreview(tx),
+        );
+        rx
+    }
+
     pub fn start_call(&self, jid: &str, is_video: bool, placeholder_id: String) {
         // A group is one call with a roster, not N calls to its members. The
         // daemon resolves the roster from the JID, so every caller can come
@@ -1931,6 +1960,22 @@ impl SessionHandle {
         self.call(CallAction::StartGroup {
             group_jid: jid.to_string(),
             video: is_video,
+            placeholder_id,
+        });
+    }
+
+    /// Join a call by its link. There is no recipient JID to resolve: the
+    /// token is the call's identity, and the placeholder names the card the
+    /// front end drew before the daemon gave the call its real id.
+    pub fn join_call_link(
+        &self,
+        token_or_url: String,
+        media: CallLinkMedia,
+        placeholder_id: String,
+    ) {
+        self.call(CallAction::JoinLink {
+            token_or_url,
+            media,
             placeholder_id,
         });
     }

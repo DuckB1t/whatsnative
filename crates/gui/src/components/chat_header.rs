@@ -31,6 +31,13 @@ fn is_callable_group(jid: &str) -> bool {
     oxidezap_core::is_group_jid(jid)
 }
 
+/// A call link needs no addressable chat: the invite carries its own identity.
+/// Only the connection matters here, not whether this particular row could
+/// receive a direct call.
+fn can_join_call_link(can_send: bool) -> bool {
+    can_send
+}
+
 /// How many names a group's line carries before it starts counting instead.
 ///
 /// A line that named everybody would be a paragraph in a bar one line tall,
@@ -309,6 +316,7 @@ fn render_actions(
     let overflow_jid = chat.jid.clone();
     let call_entity = entity.clone();
     let video_entity = entity.clone();
+    let call_link_entity = entity.clone();
     let event_entity = entity.clone();
     let poll_entity = entity.clone();
     let overflow_entity = entity.clone();
@@ -413,8 +421,27 @@ fn render_actions(
                 }),
             )
         })
+        .when(
+            can_join_call_link(can_send) && layout.show_call_buttons(),
+            |el| {
+                el.child(
+                    action(
+                        "join-call-link",
+                        ProductIcon::Phone.into(),
+                        crate::tr!(CallLinkJoin),
+                    )
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| {
+                        call_link_entity.update(cx, |app, cx| {
+                            app.begin_call_link_dialog(window, cx);
+                        });
+                    }),
+                )
+            },
+        )
         .child(render_overflow_menu(
             callable,
+            can_send,
             can_create_channel_poll,
             overflow_jid,
             overflow_entity,
@@ -430,6 +457,7 @@ fn render_actions(
 /// which is exactly why it cannot be a subset.
 fn render_overflow_menu(
     callable: bool,
+    can_send: bool,
     can_create_channel_poll: bool,
     jid: String,
     entity: Entity<WhatsAppApp>,
@@ -437,6 +465,7 @@ fn render_overflow_menu(
 ) -> impl IntoElement + use<> {
     let search_entity = entity.clone();
     let video_entity = entity.clone();
+    let call_link_entity = entity.clone();
     let poll_entity = entity.clone();
     let call_entity = entity;
 
@@ -451,6 +480,7 @@ fn render_overflow_menu(
         let search_entity = search_entity.clone();
         let call_entity = call_entity.clone();
         let video_entity = video_entity.clone();
+        let call_link_entity = call_link_entity.clone();
         let poll_entity = poll_entity.clone();
         let video_jid = jid.clone();
         let poll_jid = jid.clone();
@@ -471,6 +501,22 @@ fn render_overflow_menu(
                     .on_click(move |_, window, cx| {
                         poll_entity.update(cx, |app, cx| {
                             app.begin_channel_poll_dialog(&poll_jid, window, cx);
+                        });
+                    }),
+            )
+        } else {
+            menu
+        };
+        // The link is not one of the conversation's call targets: it belongs
+        // after the search and poll actions but before the early return, so
+        // broadcast and newsletter rows can open it too.
+        let menu = if can_join_call_link(can_send) {
+            menu.item(
+                PopupMenuItem::new(crate::tr!(CallLinkJoin))
+                    .icon(Icon::from(ProductIcon::Phone))
+                    .on_click(move |_, window, cx| {
+                        call_link_entity.update(cx, |app, cx| {
+                            app.begin_call_link_dialog(window, cx);
                         });
                     }),
             )
@@ -575,6 +621,18 @@ mod tests {
             total: 1,
             kind: ComposingKind::Text,
         }
+    }
+
+    #[test]
+    fn join_call_link_is_available_without_a_callable_chat_jid() {
+        let chat = Chat::new("status@broadcast".to_string());
+        let callable = is_callable_user(&chat.jid) || is_callable_group(&chat.jid);
+        assert!(!callable, "the fixture really is not a call target");
+        assert!(
+            can_join_call_link(true),
+            "an invite is joined by its link, not by the row's JID"
+        );
+        assert!(!can_join_call_link(false), "offline is still offline");
     }
 
     #[test]

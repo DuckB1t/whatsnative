@@ -65,6 +65,7 @@ impl GroupRoster {
 #[cfg(test)]
 mod tests {
     use super::is_group_jid;
+    use crate::CALL_LINK_RECIPIENT_JID;
 
     #[test]
     fn only_a_parsed_group_address_is_a_group() {
@@ -74,5 +75,12 @@ mod tests {
         assert!(!is_group_jid("status@broadcast"));
         assert!(!is_group_jid("newsletter@g.us@invalid"));
         assert!(!is_group_jid("not a jid"));
+    }
+
+    #[test]
+    fn is_group_jid_rejects_call_link_tokens() {
+        assert!(!is_group_jid("TEST-CALL-LINK"));
+        assert!(!is_group_jid("TEST-4821-LINK-9021"));
+        assert!(!is_group_jid(CALL_LINK_RECIPIENT_JID));
     }
 }

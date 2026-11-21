@@ -4,6 +4,16 @@ catalog! {
     SearchInConversation => ("Search in conversation", "Buscar na conversa");
     VoiceCall => ("Voice call", "Chamada de voz");
     VideoCall => ("Video call", "Chamada de vídeo");
+    CallLinkJoin => ("Join a call link", "Entrar em link de chamada");
+    CallLinkPaste => ("Paste a call link or token", "Cole um link ou token de chamada");
+    CallLinkVoice => ("Voice", "Voz");
+    CallLinkVideo => ("Video", "Vídeo");
+    CallLinkPreviewTitle => ("Call link preview", "Prévia do link de chamada");
+    CallLinkConsent => ("Joining connects you to a live WhatsApp group call. Only continue if you trust the person who shared this link.", "Entrar conecta você a uma chamada de grupo do WhatsApp ao vivo. Continue apenas se você confiar em quem compartilhou este link.");
+    CallLinkJoinConfirm => ("Join call", "Entrar na chamada");
+    CallLinkInvalid => ("That is not a valid WhatsApp call link.", "Esse não é um link de chamada válido do WhatsApp.");
+    CallLinkMediaMismatch => ("That link's call type does not match your choice.", "O tipo de chamada desse link não corresponde à sua escolha.");
+    CallLinkWaitingRoom => ("Waiting room", "Sala de espera");
     More => ("More", "Mais");
     You => ("You", "Você");
     TypeAMessage => ("Type a message", "Digite uma mensagem");

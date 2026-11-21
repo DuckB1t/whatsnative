@@ -59,7 +59,8 @@ pub use avatar::AvatarDemand;
 pub use avatar::cache_key as avatar_cache_key;
 pub use blocklist::{BlockedContact, normalize_block_target};
 pub use call::{
-    CallGroup, CallId, CallParticipant, CallParticipantRef, CallParticipantRow, IncomingCall,
+    CALL_LINK_RECIPIENT_JID, CALL_LINK_RECIPIENT_NAME, CallGroup, CallId, CallLinkMedia,
+    CallLinkPreview, CallParticipant, CallParticipantRef, CallParticipantRow, IncomingCall,
     OutgoingCall, OutgoingCallState,
 };
 pub use call_devices::*;

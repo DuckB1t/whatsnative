@@ -350,6 +350,44 @@ landed in the previous section.
 (2611 passed, 44 ignored). Synthetic command lines only; no account operation
 was performed.
 
+### 13. Native call-link preview and join (protocol 51)
+
+**Problem.** A reusable WhatsApp call link can be previewed and joined by the
+library, but no front end could reach either operation. The group-call path
+addresses people by JID; a call-link token is an opaque invite, and routing it
+through the JID parser or a chat lookup would make it a recipient it is not.
+
+**Change.**
+- `core` adds `CallLinkMedia`, `CallLinkPreview`, and the fixed label/name pair
+  for a link placement. The label is explicitly not a JID; the preview's token
+  is link identity and is never logged or drawn.
+- IPC is version **51**: `PreviewCallLink` is an out-of-band read answered by
+  `DaemonMessage::CallLinkPreview`, and `CallAction::JoinLink` carries the
+  pasted text and the front end's placeholder id. Session wrappers map the
+  upstream preview metadata and join through the library's `CallLinkCall`
+  builder; the token reaches only that builder, never `Jid`, `hub.chat()` or
+  `is_group_jid`. A video link requires camera endpoints — no voice downgrade.
+- The daemon mirrors a link join as an ordinary outgoing call under the fixed
+  recipient with no group identity, and reuses the same busy/offline/device
+  cleanup as `Start` and `StartGroup`. Group-call routing is unchanged.
+- The GUI adds a modal reached from the chat header and overflow menu. It
+  validates a full `https://call.whatsapp.com/{audio|video}/{token}` link or a
+  bare token without parsing either as an address, rejects media mismatches,
+  shows only the creator, media and waiting-room state, and keeps the join
+  button locked until a preview has been shown and the consent box is ticked.
+  EN/PT catalog entries carry the explicit live-group-call warning.
+- Synthetic-only tests cover serde round-trips, token/JID rejection, preview
+  mapping, link placeholder identity, daemon classification/mirroring, all
+  validation forms and the preview-plus-consent gate. No real link was
+  previewed or joined.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2623 passed, 44 ignored). Web gates green too: shared-view ban, daemon/session
+wasm library tests, stable and nightly shared-memory WebCodecs/call-audio
+browser tests, plus the `xtask` and example-plugin gates. Release rebuild:
+`oxidezap` 47,868,336 B, `oxidezapd` 32,799,400 B, `oxidezap-cli`
+1,706,472 B (<2 MiB).
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).
