@@ -21,8 +21,25 @@ fn top_level_commands_exist() {
     assert!(out.status.success());
     let help = String::from_utf8_lossy(&out.stdout);
     for command in [
-        "accounts", "auth", "calls", "channels", "chats", "contacts", "doctor", "groups",
-        "history", "media", "messages", "poll", "presence", "profile", "send", "status", "store",
+        "accounts",
+        "auth",
+        "calls",
+        "channels",
+        "chats",
+        "communities",
+        "contacts",
+        "doctor",
+        "events",
+        "groups",
+        "history",
+        "media",
+        "messages",
+        "poll",
+        "presence",
+        "profile",
+        "send",
+        "status",
+        "store",
         "sync",
     ] {
         assert!(help.contains(command), "missing command: {command}");
@@ -32,7 +49,7 @@ fn top_level_commands_exist() {
 /// Each family names the subcommands added after the audit.
 #[test]
 fn new_subcommands_exist() {
-    let cases: [(&str, &[&str]); 12] = [
+    let cases: [(&str, &[&str]); 14] = [
         (
             "groups",
             &[
@@ -45,7 +62,12 @@ fn new_subcommands_exist() {
                 "prune",
             ],
         ),
-        ("contacts", &["show", "refresh", "alias", "tag", "untag"]),
+        (
+            "contacts",
+            &[
+                "show", "refresh", "alias", "tag", "untag", "blocked", "block", "unblock", "lookup",
+            ],
+        ),
         ("messages", &["export", "purge"]),
         ("poll", &["list", "show"]),
         ("media", &["backfill"]),
@@ -54,8 +76,15 @@ fn new_subcommands_exist() {
         ("send", &["sticker", "select"]),
         ("presence", &["online", "offline"]),
         ("history", &["coverage", "backfill"]),
-        ("channels", &["list", "show", "join", "leave"]),
+        (
+            "channels",
+            &[
+                "list", "show", "join", "leave", "post", "poll", "react", "vote",
+            ],
+        ),
         ("accounts", &["list", "use", "add", "remove"]),
+        ("events", &["create", "respond"]),
+        ("communities", &["create", "subgroup", "link", "join"]),
     ];
     for (family, subs) in cases {
         let out = cli()
@@ -67,6 +96,149 @@ fn new_subcommands_exist() {
         let help = String::from_utf8_lossy(&out.stdout);
         for sub in subs {
             assert!(help.contains(sub), "{family} is missing {sub}");
+        }
+    }
+}
+
+/// The protocol-50 families are reachable from top-level help, and every new
+/// subcommand advertises the flags it promises. Keeping both checks in one
+/// place means a rename cannot leave the matrix and the binary disagreeing.
+#[test]
+fn new_family_commands_are_present_in_help() {
+    let out = cli().arg("--help").output().expect("run the cli");
+    assert!(out.status.success());
+    let top = String::from_utf8_lossy(&out.stdout);
+    for family in ["contacts", "channels", "events", "communities"] {
+        assert!(top.contains(family), "top-level help is missing {family}");
+    }
+
+    struct SubcommandHelp {
+        name: &'static str,
+        flags: &'static [&'static str],
+    }
+    struct FamilyHelp {
+        name: &'static str,
+        subcommands: &'static [SubcommandHelp],
+    }
+
+    let cases: [FamilyHelp; 4] = [
+        FamilyHelp {
+            name: "contacts",
+            subcommands: &[
+                SubcommandHelp {
+                    name: "blocked",
+                    flags: &[],
+                },
+                SubcommandHelp {
+                    name: "block",
+                    flags: &[],
+                },
+                SubcommandHelp {
+                    name: "unblock",
+                    flags: &[],
+                },
+                SubcommandHelp {
+                    name: "lookup",
+                    flags: &["--key"],
+                },
+            ],
+        },
+        FamilyHelp {
+            name: "channels",
+            subcommands: &[
+                SubcommandHelp {
+                    name: "post",
+                    flags: &["--jid", "--text"],
+                },
+                SubcommandHelp {
+                    name: "poll",
+                    flags: &["--jid", "--question", "--option", "--selectable"],
+                },
+                SubcommandHelp {
+                    name: "react",
+                    flags: &["--jid", "--message", "--emoji"],
+                },
+                SubcommandHelp {
+                    name: "vote",
+                    flags: &["--jid", "--poll", "--option"],
+                },
+            ],
+        },
+        FamilyHelp {
+            name: "events",
+            subcommands: &[
+                SubcommandHelp {
+                    name: "create",
+                    flags: &[
+                        "--jid",
+                        "--name",
+                        "--description",
+                        "--start-time",
+                        "--end-time",
+                        "--join-link",
+                        "--latitude",
+                        "--longitude",
+                        "--location-name",
+                        "--scheduled-call",
+                        "--extra-guests-allowed",
+                    ],
+                },
+                SubcommandHelp {
+                    name: "respond",
+                    flags: &["--chat", "--message", "--response", "--extra-guests"],
+                },
+            ],
+        },
+        FamilyHelp {
+            name: "communities",
+            subcommands: &[
+                SubcommandHelp {
+                    name: "create",
+                    flags: &[
+                        "--name",
+                        "--description",
+                        "--closed",
+                        "--allow-non-admin-sub-group-creation",
+                        "--create-general-chat",
+                    ],
+                },
+                SubcommandHelp {
+                    name: "subgroup",
+                    flags: &["--parent", "--name", "--participant", "--visibility"],
+                },
+                SubcommandHelp {
+                    name: "link",
+                    flags: &["--community", "--visible", "--hidden"],
+                },
+                SubcommandHelp {
+                    name: "join",
+                    flags: &["--community", "--subgroup"],
+                },
+            ],
+        },
+    ];
+
+    for family in cases {
+        for sub in family.subcommands {
+            let out = cli()
+                .args([family.name, sub.name, "--help"])
+                .output()
+                .expect("run the cli");
+            assert!(
+                out.status.success(),
+                "no help for {} {}",
+                family.name,
+                sub.name
+            );
+            let help = String::from_utf8_lossy(&out.stdout);
+            for flag in sub.flags {
+                assert!(
+                    help.contains(flag),
+                    "{} {} is missing {flag}",
+                    family.name,
+                    sub.name
+                );
+            }
         }
     }
 }

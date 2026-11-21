@@ -320,6 +320,36 @@ in the next commit.
 (2610 passed, 44 ignored). Synthetic fixtures only; no account operation was
 performed.
 
+### 12. CLI surface for protocol 50 operations
+
+**Problem.** The wire contract and daemon mapping made the operations possible
+from a terminal, but no command reached them. A script still had to open a GUI
+to block an address, answer an event, create a community or post in a channel.
+
+**Change.**
+- `contacts blocked|block|unblock|lookup` exposes the block list, both block
+  mutations, and all four username lookup outcomes. Lookup's human output says
+  when a `--key` retry is possible, rather than rendering `KeyRequired` as a
+  generic failure.
+- New `events create|respond` and `communities create|subgroup|link|join`
+  families pass the same typed DTOs the GUI uses. Partial community answers
+  print groups, links, failed groups and warnings; JSON mode emits the typed
+  answer verbatim.
+- `channels post|poll|react|vote` reaches the channel-specific session paths.
+  A CLI post passes `local_id: None` because it draws no optimistic bubble;
+  reaction removal is an empty `--emoji`. Polls need at least two options, and
+  an event location needs both coordinates — both are refused before a socket
+  is opened.
+- The help-surface tests name every command and flag, so a rename cannot leave
+  the documented CLI and the binary disagreeing.
+
+No wire schema or IPC protocol changed: these are clients of the contract
+landed in the previous section.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2611 passed, 44 ignored). Synthetic command lines only; no account operation
+was performed.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

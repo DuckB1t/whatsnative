@@ -17,6 +17,7 @@
 mod args;
 mod output;
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -24,6 +25,12 @@ use std::time::Duration;
 use args::{Commands, OxidezapCli};
 use output::{OutputMode, print_action, print_error, print_event, print_result};
 use oxidezap_ipc::IpcClient;
+use oxidezap_wire::dto::{
+    BlockTarget, ChannelPollDraft, ChannelReact, ChannelVotePoll, CommunityDraft,
+    CommunityOperationResult, CommunityVisibility, CommunityWarningStep, CreateEvent,
+    EventLocation, EventRsvp, JoinSubgroupRequest, LinkSubgroupTarget, LinkSubgroupsRequest,
+    PostToChannel, RespondEvent, SubgroupDraft, UsernameLookupResult,
+};
 use oxidezap_wire::envelope::CURRENT_PROTOCOL_VERSION;
 use oxidezap_wire::request::ClientRequest;
 use oxidezap_wire::response::DaemonResponse;
@@ -51,6 +58,15 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+
+    // Semantic checks the arg declaration cannot express. Answer them here,
+    // before a socket is opened: a malformed command line must not reach the
+    // daemon, and a script gets the same structured error it gets for any
+    // other bad argument.
+    if let Err(err) = validate_local_args(&command) {
+        print_error(output_mode, &err.code, &err.message);
+        return ExitCode::from(2);
+    }
 
     // Commands that execute locally without a daemon connection. Three of
     // them emit raw text meant for a shell to consume — a completion script,
@@ -296,6 +312,34 @@ fn machine_output_allowed(mode: OutputMode, command: &str, what: &str) -> bool {
         &format!("`{command}` writes {what}, not a JSON DTO; drop --json/--events"),
     );
     false
+}
+
+/// Argument relationships the parser cannot express, refused before any
+/// connection is made. Both are cheap local facts: a location needs both
+/// coordinates, and a channel poll needs something to choose between.
+fn validate_local_args(command: &Commands) -> Result<(), oxidezap_wire::ApiError> {
+    match command {
+        Commands::Events(events) => match &events.command {
+            Some(args::EventsSubcommand::Create(create)) => {
+                if create.latitude.is_some() != create.longitude.is_some() {
+                    return Err(oxidezap_wire::ApiError::invalid_argument(
+                        "--latitude and --longitude must be given together",
+                    ));
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        },
+        Commands::Channels(channels) => match &channels.command {
+            Some(args::ChannelsSubcommand::Poll(poll)) if poll.options.len() < 2 => {
+                Err(oxidezap_wire::ApiError::invalid_argument(
+                    "channels poll needs at least two --option values",
+                ))
+            }
+            _ => Ok(()),
+        },
+        _ => Ok(()),
+    }
 }
 
 /// Validate an id a user named, or resolve `default` to "unset".
@@ -1132,6 +1176,53 @@ fn execute_command(
                 }
                 Ok(())
             }
+            Some(args::ContactsSubcommand::Blocked(_)) => {
+                let resp = client.request(ClientRequest::Blocklist)?;
+                if let DaemonResponse::Blocklist { entries } = resp {
+                    print_result(output_mode, &entries, |entries| {
+                        println!("{:<32} {:<24} BLOCKED_AT", "JID", "NAME");
+                        for entry in entries {
+                            let blocked_at = match entry.blocked_at {
+                                Some(at) => at.to_string(),
+                                None => "-".to_string(),
+                            };
+                            println!(
+                                "{:<32} {:<24} {blocked_at}",
+                                entry.jid,
+                                entry.name.as_deref().unwrap_or("-")
+                            );
+                        }
+                    });
+                }
+                Ok(())
+            }
+            Some(args::ContactsSubcommand::Block(b)) => {
+                client.request(ClientRequest::Block(BlockTarget { jid: b.jid }))?;
+                print_action(output_mode, "contact_blocked", || {
+                    println!("Contact blocked.");
+                });
+                Ok(())
+            }
+            Some(args::ContactsSubcommand::Unblock(u)) => {
+                client.request(ClientRequest::Unblock(BlockTarget { jid: u.jid }))?;
+                print_action(output_mode, "contact_unblocked", || {
+                    println!("Contact unblocked.");
+                });
+                Ok(())
+            }
+            Some(args::ContactsSubcommand::Lookup(l)) => {
+                let handle = l.username.clone();
+                let resp = client.request(ClientRequest::LookupUsername {
+                    username: l.username,
+                    username_key: l.key,
+                })?;
+                if let DaemonResponse::UsernameLookup { result } = resp {
+                    print_result(output_mode, &result, |result| {
+                        print_username_lookup(&handle, result);
+                    });
+                }
+                Ok(())
+            }
             None => Ok(()),
         },
         Commands::Groups(groups) => match groups.command {
@@ -1594,6 +1685,188 @@ fn execute_command(
                 });
                 Ok(())
             }
+            Some(args::ChannelsSubcommand::Post(p)) => {
+                client.request(ClientRequest::PostToChannel(PostToChannel {
+                    channel_jid: p.jid,
+                    text: p.text,
+                    // A CLI has no optimistic bubble; the daemon owns the id.
+                    local_id: None,
+                }))?;
+                print_action(output_mode, "channel_post_sent", || {
+                    println!("Channel post sent.");
+                });
+                Ok(())
+            }
+            Some(args::ChannelsSubcommand::Poll(p)) => {
+                let resp = client.request(ClientRequest::CreateChannelPoll(ChannelPollDraft {
+                    channel_jid: p.jid,
+                    question: p.question,
+                    options: p.options,
+                    selectable_count: p.selectable,
+                }))?;
+                if let DaemonResponse::ChannelPollCreated { created } = resp {
+                    print_result(output_mode, &created, |created| {
+                        println!(
+                            "Channel poll created in {}: {}",
+                            created.channel_jid, created.message_id
+                        );
+                    });
+                }
+                Ok(())
+            }
+            Some(args::ChannelsSubcommand::React(r)) => {
+                client.request(ClientRequest::ReactToChannel(ChannelReact {
+                    channel_jid: r.jid,
+                    message_id: r.message,
+                    emoji: r.emoji,
+                }))?;
+                print_action(output_mode, "channel_reaction_recorded", || {
+                    println!("Channel reaction recorded.");
+                });
+                Ok(())
+            }
+            Some(args::ChannelsSubcommand::Vote(v)) => {
+                client.request(ClientRequest::VoteChannelPoll(ChannelVotePoll {
+                    channel_jid: v.jid,
+                    poll_message_id: v.poll,
+                    option_indices: v.options,
+                }))?;
+                print_action(output_mode, "channel_vote_recorded", || {
+                    println!("Channel vote recorded.");
+                });
+                Ok(())
+            }
+            None => Ok(()),
+        },
+        Commands::Events(events) => match events.command {
+            Some(args::EventsSubcommand::Create(c)) => {
+                let location = match (c.latitude, c.longitude) {
+                    (Some(degrees_latitude), Some(degrees_longitude)) => Some(EventLocation {
+                        degrees_latitude,
+                        degrees_longitude,
+                        name: c.location_name,
+                    }),
+                    _ => None,
+                };
+                let event = CreateEvent {
+                    jid: c.jid,
+                    name: c.name,
+                    description: c.description,
+                    start_time: c.start_time,
+                    end_time: c.end_time,
+                    join_link: c.join_link,
+                    location,
+                    is_scheduled_call: c.scheduled_call,
+                    extra_guests_allowed: c.extra_guests_allowed,
+                };
+                let resp = client.request(ClientRequest::CreateEvent(Box::new(event)))?;
+                if let DaemonResponse::EventCreated { created } = resp {
+                    print_result(output_mode, &created, |created| {
+                        println!(
+                            "Event created in {}: {}",
+                            created.chat_jid, created.message_id
+                        );
+                    });
+                }
+                Ok(())
+            }
+            Some(args::EventsSubcommand::Respond(r)) => {
+                let response = match r.response.as_str() {
+                    "going" => EventRsvp::Going,
+                    "not_going" => EventRsvp::NotGoing,
+                    "maybe" => EventRsvp::Maybe,
+                    other => {
+                        return Err(oxidezap_wire::ApiError::invalid_argument(format!(
+                            "invalid event response {other:?}; expected going, not_going, or maybe"
+                        )));
+                    }
+                };
+                client.request(ClientRequest::RespondEvent(RespondEvent {
+                    chat_jid: r.chat,
+                    event_message_id: r.message,
+                    response,
+                    extra_guest_count: r.extra_guests,
+                }))?;
+                print_action(output_mode, "event_response_recorded", || {
+                    println!("Event response recorded.");
+                });
+                Ok(())
+            }
+            None => Ok(()),
+        },
+        Commands::Communities(communities) => match communities.command {
+            Some(args::CommunitiesSubcommand::Create(c)) => {
+                let draft = CommunityDraft {
+                    name: c.name,
+                    description: c.description,
+                    closed: c.closed,
+                    allow_non_admin_sub_group_creation: c.allow_non_admin_sub_group_creation,
+                    create_general_chat: c.create_general_chat,
+                };
+                let resp = client.request(ClientRequest::CreateCommunity(draft))?;
+                if let DaemonResponse::CommunityResult { result } = resp {
+                    print_result(output_mode, &result, print_community_result);
+                }
+                Ok(())
+            }
+            Some(args::CommunitiesSubcommand::Subgroup(s)) => {
+                let visibility = match s.visibility.as_str() {
+                    "visible" => CommunityVisibility::Visible,
+                    "hidden" => CommunityVisibility::Hidden,
+                    other => {
+                        return Err(oxidezap_wire::ApiError::invalid_argument(format!(
+                            "invalid subgroup visibility {other:?}; expected visible or hidden"
+                        )));
+                    }
+                };
+                let draft = SubgroupDraft {
+                    parent_jid: s.parent,
+                    name: s.name,
+                    participants: s.participants,
+                    visibility,
+                };
+                let resp = client.request(ClientRequest::CreateCommunitySubgroup(draft))?;
+                if let DaemonResponse::CommunityResult { result } = resp {
+                    print_result(output_mode, &result, print_community_result);
+                }
+                Ok(())
+            }
+            Some(args::CommunitiesSubcommand::Link(l)) => {
+                let mut groups = Vec::with_capacity(l.visible.len() + l.hidden.len());
+                for jid in l.visible {
+                    groups.push(LinkSubgroupTarget {
+                        jid,
+                        visibility: CommunityVisibility::Visible,
+                    });
+                }
+                for jid in l.hidden {
+                    groups.push(LinkSubgroupTarget {
+                        jid,
+                        visibility: CommunityVisibility::Hidden,
+                    });
+                }
+                let resp = client.request(ClientRequest::LinkCommunitySubgroups(
+                    LinkSubgroupsRequest {
+                        community_jid: l.community,
+                        groups,
+                    },
+                ))?;
+                if let DaemonResponse::CommunityResult { result } = resp {
+                    print_result(output_mode, &result, print_community_result);
+                }
+                Ok(())
+            }
+            Some(args::CommunitiesSubcommand::Join(j)) => {
+                let resp =
+                    client.request(ClientRequest::JoinCommunitySubgroup(JoinSubgroupRequest {
+                        community_jid: j.community,
+                        subgroup_jid: j.subgroup,
+                    }))?;
+                if let DaemonResponse::CommunityResult { result } = resp {
+                    print_result(output_mode, &result, print_community_result);
+                }
+                Ok(())
+            }
             None => Ok(()),
         },
         Commands::Accounts(accounts) => match accounts.command {
@@ -1821,4 +2094,90 @@ fn print_contact(contact: &oxidezap_wire::dto::ContactDto) {
         format!(" [{}]", contact.tags.join(", "))
     };
     println!("{:<32} {name}{tags}", contact.jid);
+}
+
+/// A username lookup's four outcomes must read differently: a key-required
+/// answer is not a failed lookup, and a script reading the human text can tell
+/// which retry is possible.
+fn print_username_lookup(requested: &str, result: &UsernameLookupResult) {
+    match result {
+        UsernameLookupResult::Found(resolved) => {
+            println!("Found @{requested}: {}", resolved.jid);
+            if let Some(pn) = &resolved.pn_jid {
+                println!("  PN JID:   {pn}");
+            }
+            if let Some(username) = &resolved.username {
+                println!("  Username: @{username}");
+            }
+            if let Some(name) = &resolved.name {
+                println!("  Name:     {name}");
+            }
+            if let Some(name) = &resolved.verified_name {
+                println!("  Verified: {name}");
+            }
+        }
+        UsernameLookupResult::KeyRequired { username } => {
+            let handle = username.as_deref().unwrap_or(requested);
+            println!("Username @{handle} needs a lookup key; retry with --key KEY.");
+        }
+        UsernameLookupResult::NotFound => {
+            println!("Username @{requested}: not found.");
+        }
+        UsernameLookupResult::InvalidUsername => {
+            println!("Username {requested:?} is not a valid username.");
+        }
+    }
+}
+
+/// A community operation can partly succeed. Show every section the daemon
+/// reports, including the non-fatal warnings, so a partial result is not
+/// mistaken for a clean one.
+fn print_community_result(result: &CommunityOperationResult) {
+    if result.groups.is_empty()
+        && result.linked_jids.is_empty()
+        && result.failed_groups.is_empty()
+        && result.warnings.is_empty()
+    {
+        println!("Community operation completed.");
+        return;
+    }
+    if !result.groups.is_empty() {
+        println!("Groups:");
+        for group in &result.groups {
+            match &group.subject {
+                Some(subject) => println!("  {} ({subject})", group.jid),
+                None => println!("  {}", group.jid),
+            }
+            if let Some(description) = &group.description {
+                println!("      {description}");
+            }
+        }
+    }
+    if !result.linked_jids.is_empty() {
+        println!("Linked: {}", result.linked_jids.join(", "));
+    }
+    if !result.failed_groups.is_empty() {
+        println!("Failed groups:");
+        for failed in &result.failed_groups {
+            println!("  {} (code {})", failed.jid, failed.code);
+        }
+    }
+    if !result.warnings.is_empty() {
+        println!("Warnings:");
+        for warning in &result.warnings {
+            let step = match warning.step {
+                CommunityWarningStep::SetDescription => "set_description",
+                CommunityWarningStep::LinkSubgroup => "link_subgroup",
+                CommunityWarningStep::JoinApprovalPending => "join_approval_pending",
+            };
+            let mut line = format!("  {step}");
+            if let Some(jid) = &warning.jid {
+                let _ = write!(line, " {jid}");
+            }
+            if let Some(detail) = &warning.detail {
+                let _ = write!(line, ": {detail}");
+            }
+            println!("{line}");
+        }
+    }
 }

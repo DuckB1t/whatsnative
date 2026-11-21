@@ -62,6 +62,10 @@ pub enum Commands {
     History(HistoryArgs),
     /// Follow and manage broadcast channels
     Channels(ChannelsArgs),
+    /// Create and answer calendar events
+    Events(EventsArgs),
+    /// Create and manage communities and subgroups
+    Communities(CommunitiesArgs),
     /// List daemon account profiles
     Accounts(AccountsArgs),
     /// Download or manage media attachments
@@ -462,6 +466,32 @@ pub enum ContactsSubcommand {
     Tag(ContactTagArgs),
     /// Remove a local tag from a contact
     Untag(ContactTagArgs),
+    /// List addresses on the account's block list
+    Blocked(ContactsBlockedArgs),
+    /// Block an address by JID
+    Block(ContactBlockArgs),
+    /// Remove an address from the block list
+    Unblock(ContactBlockArgs),
+    /// Resolve a Meta username to an account
+    Lookup(ContactLookupArgs),
+}
+
+#[derive(Args)]
+pub struct ContactsBlockedArgs {}
+
+#[derive(Args)]
+pub struct ContactBlockArgs {
+    /// Address to block or unblock (a PN or LID JID)
+    pub jid: String,
+}
+
+#[derive(Args)]
+pub struct ContactLookupArgs {
+    /// Username to resolve, without the leading @
+    pub username: String,
+    /// Lookup key for a username that requires one
+    #[usage(long)]
+    pub key: Option<String>,
 }
 
 #[derive(Args)]
@@ -817,6 +847,14 @@ pub enum ChannelsSubcommand {
     Join(ChannelShowArgs),
     /// Unfollow a channel
     Leave(ChannelShowArgs),
+    /// Post plain text to a channel
+    Post(ChannelPostArgs),
+    /// Open a poll in a channel
+    Poll(ChannelPollArgs),
+    /// React to a channel message, or remove a reaction
+    React(ChannelReactArgs),
+    /// Vote on a channel poll by option index
+    Vote(ChannelVoteArgs),
 }
 
 #[derive(Args)]
@@ -826,6 +864,201 @@ pub struct ChannelsListArgs {}
 pub struct ChannelShowArgs {
     /// Channel JID
     pub jid: String,
+}
+
+#[derive(Args)]
+pub struct ChannelPostArgs {
+    /// Channel JID
+    #[usage(long)]
+    pub jid: String,
+    /// Text to post
+    #[usage(long)]
+    pub text: String,
+}
+
+#[derive(Args)]
+pub struct ChannelPollArgs {
+    /// Channel JID
+    #[usage(long)]
+    pub jid: String,
+    /// Poll question
+    #[usage(long)]
+    pub question: String,
+    /// Poll option (at least two, repeatable)
+    #[usage(long = "option")]
+    pub options: Vec<String>,
+    /// Number of selectable choices (default: 1)
+    #[usage(long, default = "1")]
+    pub selectable: u32,
+}
+
+#[derive(Args)]
+pub struct ChannelReactArgs {
+    /// Channel JID
+    #[usage(long)]
+    pub jid: String,
+    /// Message ID to react to
+    #[usage(long)]
+    pub message: String,
+    /// Emoji reaction (or empty string to remove it)
+    #[usage(long)]
+    pub emoji: String,
+}
+
+#[derive(Args)]
+pub struct ChannelVoteArgs {
+    /// Channel JID
+    #[usage(long)]
+    pub jid: String,
+    /// Poll message ID
+    #[usage(long)]
+    pub poll: String,
+    /// Option index to select (0-based, repeatable)
+    #[usage(long = "option")]
+    pub options: Vec<u32>,
+}
+
+#[derive(Args)]
+pub struct EventsArgs {
+    #[usage(subcommand)]
+    pub command: Option<EventsSubcommand>,
+}
+
+#[derive(Subcommands)]
+pub enum EventsSubcommand {
+    /// Create a calendar event in a chat
+    Create(EventCreateArgs),
+    /// Answer a calendar event invitation
+    Respond(EventRespondArgs),
+}
+
+#[derive(Args)]
+pub struct EventCreateArgs {
+    /// Chat JID in which to create the event
+    #[usage(long)]
+    pub jid: String,
+    /// Event name
+    #[usage(long)]
+    pub name: String,
+    /// Event description
+    #[usage(long)]
+    pub description: Option<String>,
+    /// Start time as Unix seconds
+    #[usage(long)]
+    pub start_time: Option<i64>,
+    /// End time as Unix seconds
+    #[usage(long)]
+    pub end_time: Option<i64>,
+    /// Join link for the event
+    #[usage(long)]
+    pub join_link: Option<String>,
+    /// Latitude of the event location (use with --longitude)
+    #[usage(long)]
+    pub latitude: Option<f64>,
+    /// Longitude of the event location (use with --latitude)
+    #[usage(long)]
+    pub longitude: Option<f64>,
+    /// Name of the event location
+    #[usage(long)]
+    pub location_name: Option<String>,
+    /// Mark the event as a scheduled call
+    #[usage(long)]
+    pub scheduled_call: bool,
+    /// Let guests bring additional guests
+    #[usage(long)]
+    pub extra_guests_allowed: bool,
+}
+
+#[derive(Args)]
+pub struct EventRespondArgs {
+    /// Chat JID holding the event
+    #[usage(long)]
+    pub chat: String,
+    /// Event message ID
+    #[usage(long)]
+    pub message: String,
+    /// Response: going, not_going, or maybe
+    #[usage(long, choices("going", "not_going", "maybe"))]
+    pub response: String,
+    /// Number of extra guests to bring
+    #[usage(long)]
+    pub extra_guests: Option<i32>,
+}
+
+#[derive(Args)]
+pub struct CommunitiesArgs {
+    #[usage(subcommand)]
+    pub command: Option<CommunitiesSubcommand>,
+}
+
+#[derive(Subcommands)]
+pub enum CommunitiesSubcommand {
+    /// Create a community
+    Create(CommunityCreateArgs),
+    /// Create a subgroup under a community
+    Subgroup(CommunitySubgroupArgs),
+    /// Link existing groups to a community
+    Link(CommunityLinkArgs),
+    /// Join a community subgroup
+    Join(CommunityJoinArgs),
+}
+
+#[derive(Args)]
+pub struct CommunityCreateArgs {
+    /// Community name
+    #[usage(long)]
+    pub name: String,
+    /// Community description
+    #[usage(long)]
+    pub description: Option<String>,
+    /// Make the community closed to non-members
+    #[usage(long)]
+    pub closed: bool,
+    /// Let non-admins create subgroups
+    #[usage(long)]
+    pub allow_non_admin_sub_group_creation: bool,
+    /// Create a general chat alongside the community
+    #[usage(long)]
+    pub create_general_chat: bool,
+}
+
+#[derive(Args)]
+pub struct CommunitySubgroupArgs {
+    /// Parent community JID
+    #[usage(long)]
+    pub parent: String,
+    /// Subgroup name
+    #[usage(long)]
+    pub name: String,
+    /// Participant JID (repeatable)
+    #[usage(long = "participant")]
+    pub participants: Vec<String>,
+    /// Listing visibility: visible or hidden (default: visible)
+    #[usage(long, default = "visible", choices("visible", "hidden"))]
+    pub visibility: String,
+}
+
+#[derive(Args)]
+pub struct CommunityLinkArgs {
+    /// Community JID
+    #[usage(long)]
+    pub community: String,
+    /// Group JID to link as visible (repeatable)
+    #[usage(long = "visible")]
+    pub visible: Vec<String>,
+    /// Group JID to link as hidden (repeatable)
+    #[usage(long = "hidden")]
+    pub hidden: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct CommunityJoinArgs {
+    /// Community JID
+    #[usage(long)]
+    pub community: String,
+    /// Subgroup JID to join
+    #[usage(long)]
+    pub subgroup: String,
 }
 
 #[derive(Args)]
