@@ -428,6 +428,10 @@ catalog! {
     DeleteUnavailable => ("Could not delete message: the daemon is unavailable.", "Não foi possível apagar a mensagem: o serviço está indisponível.");
     DeleteFailed => ("Could not delete message", "Não foi possível apagar a mensagem");
     DeleteDisconnected => ("Could not delete message: the daemon connection ended.", "Não foi possível apagar a mensagem: a conexão com o serviço foi encerrada.");
+    CouldNotSaveReaction => ("Could not save reaction", "Não foi possível salvar a reação");
+    CouldNotRecordVote => ("Could not record vote", "Não foi possível registrar o voto");
+    CouldNotChangePluginPermission => ("Could not change plugin permission", "Não foi possível alterar a permissão do plugin");
+    DaemonDisconnectedBeforeAnswer => ("the daemon disconnected before it answered", "o serviço desconectou antes de responder");
     NoPeerConnection => ("This browser has no RTCPeerConnection, which is what carries a call's media here.", "Este navegador não oferece RTCPeerConnection, necessário para transmitir as mídias da chamada.");
     CallInOtherTab => ("This tab is showing an account another tab is running, so a call would use that tab's microphone and speakers. Use that tab.", "Esta conta está sendo executada em outra aba. A chamada usaria o microfone e os alto-falantes de lá. Use a outra aba.");
     FaultUnreachableTitle => ("Can't reach WhatsApp", "Não foi possível conectar ao WhatsApp");

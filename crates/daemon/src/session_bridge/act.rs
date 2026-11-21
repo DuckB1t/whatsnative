@@ -1723,18 +1723,20 @@ impl Bridge {
                 let Some(permit) = self.permit() else {
                     return too_busy();
                 };
-                // Nothing to draw ahead of the send: the front end paints
-                // its own reaction optimistically and the network echo
-                // confirms it, so the task's answer is dropped like a send's
-                // own delivery is — `hold` only keeps the permit for it.
-                let task = client.send_reaction(chat_jid, message_id, emoji);
-                hold(
-                    permit,
-                    [oxidezap_session::spawn(async move {
-                        let _ = task.await;
-                    })],
-                );
-                CommandOutcome::Accepted
+                // The front end paints its row optimistically, so the answer
+                // has to carry the session's failure back to that same press
+                // rather than become a log line. Awaited here like a
+                // reconnection: the very request waiting for this outcome is
+                // the one that can un-draw the row.
+                let outcome = match client.send_reaction(chat_jid, message_id, emoji).await {
+                    Ok(Ok(_)) => CommandOutcome::Accepted,
+                    Ok(Err(detail)) => CommandOutcome::Refused(detail),
+                    Err(_) => CommandOutcome::Refused(
+                        "the session stopped before it answered".to_string(),
+                    ),
+                };
+                drop(permit);
+                outcome
             }
             Action::SendAudio(oxidezap_ipc::SendAudio {
                 jid,
@@ -1876,25 +1878,25 @@ impl Bridge {
                 poll_id,
                 selected_option_indices,
             }) => {
-                // Off this loop like a wire vote: the ballot encrypts to
-                // the creation's secret and the network round trip is not
-                // this loop's work. A failure is a log line — the bubble
-                // draws the options, not the outcome, and there is no
-                // staged send to un-draw.
+                // The bubble draws the attempted ballot before the answer, so
+                // a vote it cannot cast has to come back as the refusal that
+                // lets the tap take its mark back — not a log line. Awaited
+                // here like a reconnection, for the same reason as a reaction.
                 let Some(permit) = self.permit() else {
                     return too_busy();
                 };
-                let task =
-                    client.vote_poll(chat_jid.clone(), poll_id.clone(), selected_option_indices);
-                hold(
-                    permit,
-                    [oxidezap_session::spawn(async move {
-                        if let Err(detail) = task.await {
-                            log::warn!("poll vote for {poll_id} failed: {detail}");
-                        }
-                    })],
-                );
-                CommandOutcome::Accepted
+                let outcome = match client
+                    .vote_poll(chat_jid, poll_id, selected_option_indices)
+                    .await
+                {
+                    Ok(Ok(())) => CommandOutcome::Accepted,
+                    Ok(Err(detail)) => CommandOutcome::Refused(detail),
+                    Err(_) => CommandOutcome::Refused(
+                        "the session stopped before it answered".to_string(),
+                    ),
+                };
+                drop(permit);
+                outcome
             }
             // The daemon mirrors what the caller just did to its own call
             // state, because a call placed here is not an event anybody could
@@ -2941,7 +2943,9 @@ mod tests {
     }
 
     /// A reaction holds a permit like a send does: a busy refusal — not a
-    /// queued send — when none is free, and accepted once one is.
+    /// queued send — when none is free. Once one is free the session answers,
+    /// and with no session behind it that answer is the refusal the window's
+    /// optimistic row has to be able to un-draw.
     #[tokio::test]
     async fn a_reaction_without_a_free_permit_is_refused() {
         let mut bridge = connected();
@@ -2953,18 +2957,17 @@ mod tests {
         drop(held);
         assert_eq!(
             bridge.act(&client, send_reaction()).await,
-            CommandOutcome::Accepted
+            CommandOutcome::Refused("no session yet".to_string())
         );
         client.close(Duration::from_secs(1)).await;
     }
 
-    /// A vote is taken, not staged: there is no bubble to un-draw on
-    /// refusal, so the session takes it and a ballot it cannot cast is a
-    /// log line rather than an outcome. Here there is no session at all,
-    /// and the answer is still acceptance — the failure has nowhere to go
-    /// that the voter could act on.
+    /// A vote awaits the session's answer now, because the bubble draws the
+    /// attempted ballot before it. Here there is no session at all, so the
+    /// answer is a refusal carrying the reason — the tap can take its mark
+    /// back rather than keep showing a vote that never reached WhatsApp.
     #[tokio::test]
-    async fn a_vote_is_accepted_and_cast_off_the_command_path() {
+    async fn a_vote_without_a_session_is_refused_with_the_reason() {
         let mut bridge = connected();
         let client = client();
 
@@ -2978,7 +2981,10 @@ mod tests {
                 }),
             )
             .await;
-        assert_eq!(outcome, CommandOutcome::Accepted);
+        assert_eq!(
+            outcome,
+            CommandOutcome::Refused("no session yet".to_string())
+        );
         client.close(Duration::from_secs(1)).await;
     }
 

@@ -12,7 +12,7 @@ use gpui::{App, AppContext as _, Context, Entity, Window};
 use gpui_component::input::{InputEvent, InputState};
 use oxidezap_core::{PluginNode, PluginSlot, PluginSurface, PluginWidget};
 
-use super::WhatsAppApp;
+use super::{WhatsAppApp, what_went_wrong};
 
 /// One text field a plugin published, and what is currently typed in it.
 pub struct PluginField {
@@ -721,9 +721,33 @@ impl WhatsAppApp {
     }
 
     /// Allow, or stop allowing, what a plugin asked to be able to do.
+    ///
+    /// Nothing is drawn optimistically — the daemon republishes the surface
+    /// with the answer in it — so a refusal only has to be said out loud: the
+    /// switch stays where the daemon left it and the notice explains why the
+    /// permission did not change.
     pub fn approve_plugin(&mut self, plugin: &str, approved: bool, cx: &mut Context<Self>) {
         if let Some(client) = self.client.as_ref() {
-            client.plugin_approval(plugin, approved);
+            let waiting = client.plugin_approval(plugin, approved);
+            cx.spawn(async move |entity, cx| {
+                let failure = match waiting.await {
+                    Ok(Ok(())) => None,
+                    Ok(Err(failure)) => Some(failure),
+                    Err(_) => Some(crate::session::Failure::worth_retrying(crate::tr!(
+                        DaemonDisconnectedBeforeAnswer
+                    ))),
+                };
+                if let Some(failure) = failure {
+                    let _ = entity.update(cx, |app, cx| {
+                        app.notify_user(
+                            what_went_wrong(crate::tr!(CouldNotChangePluginPermission), &failure),
+                            super::notices::Tone::Problem,
+                            cx,
+                        );
+                    });
+                }
+            })
+            .detach();
         }
         // Nothing changes here either: the daemon republishes the surface
         // with the answer in it, and drawing the toggle optimistically would

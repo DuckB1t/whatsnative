@@ -177,11 +177,10 @@ impl WhatsAppApp {
     /// may already have selected options that this window cannot see, and
     /// sending its local vector would silently replace those selections.
     /// Offline the daemon would refuse,
-    /// so the tap is refused here where the window can say why. The tap is
-    /// not drawn as confirmed: the daemon may still refuse the ballot, and
-    /// the legacy IPC request has no completion event. The radio therefore
-    /// stays empty and the user can retry rather than being locked into a
-    /// false local result.
+    /// so the tap is refused here where the window can say why. The tap draws
+    /// an attempted ballot, not a confirmed one: the daemon's answer is
+    /// correlated to this request now, so a refusal takes the mark back and
+    /// says why rather than leaving a vote that never reached WhatsApp.
     pub fn vote_poll(
         &mut self,
         chat_jid: &str,
@@ -207,12 +206,32 @@ impl WhatsAppApp {
             return;
         }
         if let Some(client) = self.client.as_ref() {
-            client.vote_poll(chat_jid, message_id, vec![option_index]);
-            self.attempted_poll_votes
-                .insert((chat_jid.to_string(), message_id.to_string()), option_index);
+            let waiting = client.vote_poll(chat_jid, message_id, vec![option_index]);
+            let key = (chat_jid.to_string(), message_id.to_string());
+            self.attempted_poll_votes.insert(key.clone(), option_index);
             self.invalidate_message_cache(chat_jid, cx);
             cx.notify();
-            debug!("poll vote requested for {message_id}; no confirmation on legacy IPC");
+            cx.spawn(async move |entity, cx| {
+                let failure = match waiting.await {
+                    Ok(Ok(())) => None,
+                    Ok(Err(failure)) => Some(failure),
+                    Err(_) => Some(crate::session::Failure::worth_retrying(crate::tr!(
+                        DaemonDisconnectedBeforeAnswer
+                    ))),
+                };
+                if let Some(failure) = failure {
+                    let _ = entity.update(cx, |app, cx| {
+                        app.attempted_poll_votes.remove(&key);
+                        app.invalidate_message_cache(&key.0, cx);
+                        app.notify_user(
+                            what_went_wrong(crate::tr!(CouldNotRecordVote), &failure),
+                            notices::Tone::Problem,
+                            cx,
+                        );
+                    });
+                }
+            })
+            .detach();
         }
     }
 
@@ -280,6 +299,9 @@ impl WhatsAppApp {
         let Some(message) = chat.messages.iter().find(|m| m.id == message_id) else {
             return;
         };
+        // The row before ours goes on, so a refusal can put it back exactly —
+        // including a different emoji of ours this tap may replace.
+        let previous_reactions = message.reactions.clone();
         // Lifted before sending, which needs `self` mutably.
         let chat_jid = chat.jid.clone();
         let already_ours = message
@@ -297,7 +319,36 @@ impl WhatsAppApp {
         // else. `control()` is the process-wide connection beside it, which
         // is why this sent nothing on a page until it moved here.
         if let Some(session) = &self.client {
-            session.send_reaction(&chat_jid, message_id, &send);
+            let waiting = session.send_reaction(&chat_jid, message_id, &send);
+            let target_chat = chat_jid.clone();
+            let target_id = message_id.to_string();
+            cx.spawn(async move |entity, cx| {
+                let failure = match waiting.await {
+                    Ok(Ok(())) => None,
+                    Ok(Err(failure)) => Some(failure),
+                    Err(_) => Some(crate::session::Failure::worth_retrying(crate::tr!(
+                        DaemonDisconnectedBeforeAnswer
+                    ))),
+                };
+                if let Some(failure) = failure {
+                    let _ = entity.update(cx, |app, cx| {
+                        if let Some(chat) = app.find_chat_mut(&target_chat) {
+                            if let Some(message) =
+                                chat.messages.iter_mut().find(|m| m.id == target_id)
+                            {
+                                message.reactions = previous_reactions;
+                            }
+                            app.invalidate_message_cache(&target_chat, cx);
+                        }
+                        app.notify_user(
+                            what_went_wrong(crate::tr!(CouldNotSaveReaction), &failure),
+                            notices::Tone::Problem,
+                            cx,
+                        );
+                    });
+                }
+            })
+            .detach();
         }
         // Optimistic, in the same form the echo will confirm: an empty send
         // removes rather than adds, which is the one spelling

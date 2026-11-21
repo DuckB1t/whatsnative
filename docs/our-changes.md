@@ -153,6 +153,32 @@ one.
 **Gates.** fmt, clippy (`-D warnings`) and the full workspace test suite all
 green; no real lookup was performed.
 
+### 6. Per-request failures for reactions, poll votes and plugin approval
+
+**Problem.** Three user-visible `tell` requests had no completion: a reaction
+or poll vote drawn optimistically stayed on screen after the daemon refused
+it, and a refused plugin permission change was only a log line. Call paths
+were deliberately excluded.
+
+**Change.**
+- `SessionHandle::{send_reaction, vote_poll, plugin_approval}` now use the
+  existing `ask` + `Awaiting::Mutation` correlation and return a oneshot. No
+  new IPC variants, Awaiting variants or frames routing; protocol unchanged.
+- The app layer awaits each answer: on failure it restores the pre-tap
+  reaction map (covers switching emoji), removes the attempted poll vote, and
+  raises a `what_went_wrong(...)` notice with `Tone::Problem`. Plugin approval
+  draws nothing optimistically, so its failure path only notifies.
+- The daemon now awaits `SendReaction`/`VotePoll` inline in `act.rs` and maps
+  task failures to `CommandOutcome::Refused(detail)` instead of dropping them.
+- Typing, read receipts, history/plugin reloads, telemetry and all call paths
+  remain fire-and-forget on purpose: they are ephemeral, republished state or
+  outside the consent boundary.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace test suite all
+green. Synthetic tests only; no real reaction or vote was sent. Session
+errors are plain strings, so they read as permanent in `what_went_wrong` —
+a retryable `CommandOutcome::Failed` is a separate, later change.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

@@ -1530,16 +1530,26 @@ impl SessionHandle {
 
     /// React to a message, or remove our reaction with an empty emoji.
     ///
-    /// Fire-and-forget like typing, not tracked like a send: there is no
-    /// bubble drawn ahead of it to rename or fail, and the network echo
-    /// arriving as `ReactionReceived` is the confirmation. The optimistic
-    /// row the timeline paints is reverted only by the next history load.
-    pub fn send_reaction(&self, chat_jid: &str, message_id: &str, emoji: &str) {
-        self.tell(ClientRequest::SendReaction(Box::new(SendReaction {
-            chat_jid: chat_jid.to_string(),
-            message_id: message_id.to_string(),
-            emoji: emoji.to_string(),
-        })));
+    /// Correlated rather than told: the timeline paints the row before the
+    /// answer, so a refusal has to reach that same press or the optimistic
+    /// row would stand until the next history load. The network echo arriving
+    /// as `ReactionReceived` still confirms a successful one.
+    pub fn send_reaction(
+        &self,
+        chat_jid: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::SendReaction(Box::new(SendReaction {
+                chat_jid: chat_jid.to_string(),
+                message_id: message_id.to_string(),
+                emoji: emoji.to_string(),
+            })),
+            Awaiting::Mutation(tx),
+        );
+        rx
     }
 
     /// Report playback after the audio sink advances.
@@ -1565,16 +1575,26 @@ impl SessionHandle {
 
     /// Vote on a poll by option index.
     ///
-    /// Fire-and-forget like typing: there is no bubble to rename on refusal,
-    /// and the daemon answers a vote it cannot cast with a log line. The
-    /// caller names the chat because a bubble does not know which
-    /// conversation it is drawn in.
-    pub fn vote_poll(&self, chat_jid: &str, poll_id: &str, selected_option_indices: Vec<u32>) {
-        self.tell(ClientRequest::VotePoll(VotePoll {
-            chat_jid: chat_jid.to_string(),
-            poll_id: poll_id.to_string(),
-            selected_option_indices,
-        }));
+    /// Correlated rather than told: the bubble draws the attempted ballot
+    /// before the answer, so a refusal has to reach that same tap and let it
+    /// take the mark back. The caller names the chat because a bubble does
+    /// not know which conversation it is drawn in.
+    pub fn vote_poll(
+        &self,
+        chat_jid: &str,
+        poll_id: &str,
+        selected_option_indices: Vec<u32>,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::VotePoll(VotePoll {
+                chat_jid: chat_jid.to_string(),
+                poll_id: poll_id.to_string(),
+                selected_option_indices,
+            }),
+            Awaiting::Mutation(tx),
+        );
+        rx
     }
 
     /// Ask the daemon to republish the history it holds.
@@ -1797,11 +1817,20 @@ impl SessionHandle {
     /// action id comes from the plugin's own tree, so a plugin could publish
     /// a button labelled "OK" carrying that id and be granted by somebody
     /// pressing the wrong thing.
-    pub fn plugin_approval(&self, plugin: &str, approved: bool) {
-        self.tell(ClientRequest::PluginApproval {
-            plugin: plugin.to_string(),
-            approved,
-        });
+    pub fn plugin_approval(
+        &self,
+        plugin: &str,
+        approved: bool,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::PluginApproval {
+                plugin: plugin.to_string(),
+                approved,
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
     }
 
     /// Ask the daemon to read its plugin folder again and run what is in it.
