@@ -293,6 +293,33 @@ id they need was never captured. The prepared `core::Channel*` types were inert.
 (2601 passed, 44 ignored). Synthetic JIDs and fixtures only; no channel post,
 poll, reaction or vote was sent to the paired account.
 
+### 11. Wire/daemon parity for protocol 50 operations
+
+**Problem.** The new blocklist, username, event, community and channel requests
+existed only on the GUI's IPC path. The CLI speaks `oxidezap-wire`, whose own
+request enum did not carry them, so a terminal had no way to ask for the same
+operations.
+
+**Change.**
+- `oxidezap-wire` gains the 14 requests and six typed answers, with wire-owned
+  DTOs that mirror core/IPC field names and serde spellings. It still has no
+  dependency on `oxidezap-core`: parity is the JSON contract, not Rust type
+  identity, so the CLI dependency stays small.
+- The daemon's new `session_bridge::wire_domain` converts each wire payload to
+  the session's domain type (and results back) field by field. No JSON
+  round-trip: a renamed field fails to compile instead of arriving as a
+  default. Every request is routed out-of-band under its own request id and
+  needs a live connection, including the two network reads.
+- `local_id` on a channel post is preserved from the CLI too; a terminal simply
+  sends `None` when it draws no optimistic bubble.
+
+This commit adds the transport and daemon half. The CLI surface itself follows
+in the next commit.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2610 passed, 44 ignored). Synthetic fixtures only; no account operation was
+performed.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

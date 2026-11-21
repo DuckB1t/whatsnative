@@ -448,7 +448,25 @@ fn wire_needs_network(request: &oxidezap_wire::request::ClientRequest) -> bool {
         | R::DownloadMedia { .. }
         | R::RetryMedia { .. }
         | R::BackfillMedia { .. }
-        | R::HistoryBackfill { .. } => true,
+        | R::HistoryBackfill { .. }
+        // Protocol 50 block, username and channel operations all reach the
+        // session. The block list and username lookup are typed reads in the
+        // wire's access gate, but a read from the server still needs a live
+        // connection: this gate answers a different question from `access`.
+        | R::Blocklist
+        | R::Block(..)
+        | R::Unblock(..)
+        | R::LookupUsername { .. }
+        | R::CreateEvent(..)
+        | R::RespondEvent(..)
+        | R::CreateCommunity(..)
+        | R::CreateCommunitySubgroup(..)
+        | R::LinkCommunitySubgroups(..)
+        | R::JoinCommunitySubgroup(..)
+        | R::PostToChannel(..)
+        | R::CreateChannelPoll(..)
+        | R::ReactToChannel(..)
+        | R::VoteChannelPoll(..) => true,
     }
 }
 

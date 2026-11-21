@@ -1199,6 +1199,23 @@ pub(super) async fn handle_wire_request(
         | WireRequest::MuteChat { .. }
         | WireRequest::ArchiveChat { .. }
         | WireRequest::SetPresence { .. }
+        // Protocol 50 additions: blocklist and usernames, events, communities
+        // and the native channel operations. Their typed answers arrive from
+        // the session under the request id, so none gets a second `Ack` here.
+        | WireRequest::Blocklist
+        | WireRequest::Block(..)
+        | WireRequest::Unblock(..)
+        | WireRequest::LookupUsername { .. }
+        | WireRequest::CreateEvent(..)
+        | WireRequest::RespondEvent(..)
+        | WireRequest::CreateCommunity(..)
+        | WireRequest::CreateCommunitySubgroup(..)
+        | WireRequest::LinkCommunitySubgroups(..)
+        | WireRequest::JoinCommunitySubgroup(..)
+        | WireRequest::PostToChannel(..)
+        | WireRequest::CreateChannelPoll(..)
+        | WireRequest::ReactToChannel(..)
+        | WireRequest::VoteChannelPoll(..)
         | WireRequest::RequestPairCode { .. }
         | WireRequest::ListCalls { .. } => {
             out_of_band_wire(hub, commands, outbox, id, request).await

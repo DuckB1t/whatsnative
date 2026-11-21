@@ -2,7 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{GroupParticipantAction, PresenceState};
+use crate::dto::{
+    BlockTarget, ChannelPollDraft, ChannelReact, ChannelVotePoll, CommunityDraft, CreateEvent,
+    GroupParticipantAction, JoinSubgroupRequest, LinkSubgroupsRequest, PostToChannel,
+    PresenceState, RespondEvent, SubgroupDraft,
+};
 
 /// What a request does to the account or to local state.
 ///
@@ -313,6 +317,46 @@ pub enum ClientRequest {
         channel_jid: String,
     },
 
+    // --- Blocklist & usernames (protocol 50) ---
+    /// Read the account's block list.
+    Blocklist,
+    /// Put one address on the account's block list.
+    Block(BlockTarget),
+    /// Take one address off the account's block list.
+    Unblock(BlockTarget),
+    /// Resolve a Meta username through the account held by the daemon.
+    LookupUsername {
+        username: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        username_key: Option<String>,
+    },
+
+    // --- Events (protocol 50) ---
+    /// Create a calendar event in a chat.
+    CreateEvent(Box<CreateEvent>),
+    /// Answer a calendar invitation.
+    RespondEvent(RespondEvent),
+
+    // --- Communities (protocol 50) ---
+    /// Create a community and, when asked, its general chat.
+    CreateCommunity(CommunityDraft),
+    /// Create a subgroup under an existing community.
+    CreateCommunitySubgroup(SubgroupDraft),
+    /// Attach existing groups to a community, with their visibility.
+    LinkCommunitySubgroups(LinkSubgroupsRequest),
+    /// Join one community's subgroup.
+    JoinCommunitySubgroup(JoinSubgroupRequest),
+
+    // --- Native channels (protocol 50) ---
+    /// Post plain text to a channel.
+    PostToChannel(PostToChannel),
+    /// Open a poll in a channel.
+    CreateChannelPoll(ChannelPollDraft),
+    /// React to a channel message, or remove our reaction with an empty emoji.
+    ReactToChannel(ChannelReact),
+    /// Replace a channel poll ballot by option index.
+    VoteChannelPoll(ChannelVotePoll),
+
     // --- Calls & History ---
     ListCalls {
         #[serde(default = "default_limit")]
@@ -415,6 +459,10 @@ impl ClientRequest {
             | Self::DoctorCheck
             | Self::ListAccounts => Access::Read,
 
+            // Both answer with a typed payload under the request id and change
+            // nothing: asking for a list or resolving a handle stays a read.
+            Self::Blocklist | Self::LookupUsername { .. } => Access::Read,
+
             // Listing groups reaches the server for the participating query,
             // but writes nothing: a read-only connection may still list them.
             Self::ListGroups => Access::Read,
@@ -470,6 +518,21 @@ impl ClientRequest {
             | Self::SetPresence { .. }
             | Self::ClearMediaCache
             | Self::ForgetSession
+            // Protocol 50 account and channel operations. A block, event,
+            // community or channel write reaches the session, not just local
+            // state, so a read-only connection must refuse all of them.
+            | Self::Block(..)
+            | Self::Unblock(..)
+            | Self::CreateEvent(..)
+            | Self::RespondEvent(..)
+            | Self::CreateCommunity(..)
+            | Self::CreateCommunitySubgroup(..)
+            | Self::LinkCommunitySubgroups(..)
+            | Self::JoinCommunitySubgroup(..)
+            | Self::PostToChannel(..)
+            | Self::CreateChannelPoll(..)
+            | Self::ReactToChannel(..)
+            | Self::VoteChannelPoll(..)
             | Self::Shutdown => Access::Write,
         }
     }
@@ -499,6 +562,11 @@ fn default_backfill_count() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{Access, ClientRequest as R};
+    use crate::dto::{
+        BlockTarget, ChannelPollDraft, ChannelReact, ChannelVotePoll, CommunityDraft,
+        CommunityVisibility, CreateEvent, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest,
+        PostToChannel, RespondEvent, SubgroupDraft,
+    };
 
     /// The requests the old `matches!` list left out. Each one changes account
     /// or local state, so a read-only connection must refuse it.
@@ -586,6 +654,102 @@ mod tests {
             R::ListAccounts,
         ] {
             assert_eq!(request.access(), Access::Read, "{request:?}");
+        }
+    }
+
+    /// Every new protocol 50 mutation reaches the account, so a read-only
+    /// connection must refuse it.
+    #[test]
+    fn new_mutations_are_writes() {
+        for request in [
+            R::Block(BlockTarget {
+                jid: "15555550100@s.whatsapp.net".into(),
+            }),
+            R::Unblock(BlockTarget {
+                jid: "100000000000001@lid".into(),
+            }),
+            R::CreateEvent(Box::new(CreateEvent {
+                jid: "155555500001@g.us".into(),
+                name: "Synthetic standup".into(),
+                description: None,
+                start_time: None,
+                end_time: None,
+                join_link: None,
+                location: None,
+                is_scheduled_call: false,
+                extra_guests_allowed: false,
+            })),
+            R::RespondEvent(RespondEvent {
+                chat_jid: "155555500001@g.us".into(),
+                event_message_id: "SYNTHETIC-1".into(),
+                response: EventRsvp::Going,
+                extra_guest_count: None,
+            }),
+            R::CreateCommunity(CommunityDraft {
+                name: "Synthetic community".into(),
+                description: None,
+                closed: false,
+                allow_non_admin_sub_group_creation: false,
+                create_general_chat: false,
+            }),
+            R::CreateCommunitySubgroup(SubgroupDraft {
+                parent_jid: "155555500001@g.us".into(),
+                name: "Synthetic subgroup".into(),
+                participants: vec![],
+                visibility: CommunityVisibility::Visible,
+            }),
+            R::LinkCommunitySubgroups(LinkSubgroupsRequest {
+                community_jid: "155555500001@g.us".into(),
+                groups: vec![],
+            }),
+            R::JoinCommunitySubgroup(JoinSubgroupRequest {
+                community_jid: "155555500001@g.us".into(),
+                subgroup_jid: "155555500002@g.us".into(),
+            }),
+            R::PostToChannel(PostToChannel {
+                channel_jid: "155555500001@newsletter".into(),
+                text: "Synthetic post".into(),
+                local_id: None,
+            }),
+            R::CreateChannelPoll(ChannelPollDraft {
+                channel_jid: "155555500001@newsletter".into(),
+                question: "Synthetic question".into(),
+                options: vec!["First".into(), "Second".into()],
+                selectable_count: 1,
+            }),
+            R::ReactToChannel(ChannelReact {
+                channel_jid: "155555500001@newsletter".into(),
+                message_id: "SYNTHETIC-1".into(),
+                emoji: String::new(),
+            }),
+            R::VoteChannelPoll(ChannelVotePoll {
+                channel_jid: "155555500001@newsletter".into(),
+                poll_message_id: "SYNTHETIC-2".into(),
+                option_indices: vec![0],
+            }),
+        ] {
+            assert_eq!(request.access(), Access::Write, "{request:?}");
+            assert!(request.is_mutation(), "{request:?}");
+        }
+    }
+
+    /// Reading a list or resolving a handle changes nothing, so a read-only
+    /// agent keeps both of them.
+    #[test]
+    fn new_reads_stay_reads() {
+        for request in [
+            R::Blocklist,
+            R::LookupUsername {
+                username: "example.handle".into(),
+                username_key: None,
+            },
+            R::LookupUsername {
+                username: "example.handle".into(),
+                username_key: Some("0000".into()),
+            },
+        ] {
+            assert_eq!(request.access(), Access::Read, "{request:?}");
+            assert!(!request.is_mutation(), "{request:?}");
         }
     }
 }

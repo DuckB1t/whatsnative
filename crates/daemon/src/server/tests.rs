@@ -1573,6 +1573,326 @@ fn wire_requests_classify_their_network_dependency() {
     }
 }
 
+/// The protocol 50 DTOs are a serde mirror of core, not the same Rust type.
+/// The conversions are the one place that names every field, so a value that
+/// is absent on one side has to stay absent on the other.
+#[test]
+fn wire_family_dtos_convert_without_losing_defaults() {
+    use oxidezap_core as core;
+    use oxidezap_wire::dto as wire;
+
+    use crate::session_bridge::{
+        blocked_contact_to_wire, channel_poll_created_to_wire, channel_poll_draft_from_wire,
+        channel_react_from_wire, channel_vote_poll_from_wire, community_draft_from_wire,
+        community_operation_result_to_wire, created_message_ref_to_wire, event_draft_from_wire,
+        event_location_from_wire, event_rsvp_from_wire, join_subgroup_request_from_wire,
+        link_subgroups_request_from_wire, subgroup_draft_from_wire, username_lookup_result_to_wire,
+    };
+
+    // A bare card keeps its absent fields absent; a pin with no name stays a
+    // pin with no name rather than acquiring a default label.
+    let bare = event_draft_from_wire(wire::CreateEvent {
+        jid: "155555500001@g.us".into(),
+        name: "Synthetic standup".into(),
+        description: None,
+        start_time: None,
+        end_time: None,
+        join_link: None,
+        location: None,
+        is_scheduled_call: false,
+        extra_guests_allowed: false,
+    });
+    assert_eq!(bare.name, "Synthetic standup");
+    assert_eq!(bare.description, None);
+    assert_eq!(bare.start_time, None);
+    assert_eq!(bare.end_time, None);
+    assert_eq!(bare.join_link, None);
+    assert_eq!(bare.location, None);
+    assert!(!bare.is_scheduled_call);
+    assert!(!bare.extra_guests_allowed);
+    assert_eq!(
+        event_location_from_wire(wire::EventLocation {
+            degrees_latitude: -12.5,
+            degrees_longitude: 40.25,
+            name: None,
+        }),
+        core::EventLocation {
+            degrees_latitude: -12.5,
+            degrees_longitude: 40.25,
+            name: None,
+        }
+    );
+    assert_eq!(
+        event_rsvp_from_wire(wire::EventRsvp::Maybe),
+        core::EventRsvp::Maybe
+    );
+
+    // Drafts and requests keep empty collections empty and false flags false;
+    // nothing here turns an omitted value into a present one.
+    assert_eq!(
+        community_draft_from_wire(wire::CommunityDraft {
+            name: "Synthetic community".into(),
+            description: None,
+            closed: false,
+            allow_non_admin_sub_group_creation: false,
+            create_general_chat: false,
+        }),
+        core::CommunityDraft {
+            name: "Synthetic community".into(),
+            description: None,
+            closed: false,
+            allow_non_admin_sub_group_creation: false,
+            create_general_chat: false,
+        }
+    );
+    assert_eq!(
+        subgroup_draft_from_wire(wire::SubgroupDraft {
+            parent_jid: "155555500001@g.us".into(),
+            name: "Synthetic subgroup".into(),
+            participants: vec![],
+            visibility: wire::CommunityVisibility::Hidden,
+        }),
+        core::SubgroupDraft {
+            parent_jid: "155555500001@g.us".into(),
+            name: "Synthetic subgroup".into(),
+            participants: vec![],
+            visibility: core::CommunityVisibility::Hidden,
+        }
+    );
+    assert_eq!(
+        link_subgroups_request_from_wire(wire::LinkSubgroupsRequest {
+            community_jid: "155555500001@g.us".into(),
+            groups: vec![],
+        }),
+        core::LinkSubgroupsRequest {
+            community_jid: "155555500001@g.us".into(),
+            groups: vec![],
+        }
+    );
+    assert_eq!(
+        join_subgroup_request_from_wire(wire::JoinSubgroupRequest {
+            community_jid: "155555500001@g.us".into(),
+            subgroup_jid: "155555500002@g.us".into(),
+        }),
+        core::JoinSubgroupRequest {
+            community_jid: "155555500001@g.us".into(),
+            subgroup_jid: "155555500002@g.us".into(),
+        }
+    );
+    assert_eq!(
+        channel_poll_draft_from_wire(wire::ChannelPollDraft {
+            channel_jid: "155555500001@newsletter".into(),
+            question: "Synthetic question".into(),
+            options: vec![],
+            selectable_count: 1,
+        }),
+        core::ChannelPollDraft {
+            channel_jid: "155555500001@newsletter".into(),
+            question: "Synthetic question".into(),
+            options: vec![],
+            selectable_count: 1,
+        }
+    );
+    assert_eq!(
+        channel_react_from_wire(wire::ChannelReact {
+            channel_jid: "155555500001@newsletter".into(),
+            message_id: "SYNTHETIC-1".into(),
+            emoji: String::new(),
+        })
+        .emoji,
+        ""
+    );
+    assert!(
+        channel_vote_poll_from_wire(wire::ChannelVotePoll {
+            channel_jid: "155555500001@newsletter".into(),
+            poll_message_id: "SYNTHETIC-2".into(),
+            option_indices: vec![],
+        })
+        .option_indices
+        .is_empty()
+    );
+
+    // Results keep optional fields optional, typed outcomes distinct, and a
+    // default result empty rather than inventing a warning or a group.
+    assert_eq!(
+        blocked_contact_to_wire(core::BlockedContact {
+            jid: "155555500001@s.whatsapp.net".into(),
+            name: None,
+            blocked_at: None,
+        }),
+        wire::BlockedContact {
+            jid: "155555500001@s.whatsapp.net".into(),
+            name: None,
+            blocked_at: None,
+        }
+    );
+    assert_eq!(
+        username_lookup_result_to_wire(core::UsernameLookupResult::KeyRequired { username: None }),
+        wire::UsernameLookupResult::KeyRequired { username: None }
+    );
+    assert_eq!(
+        username_lookup_result_to_wire(core::UsernameLookupResult::InvalidUsername),
+        wire::UsernameLookupResult::InvalidUsername
+    );
+    assert_eq!(
+        created_message_ref_to_wire(core::CreatedMessageRef {
+            chat_jid: "155555500001@g.us".into(),
+            message_id: "SYNTHETIC-3".into(),
+        }),
+        wire::CreatedMessageRef {
+            chat_jid: "155555500001@g.us".into(),
+            message_id: "SYNTHETIC-3".into(),
+        }
+    );
+    assert_eq!(
+        community_operation_result_to_wire(core::CommunityOperationResult::default()),
+        wire::CommunityOperationResult::default()
+    );
+    assert_eq!(
+        community_operation_result_to_wire(core::CommunityOperationResult {
+            groups: vec![core::CommunityGroupRef {
+                jid: "155555500001@g.us".into(),
+                subject: Some("Synthetic group".into()),
+                description: None,
+            }],
+            linked_jids: vec!["155555500002@g.us".into()],
+            failed_groups: vec![core::CommunitySubgroupFailure {
+                jid: "155555500003@g.us".into(),
+                code: 403,
+            }],
+            warnings: vec![core::CommunityWarning {
+                step: core::CommunityWarningStep::JoinApprovalPending,
+                jid: Some("155555500004@g.us".into()),
+                detail: None,
+            }],
+        }),
+        wire::CommunityOperationResult {
+            groups: vec![wire::CommunityGroupRef {
+                jid: "155555500001@g.us".into(),
+                subject: Some("Synthetic group".into()),
+                description: None,
+            }],
+            linked_jids: vec!["155555500002@g.us".into()],
+            failed_groups: vec![wire::CommunitySubgroupFailure {
+                jid: "155555500003@g.us".into(),
+                code: 403,
+            }],
+            warnings: vec![wire::CommunityWarning {
+                step: wire::CommunityWarningStep::JoinApprovalPending,
+                jid: Some("155555500004@g.us".into()),
+                detail: None,
+            }],
+        }
+    );
+    assert_eq!(
+        channel_poll_created_to_wire(core::ChannelPollCreated {
+            channel_jid: "155555500001@newsletter".into(),
+            message_id: "SYNTHETIC-4".into(),
+        }),
+        wire::ChannelPollCreated {
+            channel_jid: "155555500001@newsletter".into(),
+            message_id: "SYNTHETIC-4".into(),
+        }
+    );
+}
+
+/// The protocol 50 additions all reach WhatsApp, including the two that the
+/// wire's read-only gate classifies as reads. `access` answers "may a
+/// read-only connection ask"; `needs_network` answers "can it be answered
+/// while offline". They are deliberately different questions.
+#[test]
+fn new_family_wire_requests_need_the_live_connection() {
+    use oxidezap_wire::dto as wire;
+    use oxidezap_wire::request::ClientRequest as WireRequest;
+
+    let action = |request: WireRequest| Action::Wire {
+        id: 1,
+        request,
+        answer_to: outbox(),
+    };
+    let block = wire::BlockTarget {
+        jid: "155555500001@s.whatsapp.net".into(),
+    };
+    let lookup = WireRequest::LookupUsername {
+        username: "synthetic_user".into(),
+        username_key: None,
+    };
+
+    for request in [
+        WireRequest::Blocklist,
+        WireRequest::Block(block.clone()),
+        WireRequest::Unblock(block),
+        lookup.clone(),
+        WireRequest::CreateEvent(Box::new(wire::CreateEvent {
+            jid: "155555500001@g.us".into(),
+            name: "Synthetic standup".into(),
+            description: None,
+            start_time: None,
+            end_time: None,
+            join_link: None,
+            location: None,
+            is_scheduled_call: false,
+            extra_guests_allowed: false,
+        })),
+        WireRequest::RespondEvent(wire::RespondEvent {
+            chat_jid: "155555500001@g.us".into(),
+            event_message_id: "SYNTHETIC-1".into(),
+            response: wire::EventRsvp::Going,
+            extra_guest_count: None,
+        }),
+        WireRequest::CreateCommunity(wire::CommunityDraft {
+            name: "Synthetic community".into(),
+            description: None,
+            closed: false,
+            allow_non_admin_sub_group_creation: false,
+            create_general_chat: false,
+        }),
+        WireRequest::CreateCommunitySubgroup(wire::SubgroupDraft {
+            parent_jid: "155555500001@g.us".into(),
+            name: "Synthetic subgroup".into(),
+            participants: vec![],
+            visibility: wire::CommunityVisibility::Visible,
+        }),
+        WireRequest::LinkCommunitySubgroups(wire::LinkSubgroupsRequest {
+            community_jid: "155555500001@g.us".into(),
+            groups: vec![wire::LinkSubgroupTarget {
+                jid: "155555500002@g.us".into(),
+                visibility: wire::CommunityVisibility::Hidden,
+            }],
+        }),
+        WireRequest::JoinCommunitySubgroup(wire::JoinSubgroupRequest {
+            community_jid: "155555500001@g.us".into(),
+            subgroup_jid: "155555500002@g.us".into(),
+        }),
+        WireRequest::PostToChannel(wire::PostToChannel {
+            channel_jid: "155555500001@newsletter".into(),
+            text: "Synthetic post".into(),
+            local_id: None,
+        }),
+        WireRequest::CreateChannelPoll(wire::ChannelPollDraft {
+            channel_jid: "155555500001@newsletter".into(),
+            question: "Synthetic question".into(),
+            options: vec![],
+            selectable_count: 1,
+        }),
+        WireRequest::ReactToChannel(wire::ChannelReact {
+            channel_jid: "155555500001@newsletter".into(),
+            message_id: "SYNTHETIC-2".into(),
+            emoji: String::new(),
+        }),
+        WireRequest::VoteChannelPoll(wire::ChannelVotePoll {
+            channel_jid: "155555500001@newsletter".into(),
+            poll_message_id: "SYNTHETIC-3".into(),
+            option_indices: vec![],
+        }),
+    ] {
+        assert!(action(request.clone()).needs_network(), "{request:?}");
+    }
+
+    assert_eq!(WireRequest::Blocklist.access(), oxidezap_wire::Access::Read);
+    assert_eq!(lookup.access(), oxidezap_wire::Access::Read);
+}
+
 /// A clear-cache reset must survive being offline.
 ///
 /// The reset itself is local — it forgets what the resolver knows — while the

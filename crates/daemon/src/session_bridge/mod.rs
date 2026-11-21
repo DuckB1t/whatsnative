@@ -11,7 +11,8 @@
 //! loop below is the only thing that knows about all of them: [`action`] is
 //! what a client may ask for, [`translate`] is the event stream becoming
 //! state, [`act`] is a command becoming work, [`read_tracker`] is the unread
-//! model those two share, and [`externalize`] is where a frame's media bytes
+//! model those two share, [`wire_domain`] is the protocol's payloads becoming
+//! session types and back, and [`externalize`] is where a frame's media bytes
 //! go. The `Bridge` itself stays here, with the loop that drives it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,6 +33,7 @@ mod downloads;
 mod externalize;
 mod read_tracker;
 mod translate;
+mod wire_domain;
 mod wire_events;
 
 #[cfg(test)]
@@ -44,6 +46,14 @@ pub use action::{
     AccountDisposition, AccountExit, Action, CommandOutcome, Commands, Outbox, SessionCommand,
 };
 pub(crate) use externalize::externalize_media;
+#[cfg(test)]
+pub(crate) use wire_domain::{
+    blocked_contact_to_wire, channel_poll_created_to_wire, channel_poll_draft_from_wire,
+    channel_react_from_wire, channel_vote_poll_from_wire, community_draft_from_wire,
+    community_operation_result_to_wire, created_message_ref_to_wire, event_draft_from_wire,
+    event_location_from_wire, event_rsvp_from_wire, join_subgroup_request_from_wire,
+    link_subgroups_request_from_wire, subgroup_draft_from_wire, username_lookup_result_to_wire,
+};
 pub(crate) use wire_events::{connection_status_of, translate_wire_frame};
 
 use act::MAX_IN_FLIGHT;

@@ -17,11 +17,18 @@ use wacore_binary::jid::observe_str;
 use super::externalize::externalize_messages;
 use super::read_tracker::ReadRecord;
 use super::translate::chat_updated;
+use super::wire_domain::{
+    blocked_contact_to_wire, channel_poll_created_to_wire, channel_poll_draft_from_wire,
+    channel_react_from_wire, channel_vote_poll_from_wire, community_draft_from_wire,
+    community_operation_result_to_wire, created_message_ref_to_wire, event_draft_from_wire,
+    event_rsvp_from_wire, join_subgroup_request_from_wire, link_subgroups_request_from_wire,
+    subgroup_draft_from_wire, username_lookup_result_to_wire,
+};
 use super::wire_events::{chat_message_to_dto, chat_to_dto};
 use super::{Action, Bridge, CommandOutcome, Outbox, SessionCommand};
 use crate::state::Change;
 use oxidezap_wire::dto::{
-    ChannelDto, ChatDto, ContactDto, GroupDto, GroupJoinRequestDto,
+    BlockTarget, ChannelDto, ChatDto, ContactDto, GroupDto, GroupJoinRequestDto,
     GroupParticipantAction as WireParticipantAction, GroupParticipantDto, MessageDto, PollDto,
     PollOptionDto, PresenceState,
 };
@@ -1754,6 +1761,132 @@ impl Bridge {
                 let task = client.purge_messages(chat_jid);
                 run_wire(answer_to.clone(), id, reply, permit, task, |purged| {
                     DaemonResponse::MessagesPurged { purged }
+                });
+            }
+            // --- Protocol 50 ---
+            //
+            // These answer under the request's id from the session task that
+            // did the work. A block list, a typed username answer, a created
+            // card or a partial community result is the answer itself, not an
+            // acknowledgement that arrives beside it.
+            WireRequest::Blocklist => {
+                let task = client.blocklist();
+                run_wire(answer_to.clone(), id, reply, permit, task, |entries| {
+                    DaemonResponse::Blocklist {
+                        entries: entries.into_iter().map(blocked_contact_to_wire).collect(),
+                    }
+                });
+            }
+            WireRequest::Block(BlockTarget { jid }) => {
+                let task = client.block(jid);
+                run_wire(answer_to.clone(), id, reply, permit, task, |()| {
+                    DaemonResponse::Ack
+                });
+            }
+            WireRequest::Unblock(BlockTarget { jid }) => {
+                let task = client.unblock(jid);
+                run_wire(answer_to.clone(), id, reply, permit, task, |()| {
+                    DaemonResponse::Ack
+                });
+            }
+            WireRequest::LookupUsername {
+                username,
+                username_key,
+            } => {
+                let task = client.find_by_username(username, username_key);
+                run_wire(answer_to.clone(), id, reply, permit, task, |result| {
+                    DaemonResponse::UsernameLookup {
+                        result: username_lookup_result_to_wire(result),
+                    }
+                });
+            }
+            WireRequest::CreateEvent(event) => {
+                let jid = event.jid.clone();
+                let task = client.create_event(jid, event_draft_from_wire(*event));
+                run_wire(answer_to.clone(), id, reply, permit, task, |created| {
+                    DaemonResponse::EventCreated {
+                        created: created_message_ref_to_wire(created),
+                    }
+                });
+            }
+            WireRequest::RespondEvent(response) => {
+                let oxidezap_wire::dto::RespondEvent {
+                    chat_jid,
+                    event_message_id,
+                    response,
+                    extra_guest_count,
+                } = response;
+                let task = client.respond_event(
+                    chat_jid,
+                    event_message_id,
+                    event_rsvp_from_wire(response),
+                    extra_guest_count,
+                );
+                run_wire(answer_to.clone(), id, reply, permit, task, |()| {
+                    DaemonResponse::Ack
+                });
+            }
+            WireRequest::CreateCommunity(draft) => {
+                let task = client.create_community(community_draft_from_wire(draft));
+                run_wire(answer_to.clone(), id, reply, permit, task, |result| {
+                    DaemonResponse::CommunityResult {
+                        result: community_operation_result_to_wire(result),
+                    }
+                });
+            }
+            WireRequest::CreateCommunitySubgroup(draft) => {
+                let task = client.create_community_subgroup(subgroup_draft_from_wire(draft));
+                run_wire(answer_to.clone(), id, reply, permit, task, |result| {
+                    DaemonResponse::CommunityResult {
+                        result: community_operation_result_to_wire(result),
+                    }
+                });
+            }
+            WireRequest::LinkCommunitySubgroups(request) => {
+                let task =
+                    client.link_community_subgroups(link_subgroups_request_from_wire(request));
+                run_wire(answer_to.clone(), id, reply, permit, task, |result| {
+                    DaemonResponse::CommunityResult {
+                        result: community_operation_result_to_wire(result),
+                    }
+                });
+            }
+            WireRequest::JoinCommunitySubgroup(request) => {
+                let task = client.join_community_subgroup(join_subgroup_request_from_wire(request));
+                run_wire(answer_to.clone(), id, reply, permit, task, |result| {
+                    DaemonResponse::CommunityResult {
+                        result: community_operation_result_to_wire(result),
+                    }
+                });
+            }
+            WireRequest::PostToChannel(request) => {
+                // A CLI post has no optimistic bubble; a GUI one carries the
+                // id it drew, so the field is passed through rather than
+                // replaced with a generated id here.
+                let task =
+                    client.post_to_channel(request.channel_jid, request.text, request.local_id);
+                run_wire(answer_to.clone(), id, reply, permit, task, |()| {
+                    DaemonResponse::Ack
+                });
+            }
+            WireRequest::CreateChannelPoll(draft) => {
+                let task = client.create_channel_poll(channel_poll_draft_from_wire(draft));
+                run_wire(answer_to.clone(), id, reply, permit, task, |created| {
+                    DaemonResponse::ChannelPollCreated {
+                        created: channel_poll_created_to_wire(created),
+                    }
+                });
+            }
+            WireRequest::ReactToChannel(react) => {
+                let task = client.react_to_channel(channel_react_from_wire(react));
+                run_wire(answer_to.clone(), id, reply, permit, task, |()| {
+                    DaemonResponse::Ack
+                });
+            }
+            WireRequest::VoteChannelPoll(vote) => {
+                let task = client.vote_channel_poll(channel_vote_poll_from_wire(vote));
+                run_wire(answer_to.clone(), id, reply, permit, task, |()| {
+                    DaemonResponse::Ack
                 });
             }
             _ => {

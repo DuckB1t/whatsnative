@@ -3,8 +3,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{
-    AccountDto, CallEventDto, ChannelDto, ChatDto, ConnectionStatusDto, ContactDto, DoctorDto,
+    AccountDto, BlockedContact, CallEventDto, ChannelDto, ChannelPollCreated, ChatDto,
+    CommunityOperationResult, ConnectionStatusDto, ContactDto, CreatedMessageRef, DoctorDto,
     GroupDto, GroupJoinRequestDto, MessageDto, PollDto, ProfileDto, StorageDto,
+    UsernameLookupResult,
 };
 use crate::envelope::PageCursor;
 
@@ -31,6 +33,10 @@ pub enum DaemonResponse {
         id: String,
         timestamp_ms: i64,
         enqueued: bool,
+    },
+    /// The card an event creation made, under its request's id.
+    EventCreated {
+        created: CreatedMessageRef,
     },
 
     // --- Chats ---
@@ -61,6 +67,16 @@ pub enum DaemonResponse {
         jid: Option<String>,
     },
 
+    // --- Blocklist & usernames (protocol 50) ---
+    /// The account's block list, answering `Blocklist`.
+    Blocklist {
+        entries: Vec<BlockedContact>,
+    },
+    /// The typed answer to a username lookup, answering `LookupUsername`.
+    UsernameLookup {
+        result: UsernameLookupResult,
+    },
+
     // --- Groups ---
     Groups {
         groups: Vec<GroupDto>,
@@ -79,6 +95,10 @@ pub enum DaemonResponse {
     GroupJoinRequests {
         requests: Vec<GroupJoinRequestDto>,
     },
+    /// The whole answer to a community operation, including partial failures.
+    CommunityResult {
+        result: CommunityOperationResult,
+    },
 
     // --- Polls ---
     Polls {
@@ -91,6 +111,10 @@ pub enum DaemonResponse {
         channels: Vec<ChannelDto>,
     },
     Channel(ChannelDto),
+    /// The message a channel poll creation made, under its request's id.
+    ChannelPollCreated {
+        created: ChannelPollCreated,
+    },
 
     // --- Maintenance ---
     MediaBackfilled {

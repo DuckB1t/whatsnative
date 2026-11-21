@@ -2,6 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Mirrors the `is_false` spelling used by core and IPC so a skipped boolean
+/// stays absent from the frame rather than becoming `false`.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Snapshot of the daemon's connection to WhatsApp servers.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionStatusDto {
@@ -279,6 +285,276 @@ pub struct DoctorDto {
     pub database_bytes: u64,
     pub media_cache_dir: String,
     pub media_cache_bytes: u64,
+}
+
+// --- Protocol 50 payloads ---
+//
+// These are wire-owned mirrors of the shapes core and IPC already put on the
+// socket. This crate deliberately has no dependency on either: the contract is
+// serde parity — the same field names, nesting and spellings — not Rust type
+// identity. Keep the attributes in step with the definitions they mirror.
+
+/// One address on the account's block list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockedContact {
+    /// The address as the server wrote it: a PN or a LID, never a group.
+    pub jid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Unix seconds, when the server supplied a time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_at: Option<u64>,
+}
+
+/// The account a username resolved to.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ResolvedUsername {
+    pub jid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pn_jid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_name: Option<String>,
+}
+
+/// What a username lookup answered. `KeyRequired` is distinct from `NotFound`:
+/// a second ask with the account's key can still resolve the handle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsernameLookupResult {
+    Found(ResolvedUsername),
+    KeyRequired {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        username: Option<String>,
+    },
+    NotFound,
+    InvalidUsername,
+}
+
+/// Where an event happens. Coordinates are protocol floats, so `PartialEq` is
+/// derived and `Eq` is asserted explicitly, the same as core: protocol
+/// coordinates are finite and a NaN is not a location.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EventLocation {
+    pub degrees_latitude: f64,
+    pub degrees_longitude: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl Eq for EventLocation {}
+
+/// What somebody answered on an invitation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventRsvp {
+    Going,
+    NotGoing,
+    Maybe,
+}
+
+/// The message an operation created, addressed so a front end can select it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatedMessageRef {
+    pub chat_jid: String,
+    pub message_id: String,
+}
+
+/// Whether a community or subgroup is listed for the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommunityVisibility {
+    Visible,
+    Hidden,
+}
+
+/// What creating a community was asked to do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommunityDraft {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub closed: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_non_admin_sub_group_creation: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub create_general_chat: bool,
+}
+
+/// A subgroup to create under an existing community.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubgroupDraft {
+    pub parent_jid: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub participants: Vec<String>,
+    pub visibility: CommunityVisibility,
+}
+
+/// One group to attach to a community, with the listing it should get.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkSubgroupTarget {
+    pub jid: String,
+    pub visibility: CommunityVisibility,
+}
+
+/// Attach existing groups to a community in one operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkSubgroupsRequest {
+    pub community_jid: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<LinkSubgroupTarget>,
+}
+
+/// Ask to join a community's subgroup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JoinSubgroupRequest {
+    pub community_jid: String,
+    pub subgroup_jid: String,
+}
+
+/// A group as the community list knows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommunityGroupRef {
+    pub jid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// One group an operation could not handle, so the rest can still be reported.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommunitySubgroupFailure {
+    pub jid: String,
+    pub code: u32,
+}
+
+/// Which step a non-fatal warning came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommunityWarningStep {
+    SetDescription,
+    LinkSubgroup,
+    JoinApprovalPending,
+}
+
+/// Something that did not complete but did not fail the whole operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommunityWarning {
+    pub step: CommunityWarningStep,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// The whole answer to a community operation, including its partial failures.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CommunityOperationResult {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<CommunityGroupRef>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub linked_jids: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failed_groups: Vec<CommunitySubgroupFailure>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<CommunityWarning>,
+}
+
+/// A poll to open in a channel. An empty `options` still defaults/additively
+/// decodes, exactly as it does in core.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelPollDraft {
+    pub channel_jid: String,
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    pub selectable_count: u32,
+}
+
+/// A reaction to a channel message. An empty `emoji` removes the sender's
+/// reaction rather than adding one with no text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelReact {
+    pub channel_jid: String,
+    pub message_id: String,
+    pub emoji: String,
+}
+
+/// A vote on a channel poll, by the indices of the chosen options.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelVotePoll {
+    pub channel_jid: String,
+    pub poll_message_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub option_indices: Vec<u32>,
+}
+
+/// The message a channel operation created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelPollCreated {
+    pub channel_jid: String,
+    pub message_id: String,
+}
+
+// IPC-only payloads: these are protocol structs rather than domain types, so
+// they are mirrored here too rather than imported from either crate.
+
+/// The address a block or unblock names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockTarget {
+    pub jid: String,
+}
+
+/// An event creation. Every field but the destination and the name is optional
+/// on the wire, so an older front end sending only those two still asks for a
+/// valid card.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateEvent {
+    pub jid: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<i64>,
+    /// Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_link: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<EventLocation>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_scheduled_call: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extra_guests_allowed: bool,
+}
+
+/// An answer to an event invitation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RespondEvent {
+    pub chat_jid: String,
+    pub event_message_id: String,
+    pub response: EventRsvp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_guest_count: Option<i32>,
+}
+
+/// A plain-text post to a channel. The optimistic bubble's id travels with it
+/// so the drawn bubble and the durable row name the same message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PostToChannel {
+    pub channel_jid: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_id: Option<String>,
 }
 
 #[cfg(test)]
