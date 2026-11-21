@@ -301,7 +301,11 @@ use std::path::PathBuf;
 /// 46 adds the legacy blocklist requests and their addressed reply. An older
 /// daemon would not recognise `Blocklist`, `Block` or `Unblock`, so a front end
 /// that draws a blocklist pane must not attach to one.
-pub const PROTOCOL_VERSION: u32 = 46;
+///
+/// 47 adds the legacy username lookup and its addressed, typed answer. An older
+/// daemon has no `LookupUsername` request, so the Contacts pane must not draw
+/// a field that would only ever be refused.
+pub const PROTOCOL_VERSION: u32 = 47;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

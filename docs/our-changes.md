@@ -127,6 +127,32 @@ one from chats or contacts would be wrong.
 **Gates.** fmt, clippy (`-D warnings`) and the full workspace test suite all
 green; GUI 680 passed, 14 ignored. No real block/unblock was performed.
 
+### 5. Username lookup in Settings → Contacts
+
+**Problem.** Upstream's experimental `contacts().find_by_username()` was
+unreachable from the front end. The repo already carried `username` and
+`verified_name` fields in profile DTOs, but had no way to ask the server for
+one.
+
+**Change.**
+- `core::UsernameLookupResult` is a typed answer: `Found(ResolvedUsername)`,
+  `KeyRequired`, `NotFound` or locally-invalid handle. These stay separate —
+  "give me the key" is not "nobody has this handle". `normalize_username()`
+  strips the display-only `@` and enforces the server's 3..=35 length locally.
+- `session/whatsapp/username_lookup.rs` calls upstream, converts the answer to
+  domain data, and adds only the local address-book name. The verified name is
+  the protocol's own field; a handle never becomes a fake business name.
+- IPC adds `ClientRequest::LookupUsername { username, username_key }` and a
+  correlated `DaemonMessage::UsernameLookup { id, result }`; protocol version
+  **47**. The key is runtime input only — never logged or hardcoded. Failures
+  use the existing `ProtocolError::Failed` path.
+- A new Settings → Contacts pane holds the handle/key fields and the result
+  card, keeps one lookup in flight, and lets a `KeyRequired` answer be retried
+  with the typed key. EN/PT strings added.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace test suite all
+green; no real lookup was performed.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

@@ -49,6 +49,9 @@ pub fn render_settings_view(
     // The Privacy pane's Add field needs a window to own its focus state.
     // Built here, where there always is one, rather than from the pane.
     app.ensure_blocklist_field(window, cx);
+    // The Contacts lookup has two fields: the handle, and the key the server
+    // may ask for before it discloses an identity.
+    app.ensure_username_fields(window, cx);
 
     let layout = app.responsive_layout(window, cx);
     let metrics = *layout.metrics();
@@ -407,6 +410,7 @@ fn description_for(section: SettingsSection) -> Option<&'static str> {
         SettingsSection::Appearance => {
             Some(crate::tr!(PresetsWriteToTheSameThemeJsonYouCanEditByHand))
         }
+        SettingsSection::Contacts => Some(crate::tr!(LookUpAnAccountByItsUsername)),
         SettingsSection::Privacy => Some(crate::tr!(ThisDeviceSIdentityAndHowToStartOver)),
         SettingsSection::Storage => Some(crate::tr!(WhatThisClientKeepsOnDisk)),
         SettingsSection::Plugins => Some(match crate::platform::plugins::home() {
@@ -428,6 +432,7 @@ fn icon_for(section: SettingsSection) -> Icon {
     match section {
         SettingsSection::Account => Icon::new(IconName::CircleUser),
         SettingsSection::Appearance => Icon::new(IconName::Palette),
+        SettingsSection::Contacts => Icon::new(IconName::Search),
         SettingsSection::Notifications => Icon::new(IconName::Bell),
         SettingsSection::AudioVideo => Icon::new(ProductIcon::Volume),
         SettingsSection::Privacy => Icon::new(ProductIcon::Shield),

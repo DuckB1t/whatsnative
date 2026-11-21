@@ -14,7 +14,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
 use gpui_component::{Disableable as _, Icon, IconName, Selectable as _, Sizable as _};
 
-use oxidezap_core::LogLevel;
+use oxidezap_core::{LogLevel, UsernameLookupResult};
 
 use crate::app::{SettingsSection, WhatsAppApp};
 use crate::components::ProductIcon;
@@ -32,6 +32,7 @@ pub fn render(
         SettingsSection::Account => account(app, entity, metrics, cx),
         SettingsSection::Notifications => notifications(metrics, cx),
         SettingsSection::AudioVideo => super::devices::render(app, entity.clone(), metrics, cx),
+        SettingsSection::Contacts => contacts(app, entity, metrics, cx),
         SettingsSection::Privacy => privacy(app, entity.clone(), metrics, cx),
         SettingsSection::Storage => storage(app, entity, metrics, cx),
         SettingsSection::Advanced => advanced(entity, metrics, cx),
@@ -432,6 +433,113 @@ fn notifications(metrics: Metrics, cx: &App) -> AnyElement {
         metrics,
     )
     .into_any_element()
+}
+
+/// Look up an account by the handle people share.
+///
+/// A pane of its own rather than a control in the chat list: the answer is a
+/// network read with a typed outcome, and the key field has to stay beside the
+/// handle when the server asks for it a second time.
+fn contacts(
+    app: &WhatsAppApp,
+    entity: Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> AnyElement {
+    group(
+        label(crate::tr!(FindByUsername), metrics, cx),
+        username_lookup(app, entity, metrics, cx),
+        metrics,
+    )
+    .into_any_element()
+}
+
+/// The two fields and the answer they produced.
+///
+/// Only protocol text is drawn: a verified name comes from the lookup result,
+/// and a display name from this account's address book. Nothing here turns a
+/// handle into either one.
+fn username_lookup(
+    app: &WhatsAppApp,
+    entity: Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let busy = app.username_lookup_busy();
+    let answer = match app.username_lookup_result() {
+        Some(UsernameLookupResult::Found(found)) => {
+            let mut lines = vec![(crate::tr!(JidLabel).to_string(), found.jid.clone())];
+            if let Some(pn) = found.pn_jid.as_deref() {
+                lines.push((crate::tr!(PhoneNumber).to_string(), pn.to_string()));
+            }
+            if let Some(username) = found.username.as_deref() {
+                lines.push((crate::tr!(UsernameLabel).to_string(), username.to_string()));
+            }
+            if let Some(name) = found.name.as_deref() {
+                lines.push((crate::tr!(DisplayName).to_string(), name.to_string()));
+            }
+            if let Some(verified) = found.verified_name.as_deref() {
+                lines.push((
+                    crate::tr!(VerifiedNameLabel).to_string(),
+                    verified.to_string(),
+                ));
+            }
+            card(lines, metrics, cx).into_any_element()
+        }
+        Some(UsernameLookupResult::KeyRequired { .. }) => {
+            pending(crate::tr!(UsernameKeyRequired), metrics, cx).into_any_element()
+        }
+        Some(UsernameLookupResult::NotFound) => {
+            pending(crate::tr!(UsernameNotFound), metrics, cx).into_any_element()
+        }
+        Some(UsernameLookupResult::InvalidUsername) => {
+            pending(crate::tr!(UsernameInvalid), metrics, cx).into_any_element()
+        }
+        None => pending(crate::tr!(UsernameLookupGuidance), metrics, cx).into_any_element(),
+    };
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(metrics.space_lg())
+        .child(answer)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(metrics.space_md())
+                .children(app.username_field().map(|field| Input::new(field).w_full()))
+                .children(
+                    app.username_key_field()
+                        .map(|field| Input::new(field).w_full()),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(metrics.space_md())
+                .child(
+                    Button::new("username-lookup-search")
+                        .label(crate::tr!(LookUpUsername))
+                        .outline()
+                        .disabled(busy)
+                        .when(!busy, |button| button.cursor_pointer())
+                        .on_click(move |_, _window, cx| {
+                            let entity = entity.clone();
+                            entity.update(cx, |app, cx| app.lookup_username(cx));
+                        }),
+                )
+                .when(busy, |this| {
+                    this.child(
+                        div()
+                            .text_size(metrics.text_small())
+                            .text_color(cx.theme().muted_foreground)
+                            .child(crate::tr!(LookingUpUsername)),
+                    )
+                }),
+        )
 }
 
 fn privacy(

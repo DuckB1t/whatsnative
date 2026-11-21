@@ -616,6 +616,35 @@ impl Bridge {
                 });
                 None
             }
+            Action::LookupUsername {
+                id,
+                username,
+                username_key,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.find_by_username(username, username_key);
+                oxidezap_session::spawn(async move {
+                    let answer = match task.await {
+                        Ok(Ok(result)) => Ok(DaemonMessage::UsernameLookup { id, result }),
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(_) => Err(ProtocolError::NoSession {
+                            detail: "the session stopped before the username lookup arrived"
+                                .to_string(),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::Wire {
                 id,
                 request,
@@ -1821,8 +1850,8 @@ impl Bridge {
                 through_message_id,
             }) => self.mark_read(client, &jid, through_message_id.as_deref()),
             // Answered from a task of its own. See `begin_slow`. The blocklist
-            // ones are network work rather than store reads, but they share the
-            // same rule: the command loop must not wait for an IQ.
+            // and username ones are network work rather than store reads, but
+            // they share the same rule: the command loop must not wait for an IQ.
             Action::MarkAudioPlayed(_)
             | Action::MarkStatusWatched(_)
             | Action::LoadMessages { .. }
@@ -1830,7 +1859,8 @@ impl Bridge {
             | Action::GroupMembers { .. }
             | Action::Blocklist { .. }
             | Action::Block { .. }
-            | Action::Unblock { .. } => {
+            | Action::Unblock { .. }
+            | Action::LookupUsername { .. } => {
                 CommandOutcome::Refused("a store read reached the wrong path".to_string())
             }
             Action::Typing(oxidezap_ipc::Typing { jid, composing }) => {

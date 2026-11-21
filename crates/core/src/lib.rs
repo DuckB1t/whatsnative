@@ -41,6 +41,7 @@ mod quoted;
 mod rich_text;
 mod status;
 mod system_notice;
+mod username_lookup;
 pub use group_membership::{
     GroupMembership, MembershipAction, NoticeParticipant, format_phone_jid,
 };
@@ -84,6 +85,10 @@ pub use rich_text::{
 };
 pub use status::{StatusAuthor, StatusFeed};
 pub use system_notice::{CallOutcome, CallRecord, SystemNotice, format_duration};
+pub use username_lookup::{
+    ResolvedUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH, UsernameLookupResult,
+    normalize_username,
+};
 pub use video::{CallVideo, CallVideoFrame, VideoStream};
 
 mod business;

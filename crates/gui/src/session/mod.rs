@@ -202,6 +202,13 @@ pub enum FromDaemon {
     /// A block list that never arrived. The pane stops waiting and says why
     /// rather than drawing an empty list over a read that failed.
     BlocklistLost { detail: String },
+    /// The typed answer to a username lookup, for the Contacts pane.
+    ///
+    /// The outcomes stay separate: needing a key is a different next step from
+    /// a handle nobody answers to.
+    UsernameLookup(oxidezap_core::UsernameLookupResult),
+    /// A lookup that never arrived. The pane stops waiting and says why.
+    UsernameLookupLost { detail: String },
     /// A roster that never arrived, so the header stops waiting on it.
     ///
     /// Named by the group rather than carrying an error, like a page: a
@@ -391,6 +398,9 @@ enum Awaiting {
     /// pane asks once on arrival and after a change, and a refusal is what
     /// lets it ask again.
     Blocklist,
+    /// A username lookup. The Contacts pane holds one in flight so two presses
+    /// cannot race two answers into the same result card.
+    UsernameLookup,
     /// A page of history. The timeline holds a request in flight so it does
     /// not ask twice for the same one, and a refusal is what releases it.
     Page {
@@ -425,7 +435,9 @@ impl Awaiting {
             // Nor is a page: the view that asked for it is holding a request
             // open and only an answer closes it. A roster is held the same
             // way, by the same window.
-            Self::Page { .. } | Self::Members { .. } | Self::Blocklist => false,
+            Self::Page { .. } | Self::Members { .. } | Self::Blocklist | Self::UsernameLookup => {
+                false
+            }
         }
     }
 
@@ -525,6 +537,14 @@ impl Awaiting {
                 log::warn!("the block list did not arrive: {detail}");
                 if let Some(events) = events {
                     let _ = events.send(FromDaemon::BlocklistLost {
+                        detail: detail.to_string(),
+                    });
+                }
+            }
+            Self::UsernameLookup => {
+                log::warn!("a username lookup did not arrive: {detail}");
+                if let Some(events) = events {
+                    let _ = events.send(FromDaemon::UsernameLookupLost {
                         detail: detail.to_string(),
                     });
                 }
@@ -1650,6 +1670,21 @@ impl SessionHandle {
     /// holds, so a failed read can be tried again from the pane itself.
     pub fn load_blocklist(&self) {
         self.ask(ClientRequest::Blocklist, Awaiting::Blocklist);
+    }
+
+    /// Ask the daemon to resolve a Meta username.
+    ///
+    /// The typed answer arrives as [`FromDaemon::UsernameLookup`] and a failure
+    /// as [`FromDaemon::UsernameLookupLost`]. Both release the one request the
+    /// pane holds, so a failed lookup can be tried again.
+    pub fn lookup_username(&self, username: String, username_key: Option<String>) {
+        self.ask(
+            ClientRequest::LookupUsername {
+                username,
+                username_key,
+            },
+            Awaiting::UsernameLookup,
+        );
     }
 
     /// Block one address, answered under the request's id.

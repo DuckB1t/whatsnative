@@ -41,4 +41,6 @@ formatted_catalog! {
     blocklist_failed(error) => ("Could not load blocked contacts: {error}", "Não foi possível carregar os contatos bloqueados: {error}");
     block_failed(error) => ("Could not block that address: {error}", "Não foi possível bloquear esse endereço: {error}");
     unblock_failed(error) => ("Could not unblock that contact: {error}", "Não foi possível desbloquear esse contato: {error}");
+    invalid_username(min, max) => ("Enter a username of {min} to {max} characters, without the @.", "Digite um usuário de {min} a {max} caracteres, sem o @.");
+    username_lookup_failed(error) => ("Could not look up that username: {error}", "Não foi possível buscar esse usuário: {error}");
 }

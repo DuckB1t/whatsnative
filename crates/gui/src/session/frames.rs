@@ -272,6 +272,13 @@ impl<'a> Frames<'a> {
                 }
                 self.publish(FromDaemon::Blocklist(entries))?;
             }
+            DaemonMessage::UsernameLookup { id, result } => {
+                if take_pending(self.pending, id).is_none() {
+                    debug!("a username lookup arrived for {id}, which nobody is waiting on");
+                    return ControlFlow::Continue(());
+                }
+                self.publish(FromDaemon::UsernameLookup(result))?;
+            }
             DaemonMessage::Downloaded { id, key } => {
                 let Some(waiting) = take_pending(self.pending, id) else {
                     debug!("a download answer arrived for {id}, which nobody is waiting on");

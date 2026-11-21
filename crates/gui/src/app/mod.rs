@@ -34,6 +34,7 @@ mod search;
 mod settings;
 mod status;
 mod timeline_ctl;
+mod username_lookup;
 mod viewer;
 
 pub use calls::CallCard;
@@ -997,6 +998,9 @@ pub struct WhatsAppApp {
     /// The account's block list, as the daemon last answered, and the one
     /// request the Privacy pane keeps in flight. See [`blocklist`].
     blocklist: blocklist::BlocklistState,
+    /// The last username lookup this window asked for, and the one request it
+    /// keeps in flight. See [`username_lookup`].
+    username_lookup: username_lookup::UsernameLookupState,
     /// System notices whose conversation has not arrived yet.
     ///
     /// "You were added to a group" reaches this window before the group does,
@@ -1400,6 +1404,12 @@ impl WhatsAppApp {
                     FromDaemon::BlocklistLost { detail } => entity.update(cx, |app, cx| {
                         app.blocklist_failed(&detail, cx);
                     }),
+                    FromDaemon::UsernameLookup(result) => entity.update(cx, |app, cx| {
+                        app.adopt_username_lookup(result, cx);
+                    }),
+                    FromDaemon::UsernameLookupLost { detail } => entity.update(cx, |app, cx| {
+                        app.username_lookup_failed(&detail, cx);
+                    }),
                     // A stream, not an event: the newest picture replaces
                     // the one before it and nothing is queued.
                     FromDaemon::CallFrames => entity.update(cx, |app, cx| {
@@ -1551,6 +1561,7 @@ impl WhatsAppApp {
             group_rosters: HashMap::new(),
             rosters_in_flight: std::collections::HashSet::new(),
             blocklist: blocklist::BlocklistState::default(),
+            username_lookup: username_lookup::UsernameLookupState::default(),
             pending_notices: HashMap::new(),
             video_players: HashMap::new(),
             video_update_task: None,
@@ -2479,6 +2490,9 @@ impl WhatsAppApp {
         // The block list belongs to the account being left. Keeping it would
         // draw another account's blocked contacts the next time Settings opens.
         self.reset_blocklist();
+        // A username answer belongs to that account too, including a verified
+        // name that another account must not inherit.
+        self.reset_username_lookup();
         // The composer may have said this window was typing. `composing_chat`
         // names a chat in the account being left, and the view's own timeout
         // would send its `paused` down whatever session comes next — after

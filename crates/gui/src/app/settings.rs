@@ -24,6 +24,7 @@ pub enum SettingsSection {
     Account,
     #[default]
     Appearance,
+    Contacts,
     Notifications,
     AudioVideo,
     Privacy,
@@ -33,9 +34,10 @@ pub enum SettingsSection {
 }
 
 impl SettingsSection {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Account,
         Self::Appearance,
+        Self::Contacts,
         Self::Notifications,
         Self::AudioVideo,
         Self::Privacy,
@@ -48,6 +50,7 @@ impl SettingsSection {
         match self {
             Self::Account => crate::tr!(Account),
             Self::Appearance => crate::tr!(Appearance),
+            Self::Contacts => crate::tr!(Contacts),
             Self::Notifications => crate::tr!(NotificationsText),
             Self::AudioVideo => crate::tr!(AudioVideo),
             Self::Privacy => crate::tr!(PrivacyKeys),
@@ -61,6 +64,7 @@ impl SettingsSection {
         match self {
             Self::Account => "account",
             Self::Appearance => "appearance",
+            Self::Contacts => "contacts",
             Self::Notifications => "notifications",
             Self::AudioVideo => "audio-video",
             Self::Privacy => "privacy",

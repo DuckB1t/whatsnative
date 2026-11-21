@@ -3,7 +3,7 @@
 use oxidezap_core::{
     AccountId, BlockedContact, CallState, CallVideoFrame, Chat, ChatMessage, DownloadableMedia,
     GroupHierarchy, GroupRoster, LogLevel, OutgoingMedia, PluginAction, PluginSurface,
-    QuotedMessage, UiEvent,
+    QuotedMessage, UiEvent, UsernameLookupResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -512,6 +512,13 @@ pub enum DaemonMessage {
     Blocklist {
         id: RequestId,
         entries: Vec<BlockedContact>,
+    },
+    /// The answer to [`ClientRequest::LookupUsername`], under that request's
+    /// id. One of three typed outcomes rather than a name plus a guess: the
+    /// handle may need a key, or may resolve to nobody.
+    UsernameLookup {
+        id: RequestId,
+        result: UsernameLookupResult,
     },
     /// A module was installed, and the id it claimed.
     ///
@@ -1213,6 +1220,19 @@ pub enum ClientRequest {
     /// Take one address off the account's block list. The other half of
     /// [`ClientRequest::Block`], with the same answer and the same rule.
     Unblock(BlockTarget),
+    /// Resolve a Meta username through the account held by the daemon.
+    ///
+    /// Answered with [`DaemonMessage::UsernameLookup`] under this request's
+    /// id, or with a `ProtocolError` when the lookup itself fails. The optional
+    /// key is the account's own username key: the server asks for it before it
+    /// discloses some identities, so a `KeyRequired` answer is followed by a
+    /// second ask carrying what the person typed. This is a legacy-only
+    /// request; the wire protocol has no equivalent.
+    LookupUsername {
+        username: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        username_key: Option<String>,
+    },
     /// Ask what this account is taking up on disk.
     ///
     /// Answered with [`DaemonMessage::Storage`] under the request's id. The
@@ -2298,6 +2318,21 @@ mod tests {
                 r#"{"request":"unblock","jid":"100000000000001@lid"}"#.to_string(),
             ),
             (
+                ClientRequest::LookupUsername {
+                    username: "example.handle".into(),
+                    username_key: None,
+                },
+                r#"{"request":"lookup_username","username":"example.handle"}"#.to_string(),
+            ),
+            (
+                ClientRequest::LookupUsername {
+                    username: "example.handle".into(),
+                    username_key: Some("0000".into()),
+                },
+                r#"{"request":"lookup_username","username":"example.handle","username_key":"0000"}"#
+                    .to_string(),
+            ),
+            (
                 ClientRequest::InstallPlugin(InstallPlugin {
                     file_name: "autoreply.wasm".into(),
                     upload: "u-plugin-1".into(),
@@ -2482,6 +2517,49 @@ mod tests {
         let line = serde_json::to_string(&empty).unwrap();
         assert!(line.contains(r#""entries":[]"#), "{line}");
         assert_eq!(serde_json::from_str::<DaemonMessage>(&line).unwrap(), empty);
+    }
+
+    /// All three lookup outcomes are one addressed answer, and a frame from a
+    /// daemon that leaves optional fields out still parses. The values are
+    /// synthetic: no handle or address here belongs to an account.
+    #[test]
+    fn a_username_lookup_answer_survives_both_directions_of_the_wire() {
+        use oxidezap_core::{ResolvedUsername, UsernameLookupResult};
+
+        let answered = DaemonMessage::UsernameLookup {
+            id: 14,
+            result: UsernameLookupResult::Found(ResolvedUsername {
+                jid: "100000000000001@lid".into(),
+                pn_jid: Some("15555550100@s.whatsapp.net".into()),
+                username: Some("example.handle".into()),
+                name: Some("Example Contact".into()),
+                verified_name: Some("Example Store".into()),
+            }),
+        };
+        let line = serde_json::to_string(&answered).expect("an answer is writable");
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).unwrap(),
+            answered
+        );
+
+        for (result, expected) in [
+            (
+                UsernameLookupResult::KeyRequired { username: None },
+                r#"{"type":"username_lookup","id":15,"result":{"key_required":{}}}"#,
+            ),
+            (
+                UsernameLookupResult::NotFound,
+                r#"{"type":"username_lookup","id":15,"result":"not_found"}"#,
+            ),
+            (
+                UsernameLookupResult::InvalidUsername,
+                r#"{"type":"username_lookup","id":15,"result":"invalid_username"}"#,
+            ),
+        ] {
+            let line =
+                serde_json::to_string(&DaemonMessage::UsernameLookup { id: 15, result }).unwrap();
+            assert_eq!(line, expected, "a lookup answer changed shape on the wire");
+        }
     }
 
     /// Every send accepts a frame that leaves `local_id` out.

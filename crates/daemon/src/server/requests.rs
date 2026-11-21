@@ -374,6 +374,27 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        ClientRequest::LookupUsername {
+            username,
+            username_key,
+        } => {
+            let id = match addressed(id, "a username lookup needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::LookupUsername {
+                    id,
+                    username,
+                    username_key,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::ForgetSession => acted(
             dispatch(
                 hub,

@@ -140,6 +140,15 @@ pub enum Action {
         request: oxidezap_ipc::BlockTarget,
         answer_to: Outbox,
     },
+    /// Resolve a username through the live session. Like the block list, this
+    /// waits for a server answer rather than reading the store, so it is
+    /// answered on `answer_to` from a task of its own.
+    LookupUsername {
+        id: RequestId,
+        username: String,
+        username_key: Option<String>,
+        answer_to: Outbox,
+    },
     /// Wipe local state so the user can pair again, or retire the account for
     /// good. The daemon owns the store, so it is the only process that may
     /// purge it. See [`AccountDisposition`] for what each choice leaves

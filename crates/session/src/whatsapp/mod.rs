@@ -33,6 +33,8 @@ mod profile;
 /// Sends a scriptable front end asks for, read from daemon-local paths.
 mod sends;
 mod sticker_sync;
+/// Experimental username resolution, returned as domain data.
+mod username_lookup;
 
 /// Store rows read back as the chats a front end draws.
 mod history;
