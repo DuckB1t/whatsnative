@@ -89,15 +89,16 @@ use std::sync::{Arc, Mutex};
 
 use log::error;
 use oxidezap_core::{
-    AccountId, CallState, Chat, ChatMessage, DownloadableMedia, QuotedMessage, UiEvent,
+    AccountId, CallState, Chat, ChatMessage, CreatedMessageRef, DownloadableMedia, EventRsvp,
+    QuotedMessage, UiEvent,
 };
 use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, RequestId};
 // The payload structs the protocol declares, named rather than glob-imported
 // so `Typing` and `Download` read at the call site as what they are: the
 // request's own payload, built here and moved onto the wire unchanged.
 use oxidezap_ipc::{
-    Download, EditMessage, LoadChats, LoadMessages, MarkRead, MarkStatusWatched, RevokeMessage,
-    SendAudio, SendMedia, SendReaction, SendText, Typing, VotePoll,
+    CreateEvent, Download, EditMessage, LoadChats, LoadMessages, MarkRead, MarkStatusWatched,
+    RespondEvent, RevokeMessage, SendAudio, SendMedia, SendReaction, SendText, Typing, VotePoll,
 };
 use portable_atomic::AtomicU64;
 use tokio::sync::oneshot;
@@ -329,6 +330,9 @@ enum Awaiting {
     Account(oneshot::Sender<Result<oxidezap_core::AccountId, String>>),
     /// A message mutation whose result must reach the action that opened it.
     Mutation(oneshot::Sender<Result<(), Failure>>),
+    /// A creation whose result is the message that was made, not just an
+    /// acknowledgement: without it the window cannot name the card it drew.
+    EventCreated(oneshot::Sender<Result<CreatedMessageRef, Failure>>),
     /// A mutation whose payload was staged through the media cache: a photo
     /// or video status. Carries the key for the reason a send does, since a
     /// request that never runs would otherwise leave the bytes behind.
@@ -417,6 +421,7 @@ impl Awaiting {
         match self {
             Self::Account(tx) => tx.is_closed(),
             Self::Mutation(tx) => tx.is_closed(),
+            Self::EventCreated(tx) => tx.is_closed(),
             Self::StagedMutation { tx, .. } => tx.is_closed(),
             Self::SyncedStickers(tx) => tx.is_closed(),
             Self::Download(tx) => tx.is_closed(),
@@ -464,6 +469,9 @@ impl Awaiting {
                 let _ = tx.send(Err(failure.clone()));
             }
             Self::Mutation(tx) => {
+                let _ = tx.send(Err(failure.clone()));
+            }
+            Self::EventCreated(tx) => {
                 let _ = tx.send(Err(failure.clone()));
             }
             Self::StagedMutation { tx, .. } => {
@@ -1591,6 +1599,43 @@ impl SessionHandle {
                 chat_jid: chat_jid.to_string(),
                 poll_id: poll_id.to_string(),
                 selected_option_indices,
+            }),
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Create a calendar event, answered with the message that carries it.
+    ///
+    /// The result crosses the socket as a plain message reference: the
+    /// creation's secret stays in the session, where RSVP encryption needs it.
+    pub fn create_event(
+        &self,
+        request: CreateEvent,
+    ) -> oneshot::Receiver<Result<CreatedMessageRef, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::CreateEvent(Box::new(request)),
+            Awaiting::EventCreated(tx),
+        );
+        rx
+    }
+
+    /// Answer an event invitation, correlated like a poll vote.
+    pub fn respond_event(
+        &self,
+        chat_jid: &str,
+        event_message_id: &str,
+        response: EventRsvp,
+        extra_guest_count: Option<i32>,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::RespondEvent(RespondEvent {
+                chat_jid: chat_jid.to_string(),
+                event_message_id: event_message_id.to_string(),
+                response,
+                extra_guest_count,
             }),
             Awaiting::Mutation(tx),
         );

@@ -8,6 +8,7 @@
 
 pub mod audio;
 pub(crate) mod business;
+mod event;
 mod media;
 mod poll;
 mod quote;
@@ -66,6 +67,8 @@ pub struct BubbleProps {
     pub selection_order: u64,
     /// Last vote requested here, not a confirmed vote.
     pub attempted_vote: Option<u32>,
+    /// Last RSVP requested on this card, not a confirmed answer.
+    pub attempted_event_rsvp: Option<oxidezap_core::EventRsvp>,
     pub playing_message_id: Option<String>,
     pub is_group: bool,
     /// Whether the conversation is with your own number, which is what makes
@@ -298,6 +301,17 @@ pub fn render_message_bubble(
                                         cx,
                                     )
                                 }))
+                                .children(message.event.as_ref().map(|card| {
+                                    event::render_event_card(
+                                        card,
+                                        props.chat_jid.clone(),
+                                        &message_id,
+                                        props.attempted_event_rsvp,
+                                        entity.clone(),
+                                        metrics,
+                                        cx,
+                                    )
+                                }))
                                 .when_some(message.media.clone(), |el, media_content| {
                                     render_media_content(
                                         el,
@@ -333,36 +347,41 @@ pub fn render_message_bubble(
                                         .flex_wrap()
                                         .items_end()
                                         .gap(metrics.space_md())
-                                        .when(message.poll.is_none() && !content.is_empty(), |el| {
-                                            el.child(
-                                                div()
-                                                    .flex_1()
-                                                    // A flex item's minimum is
-                                                    // its *min-content* width
-                                                    // unless told otherwise,
-                                                    // and for one unbroken
-                                                    // 60-character word that
-                                                    // is the whole word. The
-                                                    // bubble's max width then
-                                                    // clamped the box while
-                                                    // the text kept drawing
-                                                    // past it, across the
-                                                    // conversation and out of
-                                                    // the window.
-                                                    .min_w_0()
-                                                    .text_size(metrics.text_body())
-                                                    .text_color(cx.theme().foreground)
-                                                    .child(render_rich_text(
-                                                        content,
-                                                        ids.selection_key.clone(),
-                                                        props
-                                                            .selection_order
-                                                            .saturating_mul(3)
-                                                            .saturating_add(1),
-                                                        cx,
-                                                    )),
-                                            )
-                                        })
+                                        .when(
+                                            message.poll.is_none()
+                                                && message.event.is_none()
+                                                && !content.is_empty(),
+                                            |el| {
+                                                el.child(
+                                                    div()
+                                                        .flex_1()
+                                                        // A flex item's minimum is
+                                                        // its *min-content* width
+                                                        // unless told otherwise,
+                                                        // and for one unbroken
+                                                        // 60-character word that
+                                                        // is the whole word. The
+                                                        // bubble's max width then
+                                                        // clamped the box while
+                                                        // the text kept drawing
+                                                        // past it, across the
+                                                        // conversation and out of
+                                                        // the window.
+                                                        .min_w_0()
+                                                        .text_size(metrics.text_body())
+                                                        .text_color(cx.theme().foreground)
+                                                        .child(render_rich_text(
+                                                            content,
+                                                            ids.selection_key.clone(),
+                                                            props
+                                                                .selection_order
+                                                                .saturating_mul(3)
+                                                                .saturating_add(1),
+                                                            cx,
+                                                        )),
+                                                )
+                                            },
+                                        )
                                         .child(render_meta(
                                             time,
                                             status,

@@ -307,6 +307,7 @@ mod tests {
                         text: BubbleText::of_message(&message),
                         message: Arc::new(message),
                         attempted_vote: None,
+                        attempted_event_rsvp: None,
                         playing_message_id: None,
                         is_group,
                         is_own_number: false,

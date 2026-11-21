@@ -242,7 +242,61 @@ impl WhatsAppApp {
             .copied()
     }
 
+    /// Answer an event invitation from its card.
     ///
+    /// The card paints the attempt before the answer, so a refusal has to
+    /// arrive on this same tap: it takes the mark back and says why. A sent
+    /// answer stays marked as requested because this window never learns the
+    /// ballots of other devices.
+    pub fn respond_event(
+        &mut self,
+        chat_jid: &str,
+        message_id: &str,
+        response: EventRsvp,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.can_send() {
+            warn!("Cannot answer event: this window is offline");
+            return;
+        }
+        let Some(client) = self.client.as_ref() else {
+            return;
+        };
+        let waiting = client.respond_event(chat_jid, message_id, response, None);
+        let key = (chat_jid.to_string(), message_id.to_string());
+        self.attempted_event_rsvps.insert(key.clone(), response);
+        self.invalidate_message_cache(chat_jid, cx);
+        cx.notify();
+        cx.spawn(async move |entity, cx| {
+            let failure = match waiting.await {
+                Ok(Ok(())) => None,
+                Ok(Err(failure)) => Some(failure),
+                Err(_) => Some(crate::session::Failure::worth_retrying(crate::tr!(
+                    DaemonDisconnectedBeforeAnswer
+                ))),
+            };
+            if let Some(failure) = failure {
+                let _ = entity.update(cx, |app, cx| {
+                    app.attempted_event_rsvps.remove(&key);
+                    app.invalidate_message_cache(&key.0, cx);
+                    app.notify_user(
+                        what_went_wrong(crate::tr!(CouldNotRecordRsvp), &failure),
+                        notices::Tone::Problem,
+                        cx,
+                    );
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// The answer this window asked for, not one the network confirmed.
+    pub fn attempted_event_rsvp(&self, chat_jid: &str, message_id: &str) -> Option<EventRsvp> {
+        self.attempted_event_rsvps
+            .get(&(chat_jid.to_string(), message_id.to_string()))
+            .copied()
+    }
+
     /// Fixed rather than the full emoji table: this is a reaction control,
     /// not an emoji picker, and anything typed beyond these travels the
     /// composer's own path. Kept here rather than in the bubble so the strip

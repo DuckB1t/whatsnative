@@ -16,6 +16,7 @@ pub mod chat_row;
 mod chats;
 mod commands;
 pub(crate) mod editing;
+mod event_dialog;
 mod events;
 pub use editing::EditMessage;
 #[cfg(test)]
@@ -432,9 +433,9 @@ use crate::views::{
 use oxidezap_audio::{AudioPlayer, AudioRecorder, encode_to_opus_ogg};
 use oxidezap_core::{
     AppState, Availability, CachedQrCode, CallOutcome, CallRecord, CallState, Chat, ChatMessage,
-    ComposingKind, DownloadableMedia, Ending, Issued, MediaContent, MessageStatus, OutgoingCall,
-    PresenceRegistry, QuotedMessage, ReceiptType, Resend, Stage, SystemNotice, TypingSummary,
-    UiEvent,
+    ComposingKind, DownloadableMedia, Ending, EventRsvp, Issued, MediaContent, MessageStatus,
+    OutgoingCall, PresenceRegistry, QuotedMessage, ReceiptType, Resend, Stage, SystemNotice,
+    TypingSummary, UiEvent,
 };
 
 // ChatListCache is now in chats.rs and re-exported above
@@ -877,6 +878,13 @@ pub struct WhatsAppApp {
     /// is not a confirmed one: legacy IPC does not report async completion.
     /// Kept only to display honest feedback and allow retry.
     attempted_poll_votes: std::collections::HashMap<(String, String), u32>,
+    /// The last answer this window asked for on an event card. Like a vote,
+    /// it is honest feedback rather than a receipt: the daemon's correlated
+    /// answer takes it back if the invitation could not be answered.
+    attempted_event_rsvps: std::collections::HashMap<(String, String), EventRsvp>,
+    /// An event creation waiting for its fields or its answer. Taken as soon
+    /// as the request is sent, so a second press cannot create two cards.
+    event_dialog: Option<event_dialog::EventDraftDialog>,
     /// Where both paged lists continue, and whether either is asking. See
     /// [`paging`].
     pages: Entity<paging::Pages>,
@@ -1517,6 +1525,8 @@ impl WhatsAppApp {
             archived_scan: std::collections::HashSet::new(),
             owed_reads: std::collections::HashSet::new(),
             attempted_poll_votes: std::collections::HashMap::new(),
+            attempted_event_rsvps: std::collections::HashMap::new(),
+            event_dialog: None,
             pages: cx.new(|_| paging::Pages::new()),
             watched_status: std::collections::HashSet::new(),
             viewer: cx.new(viewer::Viewer::new),
@@ -2392,6 +2402,8 @@ impl WhatsAppApp {
         self.forget_paging(cx);
         self.owed_reads.clear();
         self.attempted_poll_votes.clear();
+        self.attempted_event_rsvps.clear();
+        self.event_dialog = None;
         // The reader is a selection too, and a JID-keyed one. Left alone, it
         // pointed the new account at the old account's contact: at their
         // updates if that contact exists there — watched by nobody in this
@@ -4569,6 +4581,19 @@ impl Render for WhatsAppApp {
             )
             .into_any_element()
         });
+        // The creation form borrows the deletion modal's focus handle because
+        // the two are mutually exclusive and `sync_overlay_focus` already knows
+        // how to hand a modal its keyboard. Adding another owner there would be
+        // a call-path change for a form that never appears with a call card.
+        let event_dialog = self.event_dialog.as_ref().map(|dialog| {
+            event_dialog::render_event_dialog(
+                dialog,
+                cx.entity().clone(),
+                &self.message_delete_focus,
+                cx,
+            )
+            .into_any_element()
+        });
 
         // Outside the Settings-versus-conversation branch on purpose. The
         // card and the focus it takes were built by the conversation view
@@ -4580,8 +4605,10 @@ impl Render for WhatsAppApp {
         // call card above a fullscreen viewer or confirmation surface.
         let paste_preview_open = paste_preview.is_some();
         let message_delete_open = message_delete.is_some();
+        let event_dialog_open = event_dialog.is_some();
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
-        let modal_open = paste_preview_open || message_delete_open || media_viewer_open;
+        let modal_open =
+            paste_preview_open || message_delete_open || event_dialog_open || media_viewer_open;
         let call_overlay = (connected && !modal_open)
             .then(|| render_call_overlay(self, window, cx))
             .flatten();
@@ -4626,6 +4653,7 @@ impl Render for WhatsAppApp {
         )
         .children(paste_preview)
         .children(message_delete)
+        .children(event_dialog)
         .children(call_overlay)
         .child(self.notices().clone())
         // Cached views report their surfaces in prepaint. Move focus after
@@ -4636,7 +4664,8 @@ impl Render for WhatsAppApp {
                     entity.update(cx, |app, _| {
                         app.keyboard_surfaces.call_card = call_card;
                         app.keyboard_surfaces.paste_preview = paste_preview_open;
-                        app.keyboard_surfaces.message_delete = message_delete_open;
+                        app.keyboard_surfaces.message_delete =
+                            message_delete_open || event_dialog_open;
                     });
                     let entity = entity.downgrade();
                     window.defer(cx, move |window, cx| {

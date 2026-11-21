@@ -19,6 +19,9 @@ mod auth;
 /// The account's server-owned block list, read and changed on request.
 mod blocklist;
 
+/// Calendar-event creation and RSVP, with the addressing the envelope needs.
+mod events;
+
 /// The inbound commit hook that makes the chat store the ack durability point.
 mod durability;
 
@@ -72,6 +75,7 @@ use paging::{participant_keyed_chat, read_message_range};
 use ui_queue::Sender as UiEventSender;
 pub use ui_queue::{Receiver as UiEventReceiver, TryRecvError as UiEventTryRecvError};
 
+pub use events::EventDraft;
 /// How far back a read receipt reaches: the last row a front end was shown,
 /// and the ids it is bounded by. Written in `paging`, beside the cursors.
 pub use groups::{
@@ -2369,6 +2373,9 @@ impl WhatsAppClient {
         // `[Media]` bubble until the next reload rehydrates it from the
         // store. Same extraction the stored path uses, so the two agree.
         let poll = poll_of(base_msg);
+        // Same projection hydration uses, so a just-arrived creation and the
+        // row it becomes draw one card rather than a live placeholder.
+        let event = oxidezap_chat_store::event_card(base_msg);
         let mut business = oxidezap_chat_store::business_content(base_msg);
 
         // Extract text content
@@ -2380,6 +2387,7 @@ impl WhatsAppClient {
             .or_else(|| base_msg.get_caption().map(|s| s.to_string()))
             .or_else(|| oxidezap_chat_store::shared_contacts_text(base_msg))
             .or_else(|| poll.as_ref().map(|poll| poll.question.clone()))
+            .or_else(|| event.as_ref().map(|event| event.name.clone()))
             .unwrap_or_else(|| live_content_fallback(base_msg, media_result.is_some()));
 
         // A mention arrives as `@` plus the user part — the digits of a LID
@@ -2433,7 +2441,7 @@ impl WhatsAppClient {
             system: None,
             poll,
             business,
-            event: None,
+            event,
         };
 
         if let Some(media) = media_result {

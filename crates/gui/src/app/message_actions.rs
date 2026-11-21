@@ -120,6 +120,7 @@ impl WhatsAppApp {
         if self.delete_confirmation.is_some()
             || self.edit_draft.is_some()
             || self.paste_preview.is_some()
+            || self.event_dialog.is_some()
         {
             return;
         }

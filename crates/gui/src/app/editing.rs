@@ -39,6 +39,7 @@ impl WhatsAppApp {
             || self.recorder.read(cx).is_recording()
             || self.edit_draft.is_some()
             || self.delete_confirmation.is_some()
+            || self.event_dialog.is_some()
             || self
                 .pending_message_actions
                 .contains(&(jid.clone(), id.to_owned()))

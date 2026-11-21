@@ -305,7 +305,13 @@ use std::path::PathBuf;
 /// 47 adds the legacy username lookup and its addressed, typed answer. An older
 /// daemon has no `LookupUsername` request, so the Contacts pane must not draw
 /// a field that would only ever be refused.
-pub const PROTOCOL_VERSION: u32 = 47;
+///
+/// 48 adds native event creation and RSVP. `CreateEvent` is answered by
+/// `EventCreated`, which carries only the created message reference; `RespondEvent`
+/// is a correlated mutation like a poll vote. An older daemon knows neither
+/// request, so a window that draws an event card must not attach to one that
+/// would refuse both.
+pub const PROTOCOL_VERSION: u32 = 48;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

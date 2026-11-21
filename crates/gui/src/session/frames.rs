@@ -302,6 +302,15 @@ impl<'a> Frames<'a> {
                     }
                 }
             }
+            // A creation's answer is the message it made, so it has to be
+            // taken before the generic acknowledgement path sees the id.
+            DaemonMessage::EventCreated { id, created } => match take_pending(self.pending, id) {
+                Some(Awaiting::EventCreated(tx)) => {
+                    let _ = tx.send(Ok(created));
+                }
+                Some(waiting) => self.fail(waiting, &Failure::permanent("unexpected event answer")),
+                None => {}
+            },
             // Every command is answered under the id it was asked with, which
             // is why this side no longer has to guess what a failure was
             // about.

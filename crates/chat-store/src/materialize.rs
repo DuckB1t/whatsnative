@@ -200,6 +200,37 @@ pub fn supported_poll_creation_message(
         .or_else(|| base.poll_creation_message.as_option())
 }
 
+/// An event creation as the card a front end draws, in the one place that
+/// already unwraps every carrier the store accepts.
+///
+/// Both the live handler and hydration call this, so a card drawn from a just-arrived
+/// message cannot disagree with the one drawn from the row it became. No display
+/// text is decided here: a blank name stays blank, and the front end says what
+/// an unnamed invitation means in the reader's language.
+pub fn event_card(message: &wa::Message) -> Option<oxidezap_core::EventCard> {
+    let base = normalized_message(message);
+    let event = base.event_message.as_option()?;
+    let location = event
+        .location
+        .as_option()
+        .map(|location| oxidezap_core::EventLocation {
+            degrees_latitude: location.degrees_latitude.unwrap_or_default(),
+            degrees_longitude: location.degrees_longitude.unwrap_or_default(),
+            name: location.name.clone(),
+        });
+    Some(oxidezap_core::EventCard {
+        name: event.name.clone().unwrap_or_default(),
+        description: event.description.clone(),
+        start_time: event.start_time,
+        end_time: event.end_time,
+        join_link: event.join_link.clone(),
+        location,
+        is_canceled: event.is_canceled.unwrap_or(false),
+        is_scheduled_call: event.is_schedule_call.unwrap_or(false),
+        extra_guests_allowed: event.extra_guests_allowed.unwrap_or(false),
+    })
+}
+
 /// Payloads that are bookkeeping for something else, not a message.
 ///
 /// A vote, an encrypted reaction or comment, a pin, a keep-in-chat — each
@@ -881,5 +912,66 @@ mod tests {
         // An ordinary message is not, which is what keeps the skip off the
         // conversation.
         assert!(!is_control_only(&wa::Message::text("oi")));
+    }
+
+    /// A synthetic creation exercises both halves the store owns: it is filed
+    /// as an event rather than a blank unknown row, and the exact card a front
+    /// end draws survives the same unwrapping on the live and hydrated paths.
+    #[test]
+    fn an_event_creation_is_filed_and_projected_as_a_card() {
+        let mut event = wa::message::EventMessage::default();
+        event.name = Some("Synthetic standup".into());
+        event.description = Some("A fixture, not an invitation".into());
+        event.start_time = Some(1_700_000_000);
+        event.end_time = Some(1_700_000_600);
+        event.join_link = Some("https://example.invalid/call".into());
+        event.is_schedule_call = Some(true);
+        event.extra_guests_allowed = Some(true);
+        event.location = MessageField::some({
+            let mut location = wa::message::LocationMessage::default();
+            location.degrees_latitude = Some(-12.5);
+            location.degrees_longitude = Some(40.25);
+            location.name = Some("Room 1".into());
+            location
+        });
+        let message = {
+            let mut constructed = wa::Message::default();
+            constructed.event_message = MessageField::some(event);
+            constructed
+        };
+
+        assert_eq!(message_kind(&message), "event");
+        let card = event_card(&message).expect("an event creation is a card");
+        assert_eq!(card.name, "Synthetic standup");
+        assert_eq!(
+            card.description.as_deref(),
+            Some("A fixture, not an invitation")
+        );
+        assert_eq!(card.start_time, Some(1_700_000_000));
+        assert_eq!(card.end_time, Some(1_700_000_600));
+        assert_eq!(
+            card.join_link.as_deref(),
+            Some("https://example.invalid/call")
+        );
+        assert!(card.is_scheduled_call);
+        assert!(card.extra_guests_allowed);
+        let location = card.location.expect("the card keeps its pin");
+        assert_eq!(location.degrees_latitude, -12.5);
+        assert_eq!(location.degrees_longitude, 40.25);
+        assert_eq!(location.name.as_deref(), Some("Room 1"));
+    }
+
+    #[test]
+    fn a_message_without_an_event_has_no_card() {
+        assert!(event_card(&wa::Message::text("plain text")).is_none());
+        // A blank creation is still a card; the front end supplies the words.
+        let message = {
+            let mut constructed = wa::Message::default();
+            constructed.event_message = MessageField::some(wa::message::EventMessage::default());
+            constructed
+        };
+        let card = event_card(&message).expect("a blank creation is still a card");
+        assert!(card.name.is_empty());
+        assert!(!card.is_canceled);
     }
 }

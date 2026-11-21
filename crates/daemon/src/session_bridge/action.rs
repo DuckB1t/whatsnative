@@ -74,6 +74,17 @@ pub enum Action {
     /// means the session took it, and a vote it cannot cast (unknown poll,
     /// bad index, missing secret) is a log line rather than a state change.
     VotePoll(oxidezap_ipc::VotePoll),
+    /// Create a calendar event. Addressed like an edit: the only result that
+    /// crosses the socket is the message reference the window needs to name
+    /// the card it just made.
+    CreateEvent {
+        id: RequestId,
+        request: oxidezap_ipc::CreateEvent,
+        answer_to: Outbox,
+    },
+    /// Answer a calendar invitation, correlated like a vote so a refusal
+    /// reaches the tap that painted the answer.
+    RespondEvent(oxidezap_ipc::RespondEvent),
     /// Fetch media and answer on `answer_to` rather than through the command's
     /// own reply, which resolves in microseconds while this takes seconds.
     Download {

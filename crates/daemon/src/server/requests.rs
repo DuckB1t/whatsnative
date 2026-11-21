@@ -227,6 +227,26 @@ pub(super) async fn handle_request(
         ClientRequest::VotePoll(request) => {
             acted(dispatch(hub, commands, Action::VotePoll(request)).await)
         }
+        ClientRequest::CreateEvent(request) => {
+            let id = match addressed(id, "an event creation needs an id to answer under") {
+                Ok(id) => id,
+                Err(answer) => return answer,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::CreateEvent {
+                    id,
+                    request: *request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::RespondEvent(request) => {
+            acted(dispatch(hub, commands, Action::RespondEvent(request)).await)
+        }
         ClientRequest::CallDevices(request) => {
             let id = match addressed(id, "a device request needs an id") {
                 Ok(id) => id,

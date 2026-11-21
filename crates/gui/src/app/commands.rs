@@ -349,6 +349,9 @@ impl WhatsAppApp {
             self.decline_waiting_call(cx);
             return;
         }
+        if self.cancel_event_dialog(cx) {
+            return;
+        }
         if self.cancel_message_delete(cx) {
             return;
         }

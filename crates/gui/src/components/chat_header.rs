@@ -296,12 +296,18 @@ fn render_actions(
     // Gate on a parsed PN/LID user JID or a group JID: anything else would
     // still offer calls to status/broadcast and newsletter rows. Offline is
     // as much a reason a call cannot be placed as an uncallable JID.
-    let callable = (is_callable_user(&chat.jid) || is_callable_group(&chat.jid)) && can_send;
+    let addressable = is_callable_user(&chat.jid) || is_callable_group(&chat.jid);
+    let callable = addressable && can_send;
+    // An event needs a chat the library can address, not a broadcast row or a
+    // newsletter. The offline rule is the same one the call buttons follow.
+    let can_create_event = addressable && can_send;
     let call_jid = chat.jid.clone();
     let video_jid = chat.jid.clone();
+    let event_jid = chat.jid.clone();
     let overflow_jid = chat.jid.clone();
     let call_entity = entity.clone();
     let video_entity = entity.clone();
+    let event_entity = entity.clone();
     let overflow_entity = entity.clone();
     let search_entity = entity;
 
@@ -344,6 +350,21 @@ fn render_actions(
                 .cursor_pointer()
                 .on_click(move |_, window, cx| {
                     search_entity.update(cx, |app, cx| app.toggle_conversation_search(window, cx));
+                }),
+            )
+        })
+        .when(can_create_event && layout.show_call_buttons(), |el| {
+            el.child(
+                action(
+                    "create-event",
+                    Icon::new(IconName::Calendar),
+                    crate::tr!(CreateEvent),
+                )
+                .cursor_pointer()
+                .on_click(move |_, window, cx| {
+                    event_entity.update(cx, |app, cx| {
+                        app.begin_event_dialog(&event_jid, window, cx);
+                    });
                 }),
             )
         })

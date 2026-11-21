@@ -43,4 +43,6 @@ formatted_catalog! {
     unblock_failed(error) => ("Could not unblock that contact: {error}", "Não foi possível desbloquear esse contato: {error}");
     invalid_username(min, max) => ("Enter a username of {min} to {max} characters, without the @.", "Digite um usuário de {min} a {max} caracteres, sem o @.");
     username_lookup_failed(error) => ("Could not look up that username: {error}", "Não foi possível buscar esse usuário: {error}");
+    event_time(start, end) => ("{start} – {end}", "{start} – {end}");
+    event_start(start) => ("Starts {start}", "Começa {start}");
 }

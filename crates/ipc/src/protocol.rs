@@ -1,9 +1,9 @@
 //! Messages exchanged over the socket.
 
 use oxidezap_core::{
-    AccountId, BlockedContact, CallState, CallVideoFrame, Chat, ChatMessage, DownloadableMedia,
-    GroupHierarchy, GroupRoster, LogLevel, OutgoingMedia, PluginAction, PluginSurface,
-    QuotedMessage, UiEvent, UsernameLookupResult,
+    AccountId, BlockedContact, CallState, CallVideoFrame, Chat, ChatMessage, CreatedMessageRef,
+    DownloadableMedia, EventLocation, EventRsvp, GroupHierarchy, GroupRoster, LogLevel,
+    OutgoingMedia, PluginAction, PluginSurface, QuotedMessage, UiEvent, UsernameLookupResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -555,6 +555,17 @@ pub enum DaemonMessage {
     /// download that failed comes back as [`DaemonMessage::Error`] under the
     /// same id, like every other request.
     Downloaded { id: RequestId, key: String },
+    /// An event was created, answering [`ClientRequest::CreateEvent`].
+    ///
+    /// The only creation result that crosses the socket is the message a front
+    /// end can select: the per-message secret and the library's richer result
+    /// stay inside the session, where RSVP encryption needs them. A separate
+    /// frame under the request's id because an acknowledgement alone would
+    /// leave the window with no way to name the card it just made.
+    EventCreated {
+        id: RequestId,
+        created: CreatedMessageRef,
+    },
     /// A command reached the session. Carries no result beyond that: what the
     /// network makes of it arrives as [`DaemonMessage::Update`], or as
     /// [`DaemonMessage::SendFailed`] when it makes nothing of it at all.
@@ -940,6 +951,43 @@ pub struct VotePoll {
     pub selected_option_indices: Vec<u32>,
 }
 
+/// An event creation. See [`ClientRequest::CreateEvent`].
+///
+/// Every field but the destination and the name is optional on the wire, so an
+/// older front end that sends only those two still asks for a valid card. The
+/// daemon refuses a blank name before it reaches the library.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateEvent {
+    pub jid: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<i64>,
+    /// Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_link: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<EventLocation>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_scheduled_call: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extra_guests_allowed: bool,
+}
+
+/// An answer to an event invitation. See [`ClientRequest::RespondEvent`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RespondEvent {
+    pub chat_jid: String,
+    pub event_message_id: String,
+    pub response: EventRsvp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_guest_count: Option<i32>,
+}
+
 /// One page of a chat's messages. See [`ClientRequest::LoadMessages`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoadMessages {
@@ -1166,6 +1214,17 @@ pub enum ClientRequest {
     /// from the stored creation message, so a vote on a poll this device
     /// never saw is refused rather than guessed.
     VotePoll(VotePoll),
+    /// Create a calendar event in a chat.
+    ///
+    /// Unlike a vote this has a result the window needs: the message that was
+    /// created, under this request's id. Neither the event's secret nor the
+    /// library's richer creation record is part of the answer.
+    CreateEvent(Box<CreateEvent>),
+    /// Answer a calendar invitation.
+    ///
+    /// Correlated like a vote rather than staged like a send: the card paints
+    /// the attempted answer first, so a refusal has to reach the same tap.
+    RespondEvent(RespondEvent),
     /// One page of a chat's messages, older than `before`.
     ///
     /// Answered with [`DaemonMessage::Messages`] under the request's id. This
@@ -2687,6 +2746,58 @@ mod audio_played_tests {
         assert!(json.contains("mark_audio_played"));
         assert!(!json.contains("participant"));
     }
+    #[test]
+    fn an_event_creation_defaults_its_optional_fields_and_answers_with_a_message_only() {
+        let request: ClientRequest = serde_json::from_str(
+            r#"{"request":"create_event","jid":"120363000000000001@g.us","name":"Synthetic standup"}"#,
+        )
+        .unwrap();
+        let ClientRequest::CreateEvent(draft) = request else {
+            panic!("the creation request decoded into the wrong shape");
+        };
+        assert_eq!(draft.jid, "120363000000000001@g.us");
+        assert_eq!(draft.name, "Synthetic standup");
+        assert_eq!(draft.description, None);
+        assert_eq!(draft.start_time, None);
+        assert_eq!(draft.location, None);
+        assert!(!draft.is_scheduled_call);
+        assert!(!draft.extra_guests_allowed);
+
+        let answer = DaemonMessage::EventCreated {
+            id: 17,
+            created: CreatedMessageRef {
+                chat_jid: "120363000000000001@g.us".into(),
+                message_id: "SYNTHETIC-1".into(),
+            },
+        };
+        let json = serde_json::to_string(&answer).unwrap();
+        assert!(json.contains("\"message_id\":\"SYNTHETIC-1\""));
+        assert!(!json.contains("secret"));
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&json).unwrap(),
+            answer
+        );
+    }
+
+    #[test]
+    fn an_event_response_keeps_its_wire_spelling() {
+        let request = ClientRequest::RespondEvent(RespondEvent {
+            chat_jid: "120363000000000001@g.us".into(),
+            event_message_id: "SYNTHETIC-1".into(),
+            response: EventRsvp::NotGoing,
+            extra_guest_count: None,
+        });
+        let json = serde_json::to_string(&request).unwrap();
+        assert_eq!(
+            json,
+            r#"{"request":"respond_event","chat_jid":"120363000000000001@g.us","event_message_id":"SYNTHETIC-1","response":"not_going"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&json).unwrap(),
+            request
+        );
+    }
+
     #[test]
     fn mute_filters_attention_without_changing_unread_state() {
         for jid in ["user@example.invalid", "group@g.us", "channel@newsletter"] {

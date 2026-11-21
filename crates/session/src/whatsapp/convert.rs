@@ -57,6 +57,7 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
         .map(oxidezap_chat_store::normalized_message);
     let media = base_message.and_then(|message| media::media_of(message, None));
     let poll = base_message.and_then(poll_of);
+    let event = base_message.and_then(oxidezap_chat_store::event_card);
     let business = base_message.and_then(oxidezap_chat_store::business_content);
     let contacts = base_message.and_then(oxidezap_chat_store::shared_contacts_text);
     let pack = base_message.and_then(oxidezap_chat_store::sticker_pack_text);
@@ -73,6 +74,7 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
             .as_ref()
             .map(|p| p.question.clone())
             .unwrap_or_default(),
+        (None, _) if event.is_some() => event.as_ref().map(|e| e.name.clone()).unwrap_or_default(),
         (None, _) if media.is_some() => String::new(),
         (None, _) => oxidezap_chat_store::message_fallback(&stored.kind).to_owned(),
     };
@@ -130,7 +132,7 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
         system,
         poll,
         business,
-        event: None,
+        event,
     }
 }
 
@@ -301,6 +303,27 @@ mod tests {
         let revoked = stored_to_chat_message(row);
         assert_eq!(revoked.content, "[Message deleted]");
         assert!(revoked.quoted.is_none());
+    }
+
+    #[test]
+    fn a_hydrated_event_row_carries_the_card_from_its_proto() {
+        let mut event = wa::message::EventMessage::default();
+        event.name = Some("Synthetic standup".into());
+        event.start_time = Some(1_700_000_000);
+        let mut proto = wa::Message::default();
+        proto.event_message = MessageField::some(event);
+        let mut row = stored_poll_creation();
+        row.kind = oxidezap_chat_store::MessageKind::Event;
+        row.text = None;
+        row.message = Some(Box::new(proto));
+        let rendered = stored_to_chat_message(row.clone());
+        let card = rendered.event.expect("a stored event becomes a card");
+        assert_eq!(card.name, "Synthetic standup");
+        assert_eq!(card.start_time, Some(1_700_000_000));
+        assert_eq!(rendered.content, "Synthetic standup");
+        row.revoked = true;
+        let revoked = stored_to_chat_message(row);
+        assert_eq!(revoked.content, "[Message deleted]");
     }
 
     #[test]

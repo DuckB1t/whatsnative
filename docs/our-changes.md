@@ -197,6 +197,33 @@ protocol or UI change yet:
 Four `ChatMessage` literals in `session/whatsapp/{convert.rs,mod.rs,tests.rs}`
 were updated with `event: None`. No real account data or protocol use yet.
 
+### 8. Native calendar events (protocol 48)
+
+**Problem.** The repo only materialized `event_message` rows; there was no
+domain card, no way to create an event and no way to RSVP. The library already
+had `Events::create/respond/respond_raw`.
+
+**Change.**
+- `session/whatsapp/events.rs` creates through `EventCreationParams` and
+  returns only `CreatedMessageRef`. RSVP loads the stored creation, requires
+  its protobuf event, resolves the creator with the poll-vote identity rule,
+  prefers `message_context_info.message_secret` with the `msg_secrets` index
+  as fallback, and calls `respond_raw`. Neither the secret nor `CreatedEvent`
+  crosses IPC.
+- Event protobuf is projected into `core::EventCard` on both live and hydrated
+  paths; no DB migration. The card renders name, description, known time
+  range, location and join link, and three RSVP buttons. An answer is drawn as
+  "requested" until the correlated daemon answer; a refusal takes it back.
+- A create dialog in the chat header keeps every field but the name optional,
+  validates numbers and half-pins locally, and surfaces failures as notices.
+- IPC adds `ClientRequest::{CreateEvent, RespondEvent}` and
+  `DaemonMessage::EventCreated { id, created }`; protocol version **48**.
+  Creation is addressed/out-of-band; RSVP uses the existing correlated
+  mutation path. No CLI wire changes.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace test suite all
+green; synthetic fixtures only, no real event or RSVP was sent.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

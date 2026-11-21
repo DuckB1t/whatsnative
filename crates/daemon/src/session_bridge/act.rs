@@ -10,7 +10,7 @@ use oxidezap_core::CallOutcome;
 use oxidezap_ipc::{
     CallAction, ChatSummary, DaemonEvent, DaemonMessage, PageCursor, ProtocolError, RequestId,
 };
-use oxidezap_session::{ReadBoundary, WhatsAppClient};
+use oxidezap_session::{EventDraft, ReadBoundary, WhatsAppClient};
 use tokio::sync::OwnedSemaphorePermit;
 use wacore_binary::jid::observe_str;
 
@@ -220,6 +220,28 @@ impl Bridge {
                 );
                 oxidezap_session::spawn(async move {
                     let result = mutation_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, result));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::CreateEvent {
+                id,
+                request,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let jid = request.jid.clone();
+                let task = client.create_event(jid, event_draft(request));
+                oxidezap_session::spawn(async move {
+                    let result = match task.await {
+                        Ok(Ok(created)) => Ok(DaemonMessage::EventCreated { id, created }),
+                        other => mutation_answer(id, other),
+                    };
                     answer_now(&answer_to, answered(id, result));
                     let _ = reply.send(CommandOutcome::Accepted);
                     drop(permit);
@@ -1682,6 +1704,7 @@ impl Bridge {
 
         match action {
             Action::Wire { .. }
+            | Action::CreateEvent { .. }
             | Action::EditMessage { .. }
             | Action::RevokeMessage { .. }
             | Action::PublishStatus { .. }
@@ -1887,6 +1910,31 @@ impl Bridge {
                 };
                 let outcome = match client
                     .vote_poll(chat_jid, poll_id, selected_option_indices)
+                    .await
+                {
+                    Ok(Ok(())) => CommandOutcome::Accepted,
+                    Ok(Err(detail)) => CommandOutcome::Refused(detail),
+                    Err(_) => CommandOutcome::Refused(
+                        "the session stopped before it answered".to_string(),
+                    ),
+                };
+                drop(permit);
+                outcome
+            }
+            Action::RespondEvent(oxidezap_ipc::RespondEvent {
+                chat_jid,
+                event_message_id,
+                response,
+                extra_guest_count,
+            }) => {
+                // Painted before the answer like a poll vote, so a missing
+                // secret or an unknown event has to be a refusal the tap can
+                // undo — not a log line behind a card showing the wrong answer.
+                let Some(permit) = self.permit() else {
+                    return too_busy();
+                };
+                let outcome = match client
+                    .respond_event(chat_jid, event_message_id, response, extra_guest_count)
                     .await
                 {
                     Ok(Ok(())) => CommandOutcome::Accepted,
@@ -2667,6 +2715,36 @@ fn send_wire_result(answer_to: &Outbox, id: u64, result: Result<DaemonResponse, 
     };
     if let Ok(line) = serde_json::to_string(&envelope) {
         answer_now(answer_to, line);
+    }
+}
+
+/// Move a creation request into the session's own shape.
+///
+/// Nothing is interpreted here: every optional field stays optional, so a
+/// window that names only a chat and a title creates the same card it asked
+/// for. `CreateEvent` and `EventDraft` carry the same facts rather than two
+/// spellings of them, so no field can be dropped on the way.
+fn event_draft(request: oxidezap_ipc::CreateEvent) -> EventDraft {
+    let oxidezap_ipc::CreateEvent {
+        jid: _,
+        name,
+        description,
+        start_time,
+        end_time,
+        join_link,
+        location,
+        is_scheduled_call,
+        extra_guests_allowed,
+    } = request;
+    EventDraft {
+        name,
+        description,
+        start_time,
+        end_time,
+        join_link,
+        location,
+        is_scheduled_call,
+        extra_guests_allowed,
     }
 }
 
