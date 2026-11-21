@@ -179,6 +179,24 @@ green. Synthetic tests only; no real reaction or vote was sent. Session
 errors are plain strings, so they read as permanent in `what_went_wrong` —
 a retryable `CommandOutcome::Failed` is a separate, later change.
 
+### 7. Core vocabulary for events, communities and channels
+
+Prepared the domain types the next three parity features will share, with no
+protocol or UI change yet:
+
+- `core::EventCard` / `EventLocation` / `EventRsvp` / `CreatedMessageRef`, and
+  an additive `ChatMessage.event` field (serde default, cleared on revoke).
+- `core::Community*` request/result types, preserving partial link failures and
+  warnings instead of collapsing them into one error.
+- `core::Channel{PollDraft,React,VotePoll,PollCreated}`; server ids and option
+  hashes stay behind the session boundary.
+- 10 synthetic serde/default tests. `impl Eq` is kept on the float-bearing
+  event types because `ChatMessage` and the wire enums above it derive `Eq`;
+  protocol coordinates are finite by definition.
+
+Four `ChatMessage` literals in `session/whatsapp/{convert.rs,mod.rs,tests.rs}`
+were updated with `event: None`. No real account data or protocol use yet.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

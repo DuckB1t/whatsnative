@@ -2433,6 +2433,7 @@ impl WhatsAppClient {
             system: None,
             poll,
             business,
+            event: None,
         };
 
         if let Some(media) = media_result {

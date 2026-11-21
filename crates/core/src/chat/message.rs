@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use super::media::{MediaContent, MediaType};
 use super::{fallback_sender_name, is_false};
+use crate::event::EventCard;
 use crate::message_status::MessageStatus;
 use crate::quoted::QuotedMessage;
 use crate::system_notice::SystemNotice;
@@ -68,6 +69,9 @@ pub struct ChatMessage {
     /// Display-only template, interactive card or business response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub business: Option<crate::BusinessContent>,
+    /// A calendar card this message carries, if it is an invitation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<EventCard>,
 }
 
 /// What a failed message can be sent again as.
@@ -132,6 +136,7 @@ impl ChatMessage {
             system: None,
             poll: None,
             business: None,
+            event: None,
         }
     }
 
@@ -165,6 +170,7 @@ impl ChatMessage {
             system: None,
             poll: None,
             business: None,
+            event: None,
         }
     }
 
@@ -207,6 +213,7 @@ impl ChatMessage {
         self.quoted = None;
         self.poll = None;
         self.business = None;
+        self.event = None;
     }
 
     /// What sending this again would put on the wire, if anything.

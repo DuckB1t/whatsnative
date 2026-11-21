@@ -130,6 +130,7 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
         system,
         poll,
         business,
+        event: None,
     }
 }
 

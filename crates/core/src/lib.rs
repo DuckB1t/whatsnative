@@ -12,6 +12,9 @@
 //! - `PluginSurface`: what a plugin asked to have drawn, and what it may do
 //! - `LogLevel`: how much the client says about itself
 //! - `UiEvent`: Events for UI updates
+//! - `EventCard`, `EventRsvp`: calendar invitations and answers on messages
+//! - `CommunityDraft`, `CommunityOperationResult`: communities and their subgroups
+//! - `ChannelPollDraft`, `ChannelReact`, `ChannelVotePoll`: channel operations
 
 pub mod base64;
 /// Synthetic chats and messages the tests above this crate share. Off unless
@@ -26,7 +29,10 @@ mod blocklist;
 mod call;
 mod call_devices;
 mod calls;
+mod channel;
 mod chat;
+mod community;
+mod event;
 mod events;
 mod group;
 mod group_membership;
@@ -58,12 +64,19 @@ pub use call::{
 };
 pub use call_devices::*;
 pub use calls::{ActiveCall, Admission, CallState, Ending, Stage, WaitingCall};
+pub use channel::{ChannelPollCreated, ChannelPollDraft, ChannelReact, ChannelVotePoll};
 pub use chat::STATUS_BROADCAST_JID;
 pub use chat::{
     Chat, ChatMessage, DownloadableMedia, GroupHierarchy, MediaContent, MediaType, OutgoingMedia,
     PickerSticker, PollContent, ReleasedMedia, Resend, SubgroupKind,
 };
 pub use chat::{fallback_chat_name, fallback_sender_name};
+pub use community::{
+    CommunityDraft, CommunityGroupRef, CommunityOperationResult, CommunitySubgroupFailure,
+    CommunityVisibility, CommunityWarning, CommunityWarningStep, JoinSubgroupRequest,
+    LinkSubgroupTarget, LinkSubgroupsRequest, SubgroupDraft,
+};
+pub use event::{CreatedMessageRef, EventCard, EventLocation, EventRsvp};
 pub use events::{AvatarOutcome, AvatarResolution, ReceiptType, UiEvent};
 pub use group::{GroupMember, GroupRoster, is_group_jid};
 pub use links::{LinkSpan, find_links as find_message_links, find_links_in};
