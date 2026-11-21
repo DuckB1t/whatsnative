@@ -856,6 +856,28 @@ fn execute_command(
                 }
                 Ok(())
             }
+            Some(args::MessagesSubcommand::Star(s)) => {
+                client.request(ClientRequest::SetStarred {
+                    chat_jid: s.chat,
+                    message_id: s.id,
+                    starred: true,
+                })?;
+                print_action(output_mode, "message_starred", || {
+                    println!("Message starred.");
+                });
+                Ok(())
+            }
+            Some(args::MessagesSubcommand::Unstar(s)) => {
+                client.request(ClientRequest::SetStarred {
+                    chat_jid: s.chat,
+                    message_id: s.id,
+                    starred: false,
+                })?;
+                print_action(output_mode, "message_unstarred", || {
+                    println!("Message unstarred.");
+                });
+                Ok(())
+            }
             Some(args::MessagesSubcommand::Edit(e)) => {
                 client.request(ClientRequest::EditMessage {
                     chat_jid: e.chat,

@@ -736,6 +736,7 @@ async fn a_command_reaches_the_session_rather_than_being_refused() {
         text: "hi".into(),
         local_id: None,
         quoted: None,
+        mentions: vec![],
     })));
     let answer = handle_request(request, &hub, &no_plugins(), &commands, &outbox()).await;
     assert!(matches!(
@@ -1015,6 +1016,7 @@ async fn a_session_lost_mid_command_is_reported_as_such() {
         text: "hi".into(),
         local_id: None,
         quoted: None,
+        mentions: vec![],
     })));
     let answer = handle_request(request, &hub, &no_plugins(), &commands, &outbox()).await;
     assert!(matches!(
@@ -1040,6 +1042,7 @@ async fn a_command_is_refused_while_there_is_no_session_to_carry_it() {
         text: "hi".into(),
         local_id: None,
         quoted: None,
+        mentions: vec![],
     })));
     let answer = handle_request(request, &hub, &no_plugins(), &commands, &outbox()).await;
     assert!(matches!(
@@ -1503,6 +1506,7 @@ fn the_local_actions_do_not_need_a_connection() {
             text: "hi".into(),
             local_id: None,
             quoted: None,
+            mentions: vec![],
         })
         .needs_network()
     );
@@ -2201,6 +2205,7 @@ async fn a_refusal_names_the_request_it_refused() {
             text: "hi".into(),
             local_id: Some("local_1".into()),
             quoted: None,
+            mentions: vec![],
         })),
     };
     let answer = handle_request(request, &hub, &no_plugins(), &commands, &outbox()).await;
@@ -2918,6 +2923,7 @@ async fn terminal_offline_requests_never_reach_the_session_channel() {
             text: "must stay local".into(),
             local_id: None,
             quoted: None,
+            mentions: vec![],
         }),
     ];
     for action in actions {

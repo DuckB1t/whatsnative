@@ -356,6 +356,55 @@ impl WhatsAppClient {
         })
     }
 
+    /// Set or clear a message's starred flag.
+    ///
+    /// The stored row supplies the addressing the app-state mutation needs:
+    /// a group message whose author is somebody else must name that author,
+    /// and guessing from the chat address would send a key the server refuses.
+    /// The local flag is committed only after the mutation has been accepted.
+    pub fn set_starred(
+        &self,
+        chat_jid: String,
+        message_id: String,
+        starred: bool,
+    ) -> Task<Result<(), String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let chat: Jid = chat_jid
+                .parse()
+                .map_err(|_| "not a chat address".to_string())?;
+            let id = whatsapp_rust::MessageId::new(&message_id).map_err(|e| e.to_string())?;
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let stored = live
+                .chat_store
+                .message(&chat, &message_id)
+                .await
+                .map_err(|e| format!("could not read the message: {e}"))?
+                .ok_or_else(|| "message not found".to_string())?;
+            let sender = if super::paging::participant_keyed_chat(&chat) && !stored.from_me {
+                Some(&stored.sender_jid)
+            } else {
+                None
+            };
+            let target = whatsapp_rust::MessageRef::new(&chat, id, sender, stored.from_me)
+                .map_err(|e| e.to_string())?;
+            let actions = live.client.chat_actions();
+            if starred {
+                actions.star_message(&target).await
+            } else {
+                actions.unstar_message(&target).await
+            }
+            .map_err(|e| e.to_string())?;
+            live.chat_store
+                .set_starred(&chat, &message_id, starred)
+                .await
+                .map_err(|e| format!("the star was sent but could not be saved: {e}"))?;
+            Ok(())
+        })
+    }
+
     /// Forward a stored message to another chat.
     ///
     /// The stored proto is forwarded, not rebuilt: media already on the CDN

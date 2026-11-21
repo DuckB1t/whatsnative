@@ -68,7 +68,7 @@ fn new_subcommands_exist() {
                 "show", "refresh", "alias", "tag", "untag", "blocked", "block", "unblock", "lookup",
             ],
         ),
-        ("messages", &["export", "purge"]),
+        ("messages", &["export", "purge", "star", "unstar"]),
         ("poll", &["list", "show"]),
         ("media", &["backfill"]),
         ("chats", &["cleanup"]),
@@ -673,4 +673,24 @@ fn an_old_daemon_cannot_silently_ignore_local_account_selection() {
     assert_eq!(error["error"]["code"], "account_selection_unsupported");
     server.join().unwrap();
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Protocol 52's star mutations are scriptable with the same named flags on
+/// both sides of the pair.
+#[test]
+fn message_star_commands_advertise_their_flags() {
+    for command in ["star", "unstar"] {
+        let out = cli()
+            .args(["messages", command, "--help"])
+            .output()
+            .expect("run the cli");
+        assert!(out.status.success(), "no help for messages {command}");
+        let help = String::from_utf8_lossy(&out.stdout);
+        for flag in ["--chat", "--id"] {
+            assert!(
+                help.contains(flag),
+                "messages {command} is missing {flag}: {help}"
+            );
+        }
+    }
 }

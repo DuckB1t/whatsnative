@@ -322,6 +322,8 @@ mod tests {
                         is_preparing: false,
                         saved_document_path: None,
                         reaction_picker_open: false,
+                        starred: false,
+                        focused: false,
                     };
                     render_message_bubble(props, self.app.clone(), layout, cx)
                 }))

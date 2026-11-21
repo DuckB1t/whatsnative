@@ -1,9 +1,11 @@
 //! Sent-message actions, scoped to the chat and row the menu named.
 
 use super::*;
+use gpui::SharedString;
 use gpui_component::ActiveTheme as _;
 use gpui_component::FocusTrapElement as _;
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::scroll::ScrollableElement as _;
 
 /// A deletion choice captured from one message's context menu. The request is
 /// not made until the user confirms this exact target and scope.
@@ -14,6 +16,295 @@ pub(super) struct DeleteConfirmation {
     pub chat_name: String,
     pub message_preview: String,
     pub message_time: String,
+}
+
+/// A forward waiting for its destination. The source and id are kept together
+/// because neither is available once the context menu that opened the picker
+/// has gone.
+pub(super) struct ForwardDraft {
+    pub chat_jid: SharedString,
+    pub message_id: SharedString,
+}
+
+impl WhatsAppApp {
+    /// Open the chat picker for one message.
+    pub(super) fn begin_forward(
+        &mut self,
+        chat_jid: &str,
+        message_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.forward_picker = Some(ForwardDraft {
+            chat_jid: chat_jid.into(),
+            message_id: message_id.into(),
+        });
+        cx.notify();
+    }
+
+    pub(super) fn cancel_forward(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.forward_picker.take().is_some() {
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
+    /// Ask the daemon to relay one stored message to the picked chat.
+    pub(super) fn forward_to(&mut self, target: &str, cx: &mut Context<Self>) {
+        let Some(draft) = self.forward_picker.take() else {
+            return;
+        };
+        cx.notify();
+        let Some(waiting) = self
+            .client
+            .as_ref()
+            .map(|client| client.forward_message(&draft.chat_jid, &draft.message_id, target))
+        else {
+            self.notify_user(
+                what_went_wrong(
+                    crate::tr!(CouldNotForwardMessage),
+                    &Failure::worth_retrying(crate::tr!(DaemonDisconnectedBeforeAnswer)),
+                ),
+                notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        cx.spawn(async move |entity, cx| {
+            let failure = match waiting.await {
+                Ok(Ok(())) => None,
+                Ok(Err(failure)) => Some(failure),
+                Err(_) => Some(Failure::worth_retrying(crate::tr!(
+                    DaemonDisconnectedBeforeAnswer
+                ))),
+            };
+            let _ = entity.update(cx, |app, cx| {
+                if let Some(failure) = failure {
+                    app.notify_user(
+                        what_went_wrong(crate::tr!(CouldNotForwardMessage), &failure),
+                        notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Mark a message optimistically and ask the account to make it true.
+    ///
+    /// `ChatMessage` carries no starred flag, so the flag lives in this
+    /// window's overlay. A refusal takes the mark back and says why; an
+    /// acknowledgement leaves it until the account-wide `StarChanged` arrives.
+    pub(super) fn toggle_starred(
+        &mut self,
+        chat_jid: &str,
+        message_id: &str,
+        starred: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let chat_jid = chat_jid.to_string();
+        let key = (chat_jid.clone(), message_id.to_string());
+        if starred {
+            self.starred_messages.insert(key.clone());
+        } else {
+            self.starred_messages.remove(&key);
+        }
+        self.invalidate_message_cache(&chat_jid, cx);
+        cx.notify();
+        let Some(waiting) = self
+            .client
+            .as_ref()
+            .map(|client| client.set_starred(&chat_jid, message_id, starred))
+        else {
+            self.starred_messages.remove(&key);
+            self.invalidate_message_cache(&chat_jid, cx);
+            self.notify_user(
+                what_went_wrong(
+                    crate::tr!(CouldNotStarMessage),
+                    &Failure::worth_retrying(crate::tr!(DaemonDisconnectedBeforeAnswer)),
+                ),
+                notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        cx.spawn(async move |entity, cx| {
+            let failure = match waiting.await {
+                Ok(Ok(())) => None,
+                Ok(Err(failure)) => Some(failure),
+                Err(_) => Some(Failure::worth_retrying(crate::tr!(
+                    DaemonDisconnectedBeforeAnswer
+                ))),
+            };
+            let _ = entity.update(cx, |app, cx| {
+                if let Some(failure) = failure {
+                    if starred {
+                        app.starred_messages.remove(&key);
+                    } else {
+                        app.starred_messages.insert(key);
+                    }
+                    app.invalidate_message_cache(&chat_jid, cx);
+                    app.notify_user(
+                        what_went_wrong(crate::tr!(CouldNotStarMessage), &failure),
+                        notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Apply a star change this window did not necessarily ask for.
+    pub(super) fn adopt_star_changed(
+        &mut self,
+        chat_jid: &str,
+        message_id: &str,
+        starred: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (chat_jid.to_string(), message_id.to_string());
+        let before = self.starred_messages.contains(&key);
+        if before == starred {
+            return;
+        }
+        if starred {
+            self.starred_messages.insert(key);
+        } else {
+            self.starred_messages.remove(&key);
+        }
+        self.invalidate_message_cache(chat_jid, cx);
+        cx.notify();
+    }
+
+    /// Whether a row should draw its star, asked while the timeline is built.
+    pub(crate) fn is_starred(&self, chat_jid: &str, message_id: &str) -> bool {
+        self.starred_messages
+            .contains(&(chat_jid.to_string(), message_id.to_string()))
+    }
+}
+
+/// The native chat picker a forward opens. It lists the conversations this
+/// window already knows — no directory lookup, and no fabricated destination.
+pub(super) fn render_forward_picker(
+    focus: &FocusHandle,
+    chats: Vec<(SharedString, SharedString)>,
+    app: &Entity<WhatsAppApp>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    use gpui_component::IconName;
+
+    let metrics = cx.product().metrics;
+    let cancel_app = app.clone();
+    let rows: Vec<_> = chats
+        .into_iter()
+        .map(|(name, jid)| {
+            let target_app = app.clone();
+            let target = jid.clone();
+            let jid_label = jid.clone();
+            div()
+                .id(format!("forward-target-{jid}"))
+                .debug_selector(|| "forward-target".into())
+                .w_full()
+                .cursor_pointer()
+                .rounded(metrics.radius_md())
+                .px(metrics.space_md())
+                .py(metrics.space_sm())
+                .hover(|el| el.bg(cx.theme().list_hover))
+                .on_click(move |_, _, cx| {
+                    target_app.update(cx, |app, cx| app.forward_to(&target, cx));
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(metrics.space_sm())
+                        .child(
+                            div()
+                                .text_size(metrics.text_strong())
+                                .text_color(cx.theme().foreground)
+                                .child(name),
+                        )
+                        .child(
+                            div()
+                                .text_size(metrics.text_micro())
+                                .text_color(cx.theme().muted_foreground)
+                                .child(jid_label),
+                        ),
+                )
+        })
+        .collect();
+    div()
+        .id("forward-picker")
+        .debug_selector(|| "forward-picker".into())
+        .track_focus(focus)
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p(metrics.space_xxl())
+        .child(
+            div()
+                .w(metrics.reading_width())
+                .max_w_full()
+                .max_h(metrics.config_block_height())
+                .overflow_hidden()
+                .rounded(metrics.radius_xl())
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().popover)
+                .p(metrics.space_lg())
+                .flex()
+                .flex_col()
+                .gap(metrics.space_md())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(metrics.space_sm())
+                        .child(
+                            div()
+                                .text_size(metrics.text_heading())
+                                .text_color(cx.theme().foreground)
+                                .child(crate::tr!(ChooseAChat)),
+                        )
+                        .child(
+                            Button::new("forward-picker-close")
+                                .icon(IconName::Close)
+                                .ghost()
+                                .tooltip(crate::tr!(Close))
+                                .on_click(move |_, _, cx| {
+                                    cancel_app.update(cx, |app, cx| {
+                                        app.cancel_forward(cx);
+                                    });
+                                }),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_y_scrollbar()
+                        .flex()
+                        .flex_col()
+                        .gap(metrics.space_xs())
+                        .children(if rows.is_empty() {
+                            vec![
+                                div()
+                                    .text_size(metrics.text_secondary())
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(crate::tr!(NoChatsAvailable))
+                                    .into_any_element(),
+                            ]
+                        } else {
+                            rows.into_iter().map(|row| row.into_any_element()).collect()
+                        }),
+                ),
+        )
 }
 
 pub(crate) fn can_delete_sent(message: &ChatMessage, for_everyone: bool, now_ms: i64) -> bool {

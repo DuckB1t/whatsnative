@@ -537,6 +537,26 @@ impl<'a> Frames<'a> {
                     decoders.interrupted();
                 }
             }
+            // The store's answer, not a page of one window's timeline. It has
+            // no request id on the wire: the query is what lets the overlay
+            // that asked recognize its own answer.
+            DaemonMessage::SearchResults { query, results } => {
+                self.publish(FromDaemon::SearchResults { query, results })?;
+            }
+            // A mutation the account made, whether or not the window that
+            // asked is still attached. Every front end keeps its own view of
+            // a message's starred flag, so each one repaints from this.
+            DaemonMessage::StarChanged {
+                chat_jid,
+                message_id,
+                starred,
+            } => {
+                self.publish(FromDaemon::StarChanged {
+                    chat_jid,
+                    message_id,
+                    starred,
+                })?;
+            }
             // Chat summaries, which this front end derives from the session
             // stream instead. The version still advances: it describes how far
             // the *state* has been carried, not how much of it this client

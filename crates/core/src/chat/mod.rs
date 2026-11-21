@@ -12,11 +12,13 @@ mod merge;
 mod message;
 mod reactions;
 mod retain;
+mod search;
 
 pub use group_hierarchy::{GroupHierarchy, SubgroupKind};
 pub use media::{DownloadableMedia, MediaContent, MediaType, OutgoingMedia, PickerSticker};
 pub use message::{ChatMessage, PollContent, Resend};
 pub use retain::ReleasedMedia;
+pub use search::MessageSearchHit;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

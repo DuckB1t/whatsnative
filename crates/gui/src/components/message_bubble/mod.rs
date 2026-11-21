@@ -25,7 +25,7 @@ use gpui::{
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::ContextMenuExt as _;
-use gpui_component::{Sizable as _, h_flex, v_flex};
+use gpui_component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 
 pub use audio::SPEEDS;
 pub use system::render_encryption_notice;
@@ -37,8 +37,8 @@ use quote::render_quote;
 use reactions::{render_hover_actions, render_reaction_picker, render_reactions};
 
 use crate::app::{
-    BubbleIds, CopyMessage, DeleteSentMessage, EditMessage, OpenMessageLink, ReactToMessage,
-    ReplyToMessage, RetryMessage, WhatsAppApp, can_delete_sent,
+    BubbleIds, CopyMessage, DeleteSentMessage, EditMessage, ForwardMessage, OpenMessageLink,
+    ReactToMessage, ReplyToMessage, RetryMessage, ToggleStarred, WhatsAppApp, can_delete_sent,
 };
 use crate::components::parts;
 use crate::components::{BubbleText, bubble_status_ticks, render_rich_text};
@@ -98,6 +98,11 @@ pub struct BubbleProps {
     /// with the row for the reason the ids do: reading the app here would
     /// re-enter the entity the virtual list already leased to build it.
     pub reaction_picker_open: bool,
+    /// Whether this message is starred in this front end. `ChatMessage` has no
+    /// such field, so the account-wide flag travels in beside the row.
+    pub starred: bool,
+    /// Whether this row is the one a global-search hit asked to see.
+    pub focused: bool,
     /// Whether its downloaded audio is being decoded or retimed for playback.
     pub is_preparing: bool,
 }
@@ -167,6 +172,9 @@ pub fn render_message_bubble(
     let retry_entity = entity.clone();
     let retry_id = message_id.clone();
     let failed = message.is_failed();
+    // A failed send keeps its red outline: that is a state the reader has to
+    // notice, while a search hit is only a location.
+    let focused = props.focused && !failed;
     // Whether there is anything to send again — which is not the same
     // question as whether the send failed, and drawing the button off the
     // latter offered a retry that had nothing to put on the wire.
@@ -185,6 +193,7 @@ pub fn render_message_bubble(
     let now_ms = wacore::time::now_millis();
     let menu_delete_for_me = can_delete_sent(&message, false, now_ms);
     let menu_delete_for_everyone = can_delete_sent(&message, true, now_ms);
+    let menu_starred = props.starred;
     // A refcount, not a rescan: the row's text already parsed these when the
     // timeline was built, and the targets were shared then.
     let menu_links = content.link_targets().clone();
@@ -262,6 +271,7 @@ pub fn render_message_bubble(
                         })
                         .bg(bubble_bg)
                         .when(failed, |el| el.border_1().border_color(cx.theme().danger))
+                        .when(focused, |el| el.border_1().border_color(cx.theme().primary))
                         .child(
                             v_flex()
                                 .gap(metrics.space_md())
@@ -392,6 +402,11 @@ pub fn render_message_bubble(
                                             cx,
                                         )),
                                 )
+                                .children(props.starred.then(|| {
+                                    Icon::new(IconName::StarFill)
+                                        .with_size(metrics.icon_small())
+                                        .text_color(cx.theme().warning)
+                                }))
                                 .children(message.business.as_ref().map(|business| {
                                     business::render_footer(
                                         business,
@@ -514,10 +529,29 @@ pub fn render_message_bubble(
                     }),
                 );
             }
-            let menu = menu.menu(
+            let mut menu = menu.menu(
                 crate::tr!(Reply),
                 Box::new(ReplyToMessage {
                     id: menu_id.clone().into(),
+                }),
+            );
+            menu = menu.menu(
+                crate::tr!(ForwardMessage),
+                Box::new(ForwardMessage {
+                    chat_jid: menu_jid.clone(),
+                    id: menu_id.clone().into(),
+                }),
+            );
+            menu = menu.menu(
+                if menu_starred {
+                    crate::tr!(UnstarMessage)
+                } else {
+                    crate::tr!(StarMessage)
+                },
+                Box::new(ToggleStarred {
+                    chat_jid: menu_jid.clone(),
+                    id: menu_id.clone().into(),
+                    starred: !menu_starred,
                 }),
             );
             let menu = if menu_text.is_empty() {

@@ -522,4 +522,21 @@ catalog! {
     CommunityJoined => ("Joined the subgroup.", "Entrou no subgrupo.");
     CommunityDescriptionFailed => ("The group was created but its description could not be set.", "O grupo foi criado, mas sua descrição não pôde ser definida.");
     CommunityApprovalPending => ("The join request is pending approval.", "O pedido de entrada aguarda aprovação.");
+
+    // Protocol 52's message actions and account-wide search.
+    GlobalSearch => ("Search all messages", "Buscar todas as mensagens");
+    GlobalSearchPlaceholder => ("Search every conversation", "Buscar em todas as conversas");
+    GlobalSearchResults => ("Results", "Resultados");
+    GlobalSearchNoResults => ("No results", "Nenhum resultado");
+    GlobalSearchSearching => ("Searching…", "Buscando…");
+    GlobalSearchMedia => ("Media", "Mídia");
+    CouldNotSearchMessages => ("Could not search messages", "Não foi possível buscar mensagens");
+    ForwardMessage => ("Forward", "Encaminhar");
+    ChooseAChat => ("Choose a chat", "Escolha uma conversa");
+    NoChatsAvailable => ("No chats available", "Nenhuma conversa disponível");
+    CouldNotForwardMessage => ("Could not forward the message", "Não foi possível encaminhar a mensagem");
+    StarMessage => ("Star", "Favoritar");
+    UnstarMessage => ("Remove star", "Remover favorito");
+    StarredMessage => ("Starred", "Favoritado");
+    CouldNotStarMessage => ("Could not update the star", "Não foi possível atualizar o favorito");
 }

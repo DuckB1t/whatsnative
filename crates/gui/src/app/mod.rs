@@ -134,6 +134,9 @@ enum KeyboardOwner {
     /// gpui's own root and never reaches ours. On a machine with a pointer
     /// the first click hid it; on one without, the window never listened.
     Root,
+    /// The account-wide search box, whose debounced query owns the keyboard
+    /// while the overlay is up.
+    GlobalSearch,
     /// A call that is ringing — not one that has been answered, which is a
     /// call people type through.
     RingingCall(String),
@@ -141,6 +144,9 @@ enum KeyboardOwner {
     MessageEdit,
     /// An addressed sent-message deletion awaiting final confirmation.
     MessageDelete,
+    /// The chat picker for a forward, which owns the keyboard until a
+    /// destination is chosen.
+    ForwardPicker,
     /// Files pasted or dropped into the composer, waiting for explicit
     /// confirmation before anything is uploaded.
     PastePreview,
@@ -177,6 +183,9 @@ pub struct KeyboardSurfaces {
     pub paste_preview: bool,
     pub message_edit: bool,
     pub message_delete: bool,
+    pub forward_picker: bool,
+    /// The account-wide search overlay over everything else.
+    pub global_search: bool,
     /// The call card, which only the connected screens float.
     pub call_card: bool,
 }
@@ -342,6 +351,8 @@ actions!(
         PageChatHistoryDown,
         /// Open the Settings screen.
         OpenSettings,
+        /// Search every conversation's stored history, not just the sidebar.
+        OpenGlobalSearch,
         /// Dismiss the topmost overlay: Settings, the media viewer, a reply.
         CloseOverlay,
         /// Mute or unmute the microphone of the live call.
@@ -414,8 +425,31 @@ pub struct DeleteSentMessage {
     pub for_everyone: bool,
 }
 
+/// Forward one message after the reader picks a destination chat.
+///
+/// The source chat and id travel in the action because a context menu opens
+/// on a specific bubble and the picker that follows has no timeline of its own.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = message, no_json)]
+pub struct ForwardMessage {
+    pub chat_jid: gpui::SharedString,
+    pub id: gpui::SharedString,
+}
+
+/// Set or clear one message's starred flag.
+///
+/// `starred` is what the bubble should show *after* this action, so a failed
+/// request knows exactly which optimistic mark to roll back.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = message, no_json)]
+pub struct ToggleStarred {
+    pub chat_jid: gpui::SharedString,
+    pub id: gpui::SharedString,
+    pub starred: bool,
+}
+
 use crate::components::{
-    AccountSummary, InputAreaEvent, InputAreaView, PastePreviewProps, ReplyDraft,
+    AccountSummary, InputAreaEvent, InputAreaView, MentionCandidate, PastePreviewProps, ReplyDraft,
     new_timeline_state, render_paste_preview,
 };
 use crate::retained_image::RetainedImage;
@@ -641,6 +675,10 @@ pub fn init_app_bindings(cx: &mut gpui::App) {
         // Window-wide: reachable whatever owns focus, because both are ways
         // *out* of wherever the user currently is.
         window_binding("secondary-k", FocusSearch, cx),
+        // Account-wide search gets its own chord: `secondary-k` already
+        // narrows the sidebar, and `secondary-shift-f` was unbound in the
+        // table below and on every platform's keyboard module.
+        window_binding("secondary-shift-f", OpenGlobalSearch, cx),
         window_binding(
             crate::platform::keyboard::conversation_search_key(),
             ToggleConversationSearch,
@@ -768,6 +806,11 @@ pub struct WhatsAppApp {
     paste_preview_focus: FocusHandle,
     /// Focus target for the sent-message deletion confirmation modal.
     message_delete_focus: FocusHandle,
+    /// Focus target for the chat picker a forward opens.
+    forward_picker_focus: FocusHandle,
+    /// Focus target for the account-wide search overlay. Its own handle keeps
+    /// the keyboard from being handed back to the composer mid-query.
+    global_search_focus: FocusHandle,
     /// Focus target for the window itself, so the actions hung off the root
     /// are reachable whatever else is on screen — including on the screens on
     /// the way to a conversation, which have no list and no composer to
@@ -1077,6 +1120,20 @@ pub struct WhatsAppApp {
     /// each move the timeline the other measured against.
     reaction_picker_for: Option<String>,
     delete_confirmation: Option<message_actions::DeleteConfirmation>,
+    /// A forward waiting for its destination chat. Holds the source and id so
+    /// the picker itself never needs to reach back into a timeline.
+    forward_picker: Option<message_actions::ForwardDraft>,
+    /// The pending debounce for the account-wide search query. Dropped when
+    /// the reader types again or closes the overlay, so an old keystroke
+    /// cannot send a question the box no longer holds.
+    global_search_debounce: Option<Task<()>>,
+    /// Starred flags this window has drawn, whether they came from its own
+    /// optimistic mark or from an account-wide `StarChanged`. `ChatMessage`
+    /// carries no starred field, so the display state belongs here.
+    starred_messages: HashSet<(String, String)>,
+    /// The row a global-search hit asked to see, so it can be outlined after
+    /// the timeline has been scrolled to it. Cleared by the next hit.
+    focused_message: Option<(String, String)>,
     pending_message_actions: HashSet<(String, String)>,
     #[cfg(test)]
     delete_attempts: Vec<(String, String, bool)>,
@@ -1455,6 +1512,21 @@ impl WhatsAppApp {
                     FromDaemon::StatusViewLost(message_ids) => entity.update(cx, |app, cx| {
                         app.forget_status_views(&message_ids, cx);
                     }),
+                    // The answer to an account-wide search. No request id is
+                    // carried by this frame, so the overlay itself decides
+                    // whether the query is still the one it asked about.
+                    FromDaemon::SearchResults { query, results } => entity.update(cx, |app, cx| {
+                        app.adopt_search_results(query, results, cx);
+                    }),
+                    // A star is account state: every open front end sees it,
+                    // including the one that made the optimistic mark.
+                    FromDaemon::StarChanged {
+                        chat_jid,
+                        message_id,
+                        starred,
+                    } => entity.update(cx, |app, cx| {
+                        app.adopt_star_changed(&chat_jid, &message_id, starred, cx);
+                    }),
                     // The tray's "Open", or another front end asking on a
                     // user's behalf. One window, so there is one to raise.
                     // The connection ended, and why. One screen drew three
@@ -1522,6 +1594,8 @@ impl WhatsAppApp {
             call_focus: cx.focus_handle(),
             paste_preview_focus: cx.focus_handle(),
             message_delete_focus: cx.focus_handle(),
+            forward_picker_focus: cx.focus_handle(),
+            global_search_focus: cx.focus_handle(),
             root_focus: cx.focus_handle(),
             keyboard_owner: None,
             window_focused: false,
@@ -1621,6 +1695,10 @@ impl WhatsAppApp {
             pending_edits: std::collections::HashSet::new(),
             reaction_picker_for: None,
             delete_confirmation: None,
+            forward_picker: None,
+            global_search_debounce: None,
+            starred_messages: HashSet::new(),
+            focused_message: None,
             pending_message_actions: HashSet::new(),
             #[cfg(test)]
             delete_attempts: Vec::new(),
@@ -2674,6 +2752,61 @@ impl WhatsAppApp {
             .unwrap_or_else(|| message.author_label().into_owned())
     }
 
+    /// Everyone this front end can actually address with an `@`.
+    ///
+    /// Drawn from the chats, the name cache and the group rosters the daemon
+    /// has already sent. A display name with no JID is skipped: offering it
+    /// would mean inventing the address that goes on the wire.
+    pub fn mention_candidates(&self) -> Vec<MentionCandidate> {
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        let mut candidates = Vec::new();
+        {
+            let mut add = |handle: &str, jid: &str| {
+                let handle = handle.trim();
+                if handle.is_empty() || jid.is_empty() {
+                    return;
+                }
+                let key = (handle.to_lowercase(), jid.to_string());
+                if seen.insert(key) {
+                    candidates.push(MentionCandidate {
+                        handle: handle.to_string(),
+                        jid: jid.to_string(),
+                    });
+                }
+            };
+            for chat in &self.chats {
+                if chat.is_status {
+                    continue;
+                }
+                if chat.is_group {
+                    for (jid, name) in &chat.participants {
+                        add(name, jid);
+                    }
+                } else {
+                    add(&chat.name, &chat.jid);
+                }
+            }
+            for (jid, name) in &self.name_cache {
+                add(name, jid);
+            }
+            for roster in self.group_rosters.values() {
+                for member in &roster.members {
+                    if let Some(name) = &member.name {
+                        add(name, &member.jid);
+                    }
+                }
+            }
+        }
+        candidates.sort_by(|a, b| {
+            a.handle
+                .to_lowercase()
+                .cmp(&b.handle.to_lowercase())
+                .then_with(|| a.jid.cmp(&b.jid))
+        });
+        candidates.truncate(50);
+        candidates
+    }
+
     pub fn selected_chat_data(&self) -> Option<&Arc<Chat>> {
         self.selected_chat
             .as_ref()
@@ -3347,12 +3480,19 @@ impl WhatsAppApp {
         cx: &mut Context<Self>,
     ) {
         match event {
-            InputAreaEvent::SendMessage(text) => {
+            InputAreaEvent::SendMessage(text, mentions) => {
                 if self.edit_draft.is_some() {
                     self.save_message_edit(text, window, cx);
                 } else {
-                    self.send_message(text, cx);
+                    self.send_message(text, mentions.clone(), cx);
                 }
+            }
+            InputAreaEvent::MentionQueryChanged(query) => {
+                let candidates = query
+                    .as_deref()
+                    .map(|_| self.mention_candidates())
+                    .unwrap_or_default();
+                input_area.update(cx, |view, cx| view.set_mention_candidates(candidates, cx));
             }
             InputAreaEvent::LoadPickerMedia(tab) => self.load_picker_media(*tab, input_area, cx),
             InputAreaEvent::SendPickerMedia(request) => self.send_picker_media(request, cx),
@@ -3422,11 +3562,11 @@ impl WhatsAppApp {
     }
 
     /// Send a message to the currently selected chat
-    fn send_message(&mut self, text: &str, cx: &mut Context<Self>) {
+    fn send_message(&mut self, text: &str, mentions: Vec<String>, cx: &mut Context<Self>) {
         // Taken, not read: a reply is answered once. Leaving the draft in
         // place quoted the same message from every message that followed.
         let quoted = self.reply_to.take().map(QuotedMessage::from);
-        self.send_quoted(text, quoted, cx);
+        self.send_quoted(text, quoted, mentions, cx);
     }
 
     /// Send `text`, quoting whatever the caller says it quotes.
@@ -3435,11 +3575,17 @@ impl WhatsAppApp {
     /// the *original* message's quote: retrying is presented as sending the
     /// failed message again, and the reply draft that produced it was
     /// consumed when it was first sent.
-    fn send_quoted(&mut self, text: &str, quoted: Option<QuotedMessage>, cx: &mut Context<Self>) {
+    fn send_quoted(
+        &mut self,
+        text: &str,
+        quoted: Option<QuotedMessage>,
+        mentions: Vec<String>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(jid) = self.selected_chat.clone() else {
             return;
         };
-        if !self.send_text_to(&jid, text, quoted, cx) {
+        if !self.send_text_to(&jid, text, quoted, mentions, cx) {
             return;
         }
         self.scroll_to_last_message();
@@ -3456,6 +3602,7 @@ impl WhatsAppApp {
         jid: &str,
         text: &str,
         quoted: Option<QuotedMessage>,
+        mentions: Vec<String>,
         cx: &mut Context<Self>,
     ) -> bool {
         if !self.is_connected() {
@@ -3511,7 +3658,7 @@ impl WhatsAppApp {
             return true;
         }
 
-        client.send_message(jid, text, local_id.clone(), quoted.clone());
+        client.send_message(jid, text, local_id.clone(), quoted.clone(), mentions);
 
         // MessageIdAssigned replaces the local id once the daemon accepts the send.
         let mut message = ChatMessage::new_outgoing(local_id, text.to_string());
@@ -4594,6 +4741,9 @@ impl Render for WhatsAppApp {
             .on_action(cx.listener(|app, _: &OpenSettings, window, cx| {
                 app.open_settings(window, cx);
             }))
+            .on_action(cx.listener(|app, _: &OpenGlobalSearch, window, cx| {
+                app.open_global_search(window, cx);
+            }))
             .on_action(cx.listener(|app, _: &CloseOverlay, window, cx| {
                 // `close_overlay` lives outside this change, so the link form
                 // is dismissed at the one place every Escape reaches first.
@@ -4624,6 +4774,12 @@ impl Render for WhatsAppApp {
             }))
             .on_action(cx.listener(|app, delete: &DeleteSentMessage, _window, cx| {
                 app.begin_message_delete(&delete.jid, &delete.id, delete.for_everyone, cx);
+            }))
+            .on_action(cx.listener(|app, forward: &ForwardMessage, _window, cx| {
+                app.begin_forward(&forward.chat_jid, &forward.id, cx);
+            }))
+            .on_action(cx.listener(|app, star: &ToggleStarred, _window, cx| {
+                app.toggle_starred(&star.chat_jid, &star.id, star.starred, cx);
             }))
             .on_action(|copy: &CopyMessage, _window, cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.text.to_string()));
@@ -4714,6 +4870,66 @@ impl Render for WhatsAppApp {
             .into_any_element()
         });
 
+        // The account-wide search floats above the body but below the notices,
+        // so a failure from the query that opened it stays readable on top.
+        let global_state = self.search.read(cx).global().cloned();
+        let global_input = self.search.read(cx).global_input().cloned();
+        let global_rows: Vec<search::SearchResultRow> = global_state
+            .as_ref()
+            .map(|global| {
+                global
+                    .results
+                    .iter()
+                    .map(|hit| {
+                        let chat_name = self
+                            .chat_named(&hit.chat_jid)
+                            .map(|chat| chat.name.clone())
+                            .unwrap_or_else(|| hit.chat_jid.clone());
+                        search::SearchResultRow {
+                            chat_jid: hit.chat_jid.clone().into(),
+                            chat_name: chat_name.into(),
+                            message_id: hit.message_id.clone().into(),
+                            snippet: hit.snippet.clone().into(),
+                            timestamp_ms: hit.timestamp_ms,
+                            has_media: hit.has_media,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let global_search = match (&global_state, global_input.as_ref()) {
+            (Some(global), Some(input)) => Some(
+                search::render_global_search(
+                    input,
+                    &self.global_search_focus,
+                    global,
+                    &global_rows,
+                    &cx.entity(),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            _ => None,
+        };
+        let global_search_open = global_search.is_some();
+
+        // A forward's destination picker, over the body but under notices too.
+        let forward_picker = self.forward_picker.as_ref().map(|_draft| {
+            let chats: Vec<_> = self
+                .chats
+                .iter()
+                .map(|chat| (chat.name.clone().into(), chat.jid.clone().into()))
+                .collect();
+            message_actions::render_forward_picker(
+                &self.forward_picker_focus,
+                chats,
+                &cx.entity(),
+                cx,
+            )
+            .into_any_element()
+        });
+        let forward_picker_open = forward_picker.is_some();
+
         // Outside the Settings-versus-conversation branch on purpose. The
         // card and the focus it takes were built by the conversation view
         // alone, so a call arriving while Settings was open rang at the far
@@ -4735,7 +4951,9 @@ impl Render for WhatsAppApp {
             || channel_poll_dialog_open
             || community_dialog_open
             || call_link_dialog_open
-            || media_viewer_open;
+            || media_viewer_open
+            || global_search_open
+            || forward_picker_open;
         let call_overlay = (connected && !modal_open)
             .then(|| render_call_overlay(self, window, cx))
             .flatten();
@@ -4784,6 +5002,8 @@ impl Render for WhatsAppApp {
         .children(channel_poll_dialog)
         .children(community_dialog)
         .children(call_link_dialog)
+        .children(global_search)
+        .children(forward_picker)
         .children(call_overlay)
         .child(self.notices().clone())
         // Cached views report their surfaces in prepaint. Move focus after
@@ -4799,6 +5019,8 @@ impl Render for WhatsAppApp {
                             || channel_poll_dialog_open
                             || community_dialog_open
                             || call_link_dialog_open;
+                        app.keyboard_surfaces.global_search = global_search_open;
+                        app.keyboard_surfaces.forward_picker = forward_picker_open;
                     });
                     let entity = entity.downgrade();
                     window.defer(cx, move |window, cx| {

@@ -2541,6 +2541,38 @@ impl ChatStore {
         })
     }
 
+    /// Set or clear the durable starred flag on one stored message.
+    ///
+    /// The network mutation belongs to the session; this is the local half
+    /// that makes the flag survive a restart before the app-state echo comes
+    /// back. A message the store does not hold is a no-op, as it is for an
+    /// inbound star update.
+    pub async fn set_starred(&self, chat: &Jid, msg_id: &str, starred: bool) -> Result<()> {
+        use schema::messages::dsl;
+        let device_id = self.device_id();
+        let chat = chat.to_string();
+        let msg_id = msg_id.to_string();
+        self.db()
+            .run(move |conn| {
+                let keys =
+                    crate::lid::chat_key_candidates(conn, device_id, &chat).map_err(db_err)?;
+                diesel::update(
+                    dsl::messages.filter(
+                        dsl::device_id
+                            .eq(device_id)
+                            .and(dsl::chat_jid.eq_any(keys))
+                            .and(dsl::msg_id.eq(&msg_id)),
+                    ),
+                )
+                .set(dsl::starred.eq(starred))
+                .execute(conn)
+                .map_err(db_err)?;
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Drop the stored payload of revoked messages, keeping the tombstone row.
     ///
     /// The row stays so the timeline keeps its "message deleted" marker; only

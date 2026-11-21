@@ -60,9 +60,10 @@ pub use protocol::{
     CallAction, CallDeviceAction, CallDeviceReply, CameraPreviewFrame, ChatSummary, ClientRequest,
     ClientScope, ConnectionState, CreateEvent, DaemonEvent, DaemonMessage, Download, EditMessage,
     EnsureAvatars, GroupMembers, InstallPlugin, LoadChats, LoadMessages, MarkAudioPlayed, MarkRead,
-    MarkStatusWatched, MessagePreview, PageCursor, PairingCode, PostToChannel, PreviewCallLink,
-    ProtocolError, PublishStatusMedia, Request, RequestId, RespondEvent, RevokeMessage, SendAudio,
-    SendMedia, SendReaction, SendText, StateSnapshot, StateVersion, Typing, VotePoll,
+    MarkStatusWatched, MessagePreview, MessageSearchHit, PageCursor, PairingCode, PostToChannel,
+    PreviewCallLink, ProtocolError, PublishStatusMedia, Request, RequestId, RespondEvent,
+    RevokeMessage, SendAudio, SendMedia, SendReaction, SendText, StateSnapshot, StateVersion,
+    Typing, VotePoll,
 };
 pub use transport::{
     ACCOUNT_STAGED_INFIX, DEFAULT_WEB_PORT, MAX_STAGED_BYTES, PROTOCOL_VERSION, STAGED_PREFIX,

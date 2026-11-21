@@ -28,6 +28,32 @@ use oxidezap_ipc::{CallAction, PostToChannel, RequestId};
 #[derive(Debug)]
 pub enum Action {
     SendText(oxidezap_ipc::SendText),
+    /// Forward a stored message. The answer is correlated because the session
+    /// can refuse a message it no longer holds after the request was accepted.
+    ForwardMessage {
+        id: RequestId,
+        source_chat_jid: String,
+        message_id: String,
+        target_chat_jid: String,
+        answer_to: Outbox,
+    },
+    /// Set or clear a star, answered by `StarChanged` or a correlated error.
+    SetStarred {
+        id: RequestId,
+        chat_jid: String,
+        message_id: String,
+        starred: bool,
+        answer_to: Outbox,
+    },
+    /// Full-text search, answered with `SearchResults` on the asking outbox.
+    SearchMessages {
+        id: RequestId,
+        query: String,
+        chat_jid: Option<String>,
+        has_media: bool,
+        limit: usize,
+        answer_to: Outbox,
+    },
     SyncedStickers {
         id: RequestId,
         favorites: bool,
@@ -353,6 +379,7 @@ impl Action {
                     | Self::MarkStatusWatched(_)
                     | Self::LoadMessages { .. }
                     | Self::LoadChats { .. }
+                    | Self::SearchMessages { .. }
                     | Self::RefreshAvatars
                     | Self::Download { .. }
                     | Self::GroupMembers { .. }
@@ -463,6 +490,7 @@ fn wire_needs_network(request: &oxidezap_wire::request::ClientRequest) -> bool {
         | R::EditMessage { .. }
         | R::RevokeMessage { .. }
         | R::ForwardMessage { .. }
+        | R::SetStarred { .. }
         | R::SendText { .. }
         | R::SendMedia { .. }
         | R::SendAudio { .. }

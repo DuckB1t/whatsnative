@@ -246,6 +246,21 @@ pub enum FromDaemon {
     /// thing is to put it back: nothing durable exists, and the next restart
     /// would bring the ring back anyway, with nothing having said why.
     StatusViewLost(Vec<String>),
+    /// Full-text hits for an account-wide query. The daemon carries the query
+    /// on the answer because it owns the index and can answer for any front
+    /// end; the overlay that asked compares it with what its box holds now.
+    SearchResults {
+        query: String,
+        results: Vec<oxidezap_ipc::MessageSearchHit>,
+    },
+    /// A starred flag that changed on the account, whether or not this window
+    /// asked for it. Every front end keeps its own optimistic marks, so each
+    /// one has to hear the authoritative answer.
+    StarChanged {
+        chat_jid: String,
+        message_id: String,
+        starred: bool,
+    },
 }
 
 /// Why something a front end asked for did not happen.
@@ -1204,6 +1219,7 @@ impl SessionHandle {
         text: &str,
         local_id: String,
         quoted: Option<QuotedMessage>,
+        mentions: Vec<String>,
     ) {
         self.ask(
             ClientRequest::SendText(Box::new(SendText {
@@ -1211,6 +1227,7 @@ impl SessionHandle {
                 text: text.to_string(),
                 local_id: Some(local_id.clone()),
                 quoted,
+                mentions,
             })),
             Awaiting::Send {
                 chat_jid: jid.to_string(),
@@ -1218,6 +1235,72 @@ impl SessionHandle {
                 staged: None,
             },
         );
+    }
+
+    /// Forward a stored message to another chat.
+    ///
+    /// The source proto is relayed by the daemon, so a picture already on the
+    /// CDN is not downloaded and uploaded again just to move a copy.
+    pub fn forward_message(
+        &self,
+        source_chat_jid: &str,
+        message_id: &str,
+        target_chat_jid: &str,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::ForwardMessage {
+                source_chat_jid: source_chat_jid.to_string(),
+                message_id: message_id.to_string(),
+                target_chat_jid: target_chat_jid.to_string(),
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Set or clear a message's starred flag.
+    pub fn set_starred(
+        &self,
+        chat_jid: &str,
+        message_id: &str,
+        starred: bool,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::SetStarred {
+                chat_jid: chat_jid.to_string(),
+                message_id: message_id.to_string(),
+                starred,
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Search the store's full-text index.
+    ///
+    /// The ack says the request ran; the hits arrive separately as
+    /// [`FromDaemon::SearchResults`], without a request id, because the daemon
+    /// owns the index and answers every front end that can use the result.
+    pub fn search_messages(
+        &self,
+        query: String,
+        chat_jid: Option<String>,
+        has_media: bool,
+        limit: usize,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::SearchMessages {
+                query,
+                chat_jid,
+                has_media,
+                limit,
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
     }
 
     pub fn sticker_library(

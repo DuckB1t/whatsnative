@@ -174,6 +174,10 @@ pub enum MessagesSubcommand {
     Search(MessagesSearchArgs),
     /// List starred messages
     Starred(MessagesStarredArgs),
+    /// Star a message
+    Star(MessageStarArgs),
+    /// Remove a message's star
+    Unstar(MessageStarArgs),
     /// Edit a sent text message
     Edit(MessageEditArgs),
     /// Revoke/delete a sent message
@@ -261,6 +265,16 @@ pub struct MessagesStarredArgs {
     /// Maximum number of results
     #[usage(long, default = "50")]
     pub limit: usize,
+}
+
+#[derive(Args)]
+pub struct MessageStarArgs {
+    /// Chat JID
+    #[usage(long)]
+    pub chat: String,
+    /// Message ID
+    #[usage(long)]
+    pub id: String,
 }
 
 #[derive(Args)]

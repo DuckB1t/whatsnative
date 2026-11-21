@@ -1312,7 +1312,9 @@ impl WhatsAppApp {
         log::debug!("keyboard: {:?} -> {wanted:?}", self.keyboard_owner);
         match &wanted {
             KeyboardOwner::RingingCall(_) => window.focus(&self.call_focus, cx),
+            KeyboardOwner::GlobalSearch => window.focus(&self.global_search_focus, cx),
             KeyboardOwner::MessageDelete => window.focus(&self.message_delete_focus, cx),
+            KeyboardOwner::ForwardPicker => window.focus(&self.forward_picker_focus, cx),
             KeyboardOwner::MessageEdit => {
                 if let Some(input) = self.input_area.as_ref() {
                     window.focus(&input.read(cx).focus_handle(cx), cx);
@@ -1447,6 +1449,8 @@ fn keyboard_owner_for(
     let composing = intent == ChatOpen::ToCompose;
     match ringing_call.filter(|_| surfaces.call_card) {
         Some(call_id) => KeyboardOwner::RingingCall(call_id),
+        None if surfaces.global_search => KeyboardOwner::GlobalSearch,
+        None if surfaces.forward_picker => KeyboardOwner::ForwardPicker,
         None if surfaces.message_delete => KeyboardOwner::MessageDelete,
         None if surfaces.message_edit => KeyboardOwner::MessageEdit,
         None if surfaces.paste_preview => KeyboardOwner::PastePreview,
@@ -1526,6 +1530,8 @@ mod keyboard_owner_tests {
         paste_preview: false,
         message_edit: false,
         message_delete: false,
+        forward_picker: false,
+        global_search: false,
         call_card: false,
     };
 
@@ -1550,6 +1556,8 @@ mod keyboard_owner_tests {
             paste_preview: true,
             message_edit: false,
             message_delete: false,
+            forward_picker: false,
+            global_search: false,
             call_card: true,
         };
         assert_eq!(

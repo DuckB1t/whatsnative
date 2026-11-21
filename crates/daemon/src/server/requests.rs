@@ -103,6 +103,80 @@ pub(super) async fn handle_request(
         ClientRequest::SendText(request) => {
             acted(dispatch(hub, commands, Action::SendText(*request)).await)
         }
+        // These answer from the session under this id: a forward can fail
+        // because the source row vanished, a star can be refused by the
+        // network, and a search is a query whose own result is the answer.
+        ClientRequest::ForwardMessage {
+            source_chat_jid,
+            message_id,
+            target_chat_jid,
+        } => {
+            let id = match addressed(id, "a forward needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::ForwardMessage {
+                    id,
+                    source_chat_jid,
+                    message_id,
+                    target_chat_jid,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::SetStarred {
+            chat_jid,
+            message_id,
+            starred,
+        } => {
+            let id = match addressed(id, "a star needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::SetStarred {
+                    id,
+                    chat_jid,
+                    message_id,
+                    starred,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::SearchMessages {
+            query,
+            chat_jid,
+            has_media,
+            limit,
+        } => {
+            let id = match addressed(id, "a search needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::SearchMessages {
+                    id,
+                    query,
+                    chat_jid,
+                    has_media,
+                    limit,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::SyncedStickers { favorites } => {
             let id = match addressed(id, "sticker sync needs an id to answer under") {
                 Ok(id) => id,
@@ -1178,6 +1252,7 @@ pub(super) async fn handle_wire_request(
         | WireRequest::EditMessage { .. }
         | WireRequest::RevokeMessage { .. }
         | WireRequest::ForwardMessage { .. }
+        | WireRequest::SetStarred { .. }
         | WireRequest::SendPoll { .. }
         | WireRequest::VotePoll { .. }
         | WireRequest::ListPolls { .. }

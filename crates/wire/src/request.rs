@@ -91,6 +91,16 @@ pub enum ClientRequest {
         message_id: String,
         target_chat_jid: String,
     },
+    /// Set or clear a message's starred flag.
+    ///
+    /// Mirrors the legacy `ClientRequest::SetStarred`; the daemon answers with
+    /// an ack on success and a correlated error when the app-state mutation or
+    /// its local persistence fails.
+    SetStarred {
+        chat_jid: String,
+        message_id: String,
+        starred: bool,
+    },
 
     // --- Sends ---
     SendText {
@@ -476,6 +486,7 @@ impl ClientRequest {
             | Self::EditMessage { .. }
             | Self::RevokeMessage { .. }
             | Self::ForwardMessage { .. }
+            | Self::SetStarred { .. }
             | Self::SendText { .. }
             | Self::SendMedia { .. }
             | Self::SendAudio { .. }
@@ -599,6 +610,11 @@ mod tests {
                 title: "menu".into(),
                 row_id: "row-1".into(),
                 reply_to: None,
+            },
+            R::SetStarred {
+                chat_jid: "x@s.whatsapp.net".into(),
+                message_id: "SYNTHETIC-1".into(),
+                starred: true,
             },
         ] {
             assert_eq!(request.access(), Access::Write, "{request:?}");

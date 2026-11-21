@@ -155,7 +155,7 @@ impl WhatsAppApp {
         let _ = window;
 
         match again {
-            Retry::Text(content) => self.send_quoted(&content, quoted, cx),
+            Retry::Text(content) => self.send_quoted(&content, quoted, Vec::new(), cx),
             Retry::VoiceNote(media) => {
                 self.send_voice_note(
                     cx,

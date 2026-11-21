@@ -109,6 +109,11 @@ impl MessageKind {
         }
     }
 
+    /// Whether this row's content class carries an attachment.
+    pub fn has_media(&self) -> bool {
+        Self::MEDIA_LABELS.contains(&self.as_str())
+    }
+
     /// The database labels whose content carries an attachment.
     ///
     /// A SQL fragment's worth of vocabulary, written beside [`Self::as_str`]

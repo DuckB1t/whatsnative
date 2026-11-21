@@ -349,6 +349,12 @@ impl WhatsAppApp {
             self.decline_waiting_call(cx);
             return;
         }
+        if self.cancel_forward(cx) {
+            return;
+        }
+        if self.close_global_search(cx) {
+            return;
+        }
         if self.cancel_event_dialog(cx) {
             return;
         }

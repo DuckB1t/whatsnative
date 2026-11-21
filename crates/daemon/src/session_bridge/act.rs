@@ -802,6 +802,101 @@ impl Bridge {
                 });
                 None
             }
+            Action::ForwardMessage {
+                id,
+                source_chat_jid,
+                message_id,
+                target_chat_jid,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.forward_message(source_chat_jid, message_id, target_chat_jid);
+                oxidezap_session::spawn(async move {
+                    let answer = mutation_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::SetStarred {
+                id,
+                chat_jid,
+                message_id,
+                starred,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.set_starred(chat_jid.clone(), message_id.clone(), starred);
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // The mutation's own answer is the correlated ack or error:
+                    // `StarChanged` carries no id, so it can only be the event
+                    // every front end uses to repaint the row.
+                    let answer = mutation_answer(id, task.await);
+                    if answer.is_ok() {
+                        hub.signal(&DaemonMessage::StarChanged {
+                            chat_jid,
+                            message_id,
+                            starred,
+                        });
+                    }
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::SearchMessages {
+                id,
+                query,
+                chat_jid,
+                has_media,
+                limit,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.search_message_hits(
+                    query.clone(),
+                    chat_jid,
+                    has_media,
+                    i64::try_from(limit).unwrap_or(50),
+                );
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // Hits name their query instead of a request id, so they
+                    // are a signal like any other account-wide news; the id
+                    // still gets its ordinary ack, or its error, on this wire.
+                    let answer = match task.await {
+                        Ok(Ok(results)) => {
+                            hub.signal(&DaemonMessage::SearchResults { query, results });
+                            Ok(DaemonMessage::Accepted { id: Some(id) })
+                        }
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(error) => Err(ProtocolError::NoSession {
+                            detail: format!(
+                                "the session stopped before the search arrived: {error}"
+                            ),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::Wire {
                 id,
                 request,
@@ -1286,6 +1381,24 @@ impl Bridge {
                         timestamp_ms: wacore::time::now_millis(),
                         enqueued: false,
                     }
+                });
+            }
+            WireRequest::SetStarred {
+                chat_jid,
+                message_id,
+                starred,
+            } => {
+                let event_chat = chat_jid.clone();
+                let event_id = message_id.clone();
+                let hub = Arc::clone(&self.hub);
+                let task = client.set_starred(chat_jid, message_id, starred);
+                run_wire(answer_to.clone(), id, reply, permit, task, move |()| {
+                    hub.signal(&DaemonMessage::StarChanged {
+                        chat_jid: event_chat,
+                        message_id: event_id,
+                        starred,
+                    });
+                    DaemonResponse::Ack
                 });
             }
             WireRequest::SendPoll {
@@ -1966,6 +2079,9 @@ impl Bridge {
 
         match action {
             Action::Wire { .. }
+            | Action::ForwardMessage { .. }
+            | Action::SetStarred { .. }
+            | Action::SearchMessages { .. }
             | Action::CreateEvent { .. }
             | Action::PreviewCallLink { .. }
             | Action::CreateChannelPoll { .. }
@@ -1986,6 +2102,7 @@ impl Bridge {
                 text,
                 local_id,
                 quoted,
+                mentions,
             }) => {
                 let Some(permit) = self.permit() else {
                     return too_busy();
@@ -1994,14 +2111,16 @@ impl Bridge {
                 // before it was sent and cannot match the rename otherwise.
                 // The daemon makes one up for a client that draws nothing — it
                 // still has to be unique, because a collision would rename the
-                // wrong send.
+                // wrong send. The mentions-aware send keeps that optimistic
+                // contract and adds only the extended-text context they need.
                 hold(
                     permit,
-                    [client.send_message(
+                    [client.send_message_with_mentions(
                         &jid,
                         &text,
                         local_id.unwrap_or_else(next_local_id),
                         quoted,
+                        mentions,
                     )],
                 );
                 CommandOutcome::Accepted
@@ -3283,6 +3402,7 @@ mod tests {
             text: "oi".to_string(),
             local_id: None,
             quoted: None,
+            mentions: vec![],
         })
     }
 

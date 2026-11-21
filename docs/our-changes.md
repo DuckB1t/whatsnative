@@ -388,6 +388,43 @@ browser tests, plus the `xtask` and example-plugin gates. Release rebuild:
 `oxidezap` 47,868,336 B, `oxidezapd` 32,799,400 B, `oxidezap-cli`
 1,706,472 B (<2 MiB).
 
+### 14. Native message actions and account-wide search (protocol 52)
+
+**Problem.** Forward and FTS5 search worked from the CLI but not the window.
+Starred messages were a read-only list with no mutation, and `@mentions` could
+only be attached from a terminal. The four gaps were split across store,
+session, IPC, daemon, wire, CLI and GUI, so they landed as one slice rather
+than seven partial ones.
+
+**Change.**
+- `core` gains `MessageSearchHit`; IPC moves to version **52** with
+  `ForwardMessage`, `SetStarred`, `SearchMessages`, an additive `mentions`
+  field on `SendText`, and the `SearchResults` / `StarChanged` events.
+  `SearchMessages` is a local read; the other two are correlated mutations.
+- The daemon relays forwards through the existing session mutation, routes
+  mentions through the extended-text context used by the wire send, and
+  persists the starred flag in the existing `messages.starred` column — no
+  migration. A successful star is broadcast as `StarChanged`; its own ack or
+  refusal is still correlated to the press. Search hits are bounded, sorted
+  newest-first and carry their query so a front end can discard late answers.
+- `oxidezap-wire` gains `SetStarred` without taking a dependency on `core`;
+  CLI gains `messages star|unstar` and a protocol-52 parity test covers the
+  JSON spelling.
+- The GUI adds Forward and Star/Remove star to the bubble menu, a native chat
+  picker for forwards, a bounded `@` candidate list built only from JIDs the
+  window already knows, and a global search overlay on `secondary-shift-f`.
+  The sidebar filter and in-conversation search are unchanged. Stars are a
+  display overlay because `ChatMessage` carries no starred field; a window
+  opened after a star change has no snapshot to draw until the next event.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2631 passed, 0 failed). The pre-existing sticker-animation timing test flakes
+only under heavy parallel load; it passes in isolation and in the
+single-threaded suite. Web gates green: shared-view ban, wasm daemon/session
+browser tests (16 and 35 passed), and the nightly wasm type-check. Synthetic
+fixtures only; no message, mention, star, forward or search ran against the
+paired account.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

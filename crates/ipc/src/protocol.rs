@@ -1,5 +1,6 @@
 //! Messages exchanged over the socket.
 
+pub use oxidezap_core::MessageSearchHit;
 use oxidezap_core::{
     AccountId, BlockedContact, CallState, CallVideoFrame, ChannelPollCreated, ChannelPollDraft,
     ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
@@ -495,6 +496,24 @@ pub enum DaemonMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         next: Option<PageCursor>,
     },
+    /// Full-text hits answering [`ClientRequest::SearchMessages`].
+    ///
+    /// Unlike a page of history, a search is not a position in one window's
+    /// timeline: it is the answer to a question, and the query is carried so a
+    /// front end can match a late result to the box it came from. The frame is
+    /// signalled account-wide and the request itself gets an ordinary ack.
+    SearchResults {
+        query: String,
+        results: Vec<MessageSearchHit>,
+    },
+    /// A message's starred flag changed, whether the window that asked is still
+    /// attached or not. The mutation is account state, so every front end sees
+    /// it; no request id is carried because there is no one answer to own.
+    StarChanged {
+        chat_jid: String,
+        message_id: String,
+        starred: bool,
+    },
     /// One page of the chat list, answering [`ClientRequest::LoadChats`].
     Chats {
         id: RequestId,
@@ -724,11 +743,41 @@ impl ClientRequest {
     pub fn is_account_request(&self) -> bool {
         !self.is_control_request() && !matches!(self, Self::Hello { .. })
     }
+
+    /// Whether a request only reads state.
+    ///
+    /// A list rather than a `!is_mutation` default: a request added later is
+    /// treated as a write until somebody puts it here and says why it is safe.
+    /// This is the legacy plane's counterpart to the wire's `Access` gate; it
+    /// does not decide whether a command needs a live connection.
+    #[must_use]
+    pub fn is_read(&self) -> bool {
+        matches!(
+            self,
+            Self::Hello { .. }
+                | Self::ListAccounts
+                | Self::Snapshot
+                | Self::PreviewCallLink(_)
+                | Self::SearchMessages { .. }
+                | Self::LoadMessages(_)
+                | Self::LoadChats(_)
+                | Self::GroupMembers(_)
+                | Self::Blocklist
+                | Self::LookupUsername { .. }
+                | Self::StorageUsage
+                | Self::ListInstalledPlugins
+        )
+    }
 }
 
 /// The default for [`ClientRequest::Hello::owns_window`]. See the field.
 fn owns_a_window() -> bool {
     true
+}
+
+/// The default page size for a protocol-52 message search.
+fn default_search_limit() -> usize {
+    50
 }
 
 // The payloads below are named structs rather than a variant's own fields,
@@ -773,6 +822,12 @@ pub struct SendText {
     /// wrote it, and the line to show in the quote bar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quoted: Option<QuotedMessage>,
+    /// JIDs to mark as mentioned in the message's extended-text context.
+    ///
+    /// Absent on frames from a client that does not compose mentions, which is
+    /// why an empty vector is left off the wire rather than sent as `[]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<String>,
 }
 
 /// Delete one sent message locally or request deletion for everyone.
@@ -1165,6 +1220,38 @@ pub enum ClientRequest {
     /// — and the serde working set — of every request. The wire is unchanged:
     /// `Box` is transparent to serde, and the round-trip test pins the bytes.
     SendText(Box<SendText>),
+    /// Forward one stored message to another chat.
+    ///
+    /// The source proto is relayed by the session, so media already on the CDN
+    /// is not downloaded and re-uploaded just to forward it.
+    ForwardMessage {
+        source_chat_jid: String,
+        message_id: String,
+        target_chat_jid: String,
+    },
+    /// Set or clear a message's starred flag.
+    ///
+    /// A real app-state mutation, not just a local row: this request gets an
+    /// ack or a correlated error, and success also signals
+    /// [`DaemonMessage::StarChanged`] to every front end.
+    SetStarred {
+        chat_jid: String,
+        message_id: String,
+        starred: bool,
+    },
+    /// Full-text search over stored messages.
+    ///
+    /// Answered with [`DaemonMessage::SearchResults`]. The store is the only
+    /// process that owns the index, so a front end cannot answer this itself.
+    SearchMessages {
+        query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chat_jid: Option<String>,
+        #[serde(default)]
+        has_media: bool,
+        #[serde(default = "default_search_limit")]
+        limit: usize,
+    },
     SyncedStickers {
         favorites: bool,
     },
@@ -2434,6 +2521,7 @@ mod tests {
                     text: "oi".into(),
                     local_id: Some("local-1".into()),
                     quoted: Some(quoted.clone()),
+                    mentions: vec![],
                 })),
                 r#"{"request":"send_text","jid":"559900000001@s.whatsapp.net","text":"oi","local_id":"local-1","quoted":{"message_id":"3EB0A","sender":"559900000001@s.whatsapp.net","sender_name":"quem quer que seja","preview":"a linha citada","kind":null}}"#.to_string(),
             ),
@@ -2443,6 +2531,7 @@ mod tests {
                     text: "oi".into(),
                     local_id: None,
                     quoted: None,
+                    mentions: vec![],
                 })),
                 r#"{"request":"send_text","jid":"559900000001@s.whatsapp.net","text":"oi","local_id":null}"#.to_string(),
             ),
@@ -3146,5 +3235,116 @@ mod audio_played_tests {
             chat.muted_until_ms = None;
             assert!(chat.counts_toward_attention(9000));
         }
+    }
+
+    /// Protocol 52's message actions are one more set of bytes the daemon and
+    /// every front end agree on. Literal JSON rather than a round trip, so a
+    /// field that is renamed or quietly made optional is a visible change.
+    #[test]
+    fn protocol_52_message_frames_put_the_same_bytes_on_the_wire() {
+        let requests = [
+            (
+                ClientRequest::SendText(Box::new(SendText {
+                    jid: "155555500002@s.whatsapp.net".into(),
+                    text: "hello".into(),
+                    local_id: None,
+                    quoted: None,
+                    mentions: vec!["155555500003@s.whatsapp.net".into()],
+                })),
+                r#"{"request":"send_text","jid":"155555500002@s.whatsapp.net","text":"hello","local_id":null,"mentions":["155555500003@s.whatsapp.net"]}"#,
+            ),
+            (
+                ClientRequest::ForwardMessage {
+                    source_chat_jid: "155555500001@g.us".into(),
+                    message_id: "SYNTHETIC-1".into(),
+                    target_chat_jid: "155555500002@s.whatsapp.net".into(),
+                },
+                r#"{"request":"forward_message","source_chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-1","target_chat_jid":"155555500002@s.whatsapp.net"}"#,
+            ),
+            (
+                ClientRequest::SetStarred {
+                    chat_jid: "155555500001@g.us".into(),
+                    message_id: "SYNTHETIC-2".into(),
+                    starred: true,
+                },
+                r#"{"request":"set_starred","chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-2","starred":true}"#,
+            ),
+            (
+                ClientRequest::SearchMessages {
+                    query: "synthetic".into(),
+                    chat_jid: None,
+                    has_media: false,
+                    limit: 50,
+                },
+                r#"{"request":"search_messages","query":"synthetic","has_media":false,"limit":50}"#,
+            ),
+        ];
+        for (frame, expected) in requests {
+            let line = serde_json::to_string(&frame).expect("a request serializes");
+            assert_eq!(line, expected);
+            assert_eq!(
+                serde_json::from_str::<ClientRequest>(&line).expect("a request parses"),
+                frame
+            );
+        }
+
+        let answers = [
+            (
+                DaemonMessage::SearchResults {
+                    query: "synthetic".into(),
+                    results: vec![MessageSearchHit {
+                        chat_jid: "155555500001@g.us".into(),
+                        message_id: "SYNTHETIC-1".into(),
+                        snippet: "synthetic hit".into(),
+                        sender_jid: None,
+                        timestamp_ms: 1_700_000_000_000,
+                        has_media: false,
+                    }],
+                },
+                r#"{"type":"search_results","query":"synthetic","results":[{"chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-1","snippet":"synthetic hit","timestamp_ms":1700000000000,"has_media":false}]}"#,
+            ),
+            (
+                DaemonMessage::StarChanged {
+                    chat_jid: "155555500001@g.us".into(),
+                    message_id: "SYNTHETIC-2".into(),
+                    starred: true,
+                },
+                r#"{"type":"star_changed","chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-2","starred":true}"#,
+            ),
+        ];
+        for (frame, expected) in answers {
+            let line = serde_json::to_string(&frame).expect("an answer serializes");
+            assert_eq!(line, expected);
+            assert_eq!(
+                serde_json::from_str::<DaemonMessage>(&line).expect("an answer parses"),
+                frame
+            );
+        }
+
+        assert!(
+            ClientRequest::SearchMessages {
+                query: "synthetic".into(),
+                chat_jid: None,
+                has_media: false,
+                limit: 50,
+            }
+            .is_read()
+        );
+        assert!(
+            !ClientRequest::ForwardMessage {
+                source_chat_jid: "155555500001@g.us".into(),
+                message_id: "SYNTHETIC-1".into(),
+                target_chat_jid: "155555500002@s.whatsapp.net".into(),
+            }
+            .is_read()
+        );
+        assert!(
+            !ClientRequest::SetStarred {
+                chat_jid: "155555500001@g.us".into(),
+                message_id: "SYNTHETIC-2".into(),
+                starred: true,
+            }
+            .is_read()
+        );
     }
 }

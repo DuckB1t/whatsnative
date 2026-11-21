@@ -15,7 +15,7 @@ use whatsapp_rust::client::Client;
 use whatsapp_rust::wacore_binary::jid::{Jid, JidExt, observe_str};
 use whatsapp_rust::waproto::whatsapp as wa;
 
-use oxidezap_core::{Chat, ChatMessage};
+use oxidezap_core::{Chat, ChatMessage, MessageSearchHit};
 
 use super::WhatsAppClient;
 use super::convert::{stored_to_chat_message, stored_with_unread_tail};
@@ -211,6 +211,71 @@ impl WhatsAppClient {
             )
             .await;
             Ok(messages)
+        })
+    }
+
+    /// Full-text hits as the compact protocol DTO, for clients that search
+    /// across chats rather than filling one conversation's timeline.
+    ///
+    /// The store already ranks and bounds the query; the extra sort here makes
+    /// the answer deterministic when two rows share a WhatsApp millisecond,
+    /// and the truncation keeps a long caption from pricing every frame on the
+    /// way back to the client.
+    pub fn search_message_hits(
+        &self,
+        query: String,
+        chat_jid: Option<String>,
+        has_media: bool,
+        limit: i64,
+    ) -> Task<Result<Vec<MessageSearchHit>, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let parsed_chat = match chat_jid {
+                Some(jid) => Some(
+                    jid.parse::<Jid>()
+                        .map_err(|_| "invalid chat jid".to_string())?,
+                ),
+                None => None,
+            };
+            let bound = limit.clamp(1, 100);
+            let hits = if has_media {
+                live.chat_store
+                    .search_media_messages(&query, parsed_chat, bound)
+                    .await
+            } else if let Some(chat) = parsed_chat.as_ref() {
+                live.chat_store
+                    .search_messages_in_chat(chat, &query, bound)
+                    .await
+            } else {
+                live.chat_store.search_messages(&query, bound).await
+            }
+            .map_err(|e| format!("search failed: {e}"))?;
+
+            let mut results: Vec<MessageSearchHit> = hits
+                .into_iter()
+                .map(|stored| {
+                    let snippet = search_snippet(&stored);
+                    MessageSearchHit {
+                        chat_jid: stored.chat_jid.to_string(),
+                        message_id: stored.id,
+                        snippet,
+                        sender_jid: Some(stored.sender_jid.to_string()),
+                        timestamp_ms: stored.timestamp.timestamp_millis(),
+                        has_media: stored.kind.has_media(),
+                    }
+                })
+                .collect();
+            results.sort_by(|a, b| {
+                b.timestamp_ms
+                    .cmp(&a.timestamp_ms)
+                    .then_with(|| b.chat_jid.cmp(&a.chat_jid))
+                    .then_with(|| b.message_id.cmp(&a.message_id))
+            });
+            results.truncate(bound as usize);
+            Ok(results)
         })
     }
 
@@ -531,6 +596,24 @@ impl WhatsAppClient {
             Ok(Page { items: chats, next })
         })
     }
+}
+
+/// A bounded single-line preview of a search hit.
+fn search_snippet(stored: &oxidezap_chat_store::StoredMessage) -> String {
+    const MAX: usize = 240;
+    let text = stored
+        .text
+        .clone()
+        .unwrap_or_else(|| format!("[{}]", stored.kind.as_str()))
+        .replace(['\n', '\r'], " ");
+    if text.chars().count() <= MAX {
+        return text;
+    }
+    let cut = text
+        .char_indices()
+        .nth(MAX)
+        .map_or(text.len(), |(index, _)| index);
+    format!("{}…", text[..cut].trim_end())
 }
 
 pub(super) fn read_message_range(

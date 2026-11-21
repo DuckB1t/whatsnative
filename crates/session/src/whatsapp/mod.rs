@@ -2680,6 +2680,24 @@ impl WhatsAppClient {
         local_id: String,
         quoted: Option<oxidezap_core::QuotedMessage>,
     ) -> Task<()> {
+        self.send_message_with_mentions(jid_str, content, local_id, quoted, Vec::new())
+    }
+
+    /// The same send, with the mentions a protocol-52 client attached.
+    ///
+    /// The extended-text context is built the same way as the wire send's: a
+    /// quote and a mention list are one context, and an empty mention list is
+    /// never put on the message. Keeping this beside the legacy send preserves
+    /// its optimistic-bubble notifications while sharing the context shape
+    /// with [`super::sends::WhatsAppClient::send_text_wire`].
+    pub fn send_message_with_mentions(
+        &self,
+        jid_str: &str,
+        content: &str,
+        local_id: String,
+        quoted: Option<oxidezap_core::QuotedMessage>,
+        mentions: Vec<String>,
+    ) -> Task<()> {
         let session = self.session.clone();
         let ui_sender = self.ui_sender.clone();
         let jid_str = jid_str.to_string();
@@ -2704,11 +2722,21 @@ impl WhatsAppClient {
             let live = session.lock().await.clone();
             if let Some(live) = live {
                 let client = &live.client;
-                // A reply is the same send with a quote attached, which the
-                // wire carries as an extended text message: a bare
+                // A reply or a mention needs extended text: a bare
                 // `conversation` has nowhere to put the context.
-                let message = match &quoted {
-                    Some(quoted) => {
+                let mentioned: Vec<String> =
+                    mentions.into_iter().filter(|jid| !jid.is_empty()).collect();
+                let context = if quoted.is_some() || !mentioned.is_empty() {
+                    let mut context = quoted.as_ref().map(quote_context).unwrap_or_default();
+                    if !mentioned.is_empty() {
+                        context.mentioned_jid = mentioned;
+                    }
+                    Some(context)
+                } else {
+                    None
+                };
+                let message = match context {
+                    Some(context) => {
                         let mut constructed: wa::Message = Default::default();
                         constructed.extended_text_message =
                             whatsapp_rust::buffa::MessageField::some({
@@ -2716,7 +2744,7 @@ impl WhatsAppClient {
                                     Default::default();
                                 constructed.text = Some(content.clone());
                                 constructed.context_info =
-                                    whatsapp_rust::buffa::MessageField::some(quote_context(quoted));
+                                    whatsapp_rust::buffa::MessageField::some(context);
                                 constructed
                             });
                         constructed

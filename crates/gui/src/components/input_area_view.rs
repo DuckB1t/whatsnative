@@ -7,7 +7,10 @@ use std::time::Duration;
 
 use wacore::time::Instant;
 
-use gpui::{App, Entity, EventEmitter, Focusable as _, Task, WeakEntity, Window, div, prelude::*};
+use gpui::{
+    App, Entity, EventEmitter, Focusable as _, SharedString, Task, WeakEntity, Window, div,
+    prelude::*,
+};
 use gpui_component::{
     ActiveTheme, Disableable as _, Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants},
@@ -27,8 +30,12 @@ pub(crate) use composer_picker::{PickerItem, PickerRequest, PickerTab};
 /// Events emitted by the input area to communicate with the parent app.
 #[derive(Clone, Debug)]
 pub enum InputAreaEvent {
-    /// User wants to send the current message
-    SendMessage(String),
+    /// User wants to send the current message, with the JIDs of the mentions
+    /// whose handles are still in the text.
+    SendMessage(String, Vec<String>),
+    /// The fragment after an `@` changed. The window answers with the people
+    /// it actually knows; the composer never invents an address.
+    MentionQueryChanged(Option<String>),
     LoadPickerMedia(PickerTab),
     SendPickerMedia(PickerRequest),
     /// User picked an attachment category from the composer menu.
@@ -84,6 +91,23 @@ pub struct ReplyDraft {
     /// client draws. Dropped here, the kind-aware quote builder in the
     /// session had nothing to be aware of.
     pub kind: Option<oxidezap_core::QuotedKind>,
+}
+
+/// One person the composer may offer after `@`.
+///
+/// Both halves have to be real data the window already has: a name without a
+/// JID is not an entry, because choosing it would mean making an address up.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MentionCandidate {
+    pub handle: String,
+    pub jid: String,
+}
+
+/// A mention the reader actually picked, kept until the text is sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DraftMention {
+    handle: String,
+    jid: String,
 }
 
 impl ReplyDraft {
@@ -153,6 +177,13 @@ pub struct InputAreaView {
     /// Task that monitors typing state
     #[allow(dead_code)]
     typing_monitor_task: Option<Task<()>>,
+    /// People the window knows, refreshed whenever `@` is typed.
+    mention_candidates: Vec<MentionCandidate>,
+    /// The fragment after the `@` the caret is currently in, when there is
+    /// one. `None` means no popup; `Some("")` is a bare `@`.
+    mention_query: Option<String>,
+    /// Resolved mentions whose handles are still in the draft.
+    draft_mentions: Vec<DraftMention>,
     /// Whether a voice note can be recorded here at all.
     ///
     /// Asked once rather than per frame: on the web the answer is whether the
@@ -221,6 +252,9 @@ impl InputAreaView {
             touch_target: None,
             typing_state: TypingState::default(),
             typing_monitor_task: None,
+            mention_candidates: Vec::new(),
+            mention_query: None,
+            draft_mentions: Vec::new(),
             // Whether the browser has an Opus encoder, which is the one
             // thing that can make this control a promise it cannot keep.
             // Where it does, every arrangement a page can be in has somewhere
@@ -245,9 +279,110 @@ impl InputAreaView {
             InputEvent::Change => {
                 // Handle typing indicator - minimal work, no notify
                 self.on_keystroke(cx);
+                self.refresh_mention(cx);
             }
             _ => {}
         }
+    }
+
+    /// Where the `@` that starts the mention under the caret began.
+    ///
+    /// A whitespace or a second `@` closes the fragment, so an address in the
+    /// middle of a sentence cannot adopt the word before it. Byte offsets are
+    /// right here: `TextareaState::cursor` reports UTF-8 bytes.
+    fn mention_start(text: &str, cursor: usize) -> Option<usize> {
+        let before = text.get(..cursor)?;
+        let at = before.rfind('@')?;
+        let fragment = &before[at + 1..];
+        (!fragment.chars().any(char::is_whitespace)
+            && !fragment.contains('@')
+            && fragment
+                .chars()
+                .all(|c| c.is_alphanumeric() || "_.-".contains(c)))
+        .then_some(at)
+    }
+
+    /// The candidates worth drawing for a fragment, bounded and addressable.
+    ///
+    /// A display name with no JID is not a contact: offering it would invite a
+    /// choice whose only possible result would be an invented address.
+    fn matching_mentions(candidates: &[MentionCandidate], query: &str) -> Vec<MentionCandidate> {
+        candidates
+            .iter()
+            .filter(|candidate| {
+                !candidate.jid.is_empty() && candidate.handle.to_lowercase().contains(query)
+            })
+            .take(6)
+            .cloned()
+            .collect()
+    }
+
+    /// Re-read the fragment and say whether the popup's question changed.
+    fn refresh_mention(&mut self, cx: &mut Context<Self>) {
+        let (text, cursor) = {
+            let input = self.input.read(cx);
+            (input.text().to_string(), input.cursor())
+        };
+        // A mention whose visible handle was deleted or rewritten is no
+        // longer in the message, so it must not ride along on the wire.
+        self.draft_mentions
+            .retain(|mention| text.contains(&format!("@{}", mention.handle)));
+        let query =
+            Self::mention_start(&text, cursor).map(|at| text[at + 1..cursor].to_lowercase());
+        if self.mention_query != query {
+            self.mention_query = query.clone();
+            cx.emit(InputAreaEvent::MentionQueryChanged(query));
+        }
+        cx.notify();
+    }
+
+    /// The window's answer to the current fragment. Only people with both a
+    /// name and a JID are offered, and the popup is bounded so a large roster
+    /// cannot turn typing `@` into a wall of rows.
+    pub fn set_mention_candidates(
+        &mut self,
+        candidates: Vec<MentionCandidate>,
+        cx: &mut Context<Self>,
+    ) {
+        self.mention_candidates = candidates;
+        cx.notify();
+    }
+
+    /// Replace the fragment with a visible handle and keep its JID for the
+    /// send. Both happen here so the two can never disagree.
+    fn select_mention(
+        &mut self,
+        candidate: &MentionCandidate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (text, cursor) = {
+            let input = self.input.read(cx);
+            (input.text().to_string(), input.cursor())
+        };
+        let Some(at) = Self::mention_start(&text, cursor) else {
+            return;
+        };
+        self.input.update(cx, |state, cx| {
+            state.set_selected_range(at..cursor, cx);
+            state.replace(
+                SharedString::from(format!("@{} ", candidate.handle)),
+                window,
+                cx,
+            );
+            state.focus(window, cx);
+        });
+        self.draft_mentions.retain(|mention| {
+            mention.jid != candidate.jid && text.contains(&format!("@{}", mention.handle))
+        });
+        self.draft_mentions.push(DraftMention {
+            handle: candidate.handle.clone(),
+            jid: candidate.jid.clone(),
+        });
+        self.mention_query = None;
+        cx.emit(InputAreaEvent::MentionQueryChanged(None));
+        self.on_keystroke(cx);
+        cx.notify();
     }
 
     fn paste_image(&mut self, cx: &mut Context<Self>) {
@@ -344,6 +479,11 @@ impl InputAreaView {
         self.input.update(cx, |state, cx| {
             state.set_value(crate::emoji::content(new_text), window, cx);
         });
+        // A draft belongs to one conversation: its resolved mentions must not
+        // follow the text into another one.
+        self.draft_mentions.clear();
+        self.mention_query = None;
+        cx.emit(InputAreaEvent::MentionQueryChanged(None));
         old
     }
 
@@ -362,7 +502,15 @@ impl InputAreaView {
         });
         self.stop_typing_internal(cx);
         self.close_picker();
-        cx.emit(InputAreaEvent::SendMessage(text));
+        let mentions: Vec<String> = self
+            .draft_mentions
+            .iter()
+            .map(|mention| mention.jid.clone())
+            .collect();
+        self.draft_mentions.clear();
+        self.mention_query = None;
+        cx.emit(InputAreaEvent::MentionQueryChanged(None));
+        cx.emit(InputAreaEvent::SendMessage(text, mentions));
     }
 
     fn insert_emoji(&mut self, emoji: &'static str, window: &mut Window, cx: &mut Context<Self>) {
@@ -484,6 +632,9 @@ impl Render for InputAreaView {
         let control = self.touch_target.unwrap_or_else(|| metrics.icon_button());
 
         div()
+            // The mention popup is positioned against this box, not the
+            // window: the composer moves with the conversation pane.
+            .relative()
             // A floor, not a ceiling: the layout's slot is what an empty
             // composer occupies, and the field grows the strip from there.
             .min_h(height)
@@ -530,10 +681,94 @@ impl Render for InputAreaView {
                 self.render_composer(control, metrics, cx)
                     .into_any_element()
             })
+            .children(
+                self.render_mentions(metrics, cx)
+                    .map(|popup| popup.into_any_element()),
+            )
     }
 }
 
 impl InputAreaView {
+    /// The @mention choices for the fragment under the caret.
+    ///
+    /// The window supplies the candidates; this only filters and draws them.
+    /// An empty answer is deliberately no popup at all rather than a box that
+    /// says "no results" for a name nobody has ever heard of.
+    fn render_mentions(
+        &self,
+        metrics: Metrics,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let query = self.mention_query.as_deref()?;
+        let matches = Self::matching_mentions(&self.mention_candidates, query);
+        if matches.is_empty() {
+            return None;
+        }
+        let entity = cx.entity().clone();
+        let rows: Vec<_> = matches
+            .into_iter()
+            .map(|candidate| {
+                let target = entity.clone();
+                let handle = SharedString::from(candidate.handle.clone());
+                let jid = SharedString::from(candidate.jid.clone());
+                div()
+                    .id(format!("mention-{}", candidate.jid))
+                    .debug_selector(|| "mention-candidate".into())
+                    .w_full()
+                    .cursor_pointer()
+                    .rounded(metrics.radius_sm())
+                    .px(metrics.space_md())
+                    .py(metrics.space_sm())
+                    .hover(|el| el.bg(cx.theme().list_hover))
+                    .on_click(move |_, window, cx| {
+                        target.update(cx, |view, cx| {
+                            view.select_mention(&candidate, window, cx);
+                        });
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(metrics.space_sm())
+                            .child(
+                                div()
+                                    .text_size(metrics.text_body())
+                                    .text_color(cx.theme().foreground)
+                                    .child(handle),
+                            )
+                            .child(
+                                div()
+                                    .text_size(metrics.text_micro())
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(jid),
+                            ),
+                    )
+            })
+            .collect();
+        Some(
+            div()
+                .id("mention-popup")
+                .debug_selector(|| "mention-popup".into())
+                .absolute()
+                .bottom(metrics.composer_height())
+                .left_0()
+                .w(metrics.reading_width())
+                .max_w_full()
+                .max_h(metrics.config_block_height())
+                .overflow_y_scroll()
+                .rounded(metrics.radius_lg())
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().popover)
+                .p(metrics.space_sm())
+                .flex()
+                .flex_col()
+                .gap(metrics.space_xxs())
+                .children(rows),
+        )
+    }
+
     /// The ordinary state: attach, field, emoji, and either record or send.
     fn render_composer(
         &self,
@@ -845,7 +1080,7 @@ mod tests {
         ParentElement, Render, Styled as _, Subscription, Window, div, px, size,
     };
 
-    use super::{InputAreaEvent, InputAreaView, ReplyDraft};
+    use super::{InputAreaEvent, InputAreaView, MentionCandidate, ReplyDraft};
     use crate::platform::picker::AttachmentCategory;
 
     struct ComposerHarness {
@@ -895,6 +1130,90 @@ mod tests {
         draft.sender_is_self = false;
         draft.sender_name = "Você".into();
         assert_eq!(draft.sender_label(Language::English), "Você");
+    }
+
+    #[test]
+    fn mention_fragment_is_only_the_word_after_the_at() {
+        assert_eq!(InputAreaView::mention_start("hi @ana", 7), Some(3));
+        assert_eq!(InputAreaView::mention_start("hi @ana ", 8), None);
+        assert_eq!(InputAreaView::mention_start("hi ana", 6), None);
+        assert_eq!(
+            InputAreaView::mention_start("hi @an@", 7),
+            Some(6),
+            "a second @ starts a fresh fragment"
+        );
+    }
+
+    #[test]
+    fn mention_popup_skips_a_name_without_a_jid() {
+        let candidates = vec![
+            MentionCandidate {
+                handle: "Ana".into(),
+                jid: String::new(),
+            },
+            MentionCandidate {
+                handle: "Ana Maria".into(),
+                jid: "559900000002@s.whatsapp.net".into(),
+            },
+            MentionCandidate {
+                handle: "Bia".into(),
+                jid: "559900000003@s.whatsapp.net".into(),
+            },
+        ];
+
+        let matches = InputAreaView::matching_mentions(&candidates, "an");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].handle, "Ana Maria");
+    }
+
+    #[test]
+    fn selecting_a_mention_sends_its_resolved_jid() {
+        let ComposerFixture {
+            mut cx,
+            window,
+            input,
+            ..
+        } = setup();
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let observed = sent.clone();
+        let _subscription = cx.update(|cx| {
+            cx.subscribe(&input, move |_, event: &InputAreaEvent, _| {
+                if let InputAreaEvent::SendMessage(text, mentions) = event {
+                    observed.borrow_mut().push((text.clone(), mentions.clone()));
+                }
+            })
+        });
+        cx.update_window(*window, |_, window, cx| {
+            input.update(cx, |view, cx| {
+                view.swap_text("hi @an", window, cx);
+                view.input.update(cx, |field, cx| {
+                    field.set_cursor_position(
+                        gpui_component::input::Position::new(0, 6),
+                        window,
+                        cx,
+                    );
+                });
+                view.mention_query = Some("an".into());
+                view.select_mention(
+                    &MentionCandidate {
+                        handle: "ana".into(),
+                        jid: "559900000009@s.whatsapp.net".into(),
+                    },
+                    window,
+                    cx,
+                );
+                view.submit_input(window, cx);
+            });
+        })
+        .unwrap();
+        cx.run_until_parked();
+
+        assert_eq!(sent.borrow().len(), 1);
+        assert_eq!(
+            sent.borrow()[0].1,
+            vec!["559900000009@s.whatsapp.net".to_string()]
+        );
     }
 
     fn setup() -> ComposerFixture {
@@ -1009,7 +1328,7 @@ mod tests {
         let observed = sent.clone();
         let _subscription = cx.update(|cx| {
             cx.subscribe(&input, move |_, event: &InputAreaEvent, _| {
-                if let InputAreaEvent::SendMessage(text) = event {
+                if let InputAreaEvent::SendMessage(text, _) = event {
                     observed.borrow_mut().push(text.clone());
                 }
             })
@@ -1062,7 +1381,7 @@ mod tests {
         let observed = sent.clone();
         let _subscription = cx.update(|cx| {
             cx.subscribe(&input, move |_, event: &InputAreaEvent, _| {
-                if let InputAreaEvent::SendMessage(text) = event {
+                if let InputAreaEvent::SendMessage(text, _) = event {
                     observed.borrow_mut().push(text.clone());
                 }
             })
@@ -1137,7 +1456,7 @@ mod tests {
         let observed = sent.clone();
         let _subscription = cx.update(|cx| {
             cx.subscribe(&input, move |_, event: &InputAreaEvent, _| {
-                if let InputAreaEvent::SendMessage(text) = event {
+                if let InputAreaEvent::SendMessage(text, _) = event {
                     observed.borrow_mut().push(text.clone());
                 }
             })

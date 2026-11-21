@@ -359,6 +359,9 @@ impl Commands for Bridge {
                 preview: String::new(),
                 kind: None,
             }),
+            // Plugins compose no mentions; protocol 52's additive field is
+            // empty for them.
+            mentions: Vec::new(),
         }))
     }
 

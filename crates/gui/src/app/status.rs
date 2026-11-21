@@ -454,7 +454,7 @@ impl WhatsAppApp {
         }
         let quote = reply.quote.clone();
         let jid = quote.sender.clone();
-        if self.send_text_to(&jid, text, Some(quote), cx) {
+        if self.send_text_to(&jid, text, Some(quote), Vec::new(), cx) {
             self.status_reply = None;
             self.select_chat(jid, super::ChatOpen::ToPreview, window, cx);
             self.scroll_to_last_message();

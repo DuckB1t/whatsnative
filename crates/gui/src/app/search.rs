@@ -12,11 +12,21 @@
 //! control that silently covers only part of a history is worse than one that
 //! names its horizon.
 
-use gpui::{Context, Entity, Task, WeakEntity, Window};
-use gpui_component::input::InputState;
-use oxidezap_core::ChatMessage;
+use std::time::Duration;
 
-use super::WhatsAppApp;
+use gpui::{
+    App, Context, Entity, FocusHandle, SharedString, Styled, Task, WeakEntity, Window, div,
+    prelude::*,
+};
+use gpui_component::ActiveTheme as _;
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::input::{Input, InputState};
+use gpui_component::{Icon, IconName, Sizable as _, v_flex};
+use oxidezap_core::ChatMessage;
+use oxidezap_ipc::MessageSearchHit;
+
+use super::{ChatOpen, Failure, KeyboardOwner, WhatsAppApp, what_went_wrong};
+use crate::theme::ActiveProductTheme as _;
 
 /// How long a keystroke waits before the list is filtered again.
 ///
@@ -25,6 +35,20 @@ use super::WhatsAppApp;
 /// equivalent because it walks messages already in memory, while this one
 /// rebuilds a cache over every chat the window holds.
 const LIST_DEBOUNCE_MS: u64 = 150;
+
+/// How long the account-wide query waits before it reaches the daemon.
+///
+/// The index lives behind a process boundary, so every letter would otherwise
+/// be a round trip and a fresh set of hits. Longer than the sidebar's filter
+/// for that reason, but still short enough to feel like typing into one box.
+const GLOBAL_DEBOUNCE_MS: u64 = 220;
+
+/// How many global hits the overlay asks for, and how many it keeps.
+///
+/// The bound travels to the daemon rather than being applied only here: a
+/// thousand hits in one frame costs more to decode than to draw, and the
+/// reader cannot use more than a screenful at a time.
+const GLOBAL_SEARCH_LIMIT: usize = 50;
 
 /// Both of this window's searches, and the fields they are typed into.
 ///
@@ -65,6 +89,12 @@ pub(super) struct Search {
     conversation: Option<ConversationSearch>,
     /// The field for it, created the first time the search is opened.
     conversation_input: Option<Entity<InputState>>,
+    /// The account-wide search over stored messages. Not merged with the two
+    /// above: those narrow what this window already holds, while this one
+    /// asks the daemon to look through the whole store.
+    global: Option<GlobalSearch>,
+    /// Its field, built by the window and handed over like the others.
+    global_input: Option<Entity<InputState>>,
 }
 
 impl Search {
@@ -76,6 +106,8 @@ impl Search {
             debounce: None,
             conversation: None,
             conversation_input: None,
+            global: None,
+            global_input: None,
         }
     }
 
@@ -93,6 +125,11 @@ impl Search {
         if let Some(input) = &self.conversation_input {
             input.update(cx, |input, cx| {
                 input.set_placeholder(crate::tr!(SearchInThisConversation), window, cx)
+            });
+        }
+        if let Some(input) = &self.global_input {
+            input.update(cx, |input, cx| {
+                input.set_placeholder(crate::tr!(GlobalSearchPlaceholder), window, cx)
             });
         }
     }
@@ -201,6 +238,7 @@ impl Search {
         self.debounce = None;
         self.list_query.clear();
         self.conversation = None;
+        self.global = None;
         cx.notify();
     }
 
@@ -316,6 +354,111 @@ impl Search {
     pub(super) fn conversation_jid(&self) -> Option<&str> {
         self.conversation.as_ref().map(|search| search.jid.as_str())
     }
+
+    /// The account-wide search, while its overlay is up.
+    pub(super) fn global(&self) -> Option<&GlobalSearch> {
+        self.global.as_ref()
+    }
+
+    pub(super) fn global_input(&self) -> Option<&Entity<InputState>> {
+        self.global_input.as_ref()
+    }
+
+    /// Open the overlay, adopting the field the window built for it.
+    pub(super) fn open_global(
+        &mut self,
+        input: Option<Entity<InputState>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(input) = input {
+            self.global_input = Some(input);
+        }
+        if self.global.is_none() {
+            self.global = Some(GlobalSearch::default());
+        }
+        if let Some(input) = &self.global_input {
+            input.update(cx, |state, cx| {
+                state.set_value("", window, cx);
+                state.focus(window, cx);
+            });
+        }
+        cx.notify();
+    }
+
+    pub(super) fn close_global(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.global.take().is_some() {
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
+    /// Set the query the daemon will be asked about.
+    ///
+    /// The hits on screen belong to the old question, so they go with it: an
+    /// answer carrying the previous query arrives later and is dropped by
+    /// [`Self::adopt_global_results`].
+    pub(super) fn set_global_query(&mut self, query: String, cx: &mut Context<Self>) {
+        let Some(global) = self.global.as_mut() else {
+            return;
+        };
+        if global.query == query {
+            return;
+        }
+        global.query = query;
+        global.results.clear();
+        global.pending = false;
+        cx.notify();
+    }
+
+    /// Adopt hits only if they answer the query now in the box.
+    ///
+    /// The daemon broadcasts results without a request id, so the query is the
+    /// whole correlation. A late answer to a query that has since changed is
+    /// somebody else's answer as far as this overlay is concerned: showing it
+    /// would put messages under a question the reader did not ask.
+    pub(super) fn adopt_global_results(
+        &mut self,
+        query: String,
+        results: Vec<MessageSearchHit>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(global) = self.global.as_mut() else {
+            return;
+        };
+        if global.query != query {
+            return;
+        }
+        global.pending = false;
+        global.results = {
+            let mut results = results;
+            results.sort_unstable_by_key(|hit| std::cmp::Reverse(hit.timestamp_ms));
+            results.truncate(GLOBAL_SEARCH_LIMIT);
+            results
+        };
+        cx.notify();
+    }
+
+    pub(super) fn mark_global_pending(&mut self, cx: &mut Context<Self>) {
+        if let Some(global) = self.global.as_mut() {
+            global.pending = true;
+            cx.notify();
+        }
+    }
+}
+
+/// The stored-history search, while its overlay is up.
+#[derive(Default, Clone)]
+pub struct GlobalSearch {
+    /// Exactly what was sent to the daemon. Trimming happens before this, so
+    /// the echoed query can be compared without guessing about whitespace.
+    pub query: String,
+    /// Newest first, and never more than [`GLOBAL_SEARCH_LIMIT`].
+    pub results: Vec<MessageSearchHit>,
+    /// Whether a request is out for the current query. Cleared by an answer
+    /// whose query matches, or by changing the query.
+    pub pending: bool,
 }
 
 /// One conversation's search, while it is open.
@@ -434,6 +577,310 @@ fn matches(message: &ChatMessage, query: &str) -> bool {
     })
 }
 
+/// One result row, gathered where the chats are so the render helper never
+/// has to reach back into the app it is already drawn inside.
+pub(super) struct SearchResultRow {
+    pub chat_jid: SharedString,
+    pub chat_name: SharedString,
+    pub message_id: SharedString,
+    pub snippet: SharedString,
+    pub timestamp_ms: i64,
+    pub has_media: bool,
+}
+
+impl WhatsAppApp {
+    /// Open the account-wide search over the daemon's stored index.
+    pub(super) fn open_global_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Built and subscribed here, like the other two boxes: a handler owned
+        // by `Search` would be handed that entity leased out of the map, and
+        // every answer it has goes back through methods on the window.
+        let input = self.search.read(cx).global_input().is_none().then(|| {
+            use gpui_component::input::InputEvent;
+
+            let input = cx.new(|cx| {
+                InputState::new(window, cx).placeholder(crate::tr!(GlobalSearchPlaceholder))
+            });
+            cx.subscribe(&input, |this, input, event: &InputEvent, cx| {
+                if let InputEvent::Change = event {
+                    let query = input.read(cx).value().to_string();
+                    this.set_global_query(query, cx);
+                }
+            })
+            .detach();
+            input
+        });
+        self.search
+            .update(cx, |search, cx| search.open_global(input, window, cx));
+        self.keyboard_owner = Some(KeyboardOwner::GlobalSearch);
+        cx.notify();
+    }
+
+    pub(super) fn close_global_search(&mut self, cx: &mut Context<Self>) -> bool {
+        self.global_search_debounce = None;
+        let closed = self.search.update(cx, |search, cx| search.close_global(cx));
+        if closed {
+            self.keyboard_owner = None;
+            cx.notify();
+        }
+        closed
+    }
+
+    /// The debounced query is sent from here because only the window owns the
+    /// session client. The box itself stays a dumb field.
+    fn set_global_query(&mut self, query: String, cx: &mut Context<Self>) {
+        let query = query.trim().to_string();
+        self.search
+            .update(cx, |search, cx| search.set_global_query(query.clone(), cx));
+        self.global_search_debounce = None;
+        if query.is_empty() {
+            return;
+        }
+        let weak = cx.entity().downgrade();
+        self.global_search_debounce = Some(cx.spawn(async move |_, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(GLOBAL_DEBOUNCE_MS))
+                .await;
+            let _ = weak.update(cx, |app, cx| app.request_global_search(cx));
+        }));
+    }
+
+    /// Ask the daemon for the current query. The ack only says the request ran;
+    /// the hits arrive separately as a broadcast carrying the query.
+    fn request_global_search(&mut self, cx: &mut Context<Self>) {
+        let Some(query) = self.search.read(cx).global().map(|g| g.query.clone()) else {
+            return;
+        };
+        if query.is_empty() {
+            return;
+        }
+        let Some(waiting) = self
+            .client
+            .as_ref()
+            .map(|client| client.search_messages(query.clone(), None, false, GLOBAL_SEARCH_LIMIT))
+        else {
+            self.notify_user(
+                what_went_wrong(
+                    crate::tr!(CouldNotSearchMessages),
+                    &Failure::worth_retrying(crate::tr!(DaemonDisconnectedBeforeAnswer)),
+                ),
+                crate::app::notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        self.search
+            .update(cx, |search, cx| search.mark_global_pending(cx));
+        cx.spawn(async move |entity, cx| {
+            let failure = match waiting.await {
+                Ok(Ok(())) => None,
+                Ok(Err(failure)) => Some(failure),
+                Err(_) => Some(Failure::worth_retrying(crate::tr!(
+                    DaemonDisconnectedBeforeAnswer
+                ))),
+            };
+            let _ = entity.update(cx, |app, cx| {
+                if let Some(failure) = failure {
+                    app.notify_user(
+                        what_went_wrong(crate::tr!(CouldNotSearchMessages), &failure),
+                        crate::app::notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Adopt an account-wide answer, dropping one that belongs to an older
+    /// query. The correlation lives in `Search`, not here, so no other caller
+    /// can accidentally bypass it.
+    pub(super) fn adopt_search_results(
+        &mut self,
+        query: String,
+        results: Vec<MessageSearchHit>,
+        cx: &mut Context<Self>,
+    ) {
+        self.search.update(cx, |search, cx| {
+            search.adopt_global_results(query, results, cx)
+        });
+    }
+
+    /// Whether this row is the one a search hit asked to see.
+    pub(crate) fn is_focused_message(&self, chat_jid: &str, message_id: &str) -> bool {
+        self.focused_message
+            .as_ref()
+            .is_some_and(|focused| focused.0 == chat_jid && focused.1 == message_id)
+    }
+
+    /// Close the overlay and take the reader to the hit they clicked.
+    pub(super) fn open_search_hit(
+        &mut self,
+        chat_jid: &str,
+        message_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_global_search(cx);
+        self.focused_message = Some((chat_jid.to_string(), message_id.to_string()));
+        self.select_chat(chat_jid.to_string(), ChatOpen::ToPreview, window, cx);
+        // A hit outside the loaded page has no row to outline. The chat is
+        // still open, which is the most that can honestly be done without a
+        // protocol for paging to an arbitrary id.
+        self.jump_to_message(message_id, cx);
+        cx.notify();
+    }
+}
+
+/// The floating, account-wide search. Kept out of the sidebar and the
+/// conversation header: both of those search a horizon this one does not.
+pub(super) fn render_global_search(
+    input: &Entity<InputState>,
+    focus: &FocusHandle,
+    global: &GlobalSearch,
+    rows: &[SearchResultRow],
+    app: &Entity<WhatsAppApp>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let metrics = cx.product().metrics;
+    let status = if global.query.is_empty() {
+        crate::tr!(GlobalSearchPlaceholder).to_string()
+    } else if global.pending {
+        crate::tr!(GlobalSearchSearching).to_string()
+    } else if rows.is_empty() {
+        crate::tr!(GlobalSearchNoResults).to_string()
+    } else {
+        format!("{} · {}", crate::tr!(GlobalSearchResults), rows.len())
+    };
+    let close_app = app.clone();
+    let result_rows: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            let hit_app = app.clone();
+            let chat_jid = row.chat_jid.clone();
+            let message_id = row.message_id.clone();
+            let chat_name = row.chat_name.clone();
+            let jid_label = row.chat_jid.clone();
+            let snippet = row.snippet.clone();
+            let time = chrono::DateTime::from_timestamp_millis(row.timestamp_ms)
+                .map(|when| crate::utils::format_time_local(&when))
+                .unwrap_or_default();
+            let has_media = row.has_media;
+            div()
+                .id(format!("global-search-hit-{}-{message_id}", row.chat_jid))
+                .debug_selector(|| "global-search-hit".into())
+                .w_full()
+                .cursor_pointer()
+                .rounded(metrics.radius_md())
+                .px(metrics.space_md())
+                .py(metrics.space_sm())
+                .hover(|el| el.bg(cx.theme().list_hover))
+                .on_click(move |_, window, cx| {
+                    hit_app.update(cx, |app, cx| {
+                        app.open_search_hit(&chat_jid, &message_id, window, cx);
+                    });
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(metrics.space_sm())
+                        .child(
+                            div()
+                                .text_size(metrics.text_strong())
+                                .text_color(cx.theme().foreground)
+                                .child(chat_name),
+                        )
+                        .child(
+                            div()
+                                .text_size(metrics.text_micro())
+                                .text_color(cx.theme().muted_foreground)
+                                .child(jid_label),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(metrics.text_secondary())
+                        .text_color(cx.theme().foreground)
+                        .child(snippet),
+                )
+                .child(
+                    div()
+                        .mt(metrics.space_xxs())
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(metrics.space_sm())
+                        .child(
+                            div()
+                                .text_size(metrics.text_micro())
+                                .text_color(cx.theme().muted_foreground)
+                                .child(if has_media {
+                                    SharedString::from(format!(
+                                        "{} · {}",
+                                        crate::tr!(GlobalSearchMedia),
+                                        time
+                                    ))
+                                } else {
+                                    SharedString::from(time)
+                                }),
+                        ),
+                )
+        })
+        .collect();
+    div()
+        .id("global-search-overlay")
+        .debug_selector(|| "global-search-overlay".into())
+        .track_focus(focus)
+        .absolute()
+        .inset_0()
+        .flex()
+        .flex_col()
+        .items_center()
+        .pt(metrics.space_xxl())
+        .child(
+            v_flex()
+                .w(metrics.reading_width())
+                .max_w_full()
+                .rounded(metrics.radius_xl())
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().popover)
+                .p(metrics.space_lg())
+                .gap(metrics.space_md())
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(metrics.space_sm())
+                        .child(
+                            Icon::new(IconName::Search)
+                                .with_size(metrics.icon())
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                        .child(Input::new(input).w_full())
+                        .child(
+                            Button::new("global-search-close")
+                                .icon(IconName::Close)
+                                .ghost()
+                                .tooltip(crate::tr!(Close))
+                                .on_click(move |_, _, cx| {
+                                    close_app.update(cx, |app, cx| {
+                                        app.close_global_search(cx);
+                                    });
+                                }),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(metrics.text_small())
+                        .text_color(cx.theme().muted_foreground)
+                        .child(status),
+                )
+                .child(v_flex().gap(metrics.space_xs()).children(result_rows)),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,5 +991,74 @@ mod tests {
             search.status().as_deref(),
             Some("No matches in the loaded messages")
         );
+    }
+
+    fn hit(id: &str, timestamp_ms: i64) -> MessageSearchHit {
+        MessageSearchHit {
+            chat_jid: "559900000001@s.whatsapp.net".into(),
+            message_id: id.into(),
+            snippet: "a synthetic hit".into(),
+            sender_jid: None,
+            timestamp_ms,
+            has_media: false,
+        }
+    }
+
+    /// Build a `Search` with only its global half open; the window would do
+    /// this in production, and the tests here only drive the answer's rules.
+    fn global_search(query: &str) -> Search {
+        let mut search = Search::new();
+        search.global = Some(GlobalSearch {
+            query: query.into(),
+            results: Vec::new(),
+            pending: true,
+        });
+        search
+    }
+
+    #[gpui::test]
+    fn global_hits_are_bounded_and_newest_first(cx: &mut gpui::TestAppContext) {
+        let search = cx.update(|cx| cx.new(|_| global_search("invoice")));
+        let hits: Vec<_> = (0..GLOBAL_SEARCH_LIMIT + 4)
+            .map(|i| hit(&format!("id-{i}"), i as i64))
+            .collect();
+        cx.update(|cx| {
+            search.update(cx, |search, cx| {
+                search.adopt_global_results("invoice".into(), hits, cx)
+            });
+        });
+
+        let global = cx.update(|cx| search.read(cx).global().unwrap().clone());
+        assert!(!global.pending);
+        assert_eq!(global.results.len(), GLOBAL_SEARCH_LIMIT);
+        assert_eq!(global.results[0].message_id, "id-53");
+        assert_eq!(
+            global.results.last().unwrap().message_id,
+            "id-4",
+            "the oldest hits are the ones dropped"
+        );
+    }
+
+    #[gpui::test]
+    fn a_global_answer_for_an_old_query_is_dropped(cx: &mut gpui::TestAppContext) {
+        let search = cx.update(|cx| cx.new(|_| global_search("invoice")));
+        cx.update(|cx| {
+            search.update(cx, |search, cx| {
+                search.adopt_global_results("receipt".into(), vec![hit("old", 1)], cx)
+            });
+        });
+
+        let global = cx.update(|cx| search.read(cx).global().unwrap().clone());
+        assert!(global.results.is_empty());
+        assert!(global.pending, "the live question is still waiting");
+
+        cx.update(|cx| {
+            search.update(cx, |search, cx| {
+                search.set_global_query("receipt".into(), cx)
+            });
+        });
+        let global = cx.update(|cx| search.read(cx).global().unwrap().clone());
+        assert_eq!(global.query, "receipt");
+        assert!(!global.pending);
     }
 }

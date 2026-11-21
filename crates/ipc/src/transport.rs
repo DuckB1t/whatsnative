@@ -329,7 +329,14 @@ use std::path::PathBuf;
 /// (`CallAction::JoinLink`). An older daemon knows neither frame and cannot
 /// answer those requests, so a window drawing a link preview must not attach
 /// to one.
-pub const PROTOCOL_VERSION: u32 = 51;
+///
+/// 52 adds message actions a front end can drive: forwarding, starring and
+/// unstarring, mentions on `SendText`, and full-text search answered with
+/// `DaemonMessage::SearchResults`. An older daemon knows none of these frames,
+/// so a window that offers any of them must not attach to one. Starring also
+/// publishes `DaemonMessage::StarChanged`, which a client must tolerate even
+/// when it never asks for the mutation itself.
+pub const PROTOCOL_VERSION: u32 = 52;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///
