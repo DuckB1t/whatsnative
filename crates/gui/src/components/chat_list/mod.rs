@@ -162,7 +162,8 @@ fn render_title_bar(
     metrics: Metrics,
     cx: &App,
 ) -> impl IntoElement + use<> {
-    let settings_entity = entity;
+    let settings_entity = entity.clone();
+    let community_entity = entity;
 
     div()
         .flex_shrink_0()
@@ -184,14 +185,31 @@ fn render_title_bar(
                 .flex()
                 .gap(metrics.space_xxs())
                 .child(
-                    // No flow behind it yet, and a button that answers a
-                    // click with nothing is a bug report waiting to be filed.
-                    Button::new("new-chat")
-                        .icon(IconName::Plus)
-                        .ghost()
-                        .small()
-                        .disabled(true)
-                        .tooltip(crate::tr!(StartingANewConversationIsNotAvailableYet)),
+                    // Communities have a real creation flow behind them; the
+                    // other destinations keep the honest, disabled button
+                    // rather than one that answers a click with nothing.
+                    if destination == Destination::Communities {
+                        Button::new("new-community")
+                            .icon(IconName::Plus)
+                            .ghost()
+                            .small()
+                            .tooltip(crate::tr!(NewCommunity))
+                            .cursor_pointer()
+                            .on_click(move |_, window, cx| {
+                                community_entity.update(cx, |app, cx| {
+                                    app.begin_community_dialog(window, cx);
+                                });
+                            })
+                            .into_any_element()
+                    } else {
+                        Button::new("new-chat")
+                            .icon(IconName::Plus)
+                            .ghost()
+                            .small()
+                            .disabled(true)
+                            .tooltip(crate::tr!(StartingANewConversationIsNotAvailableYet))
+                            .into_any_element()
+                    },
                 )
                 .child(
                     Button::new("open-settings")
@@ -329,7 +347,8 @@ fn render_empty(
     _cx: &App,
 ) -> impl IntoElement + use<> {
     let clear_entity = entity.clone();
-    let reset_entity = entity;
+    let reset_entity = entity.clone();
+    let create_entity = entity;
 
     let empty = if props.loading {
         EmptyState::new(crate::tr!(Loading))
@@ -354,10 +373,18 @@ fn render_empty(
         .action(crate::tr!(ShowAllChats), move |_window, cx| {
             reset_entity.update(cx, |app, cx| app.set_chat_filter(ChatFilter::All, cx));
         })
+    } else if props.destination == Destination::Communities {
+        EmptyState::new(crate::tr!(NoCommunitiesYet))
+            .icon(IconName::Inbox)
+            .description(crate::tr!(
+                ConversationsAppearHereOnceYourPhoneFinishesSyncing
+            ))
+            .action(crate::tr!(NewCommunity), move |window, cx| {
+                create_entity.update(cx, |app, cx| app.begin_community_dialog(window, cx));
+            })
     } else {
         EmptyState::new(match props.destination {
             Destination::Channels => crate::tr!(NoChannelsYet),
-            Destination::Communities => crate::tr!(NoCommunitiesYet),
             _ => crate::tr!(NoChatsYet),
         })
         .icon(IconName::Inbox)

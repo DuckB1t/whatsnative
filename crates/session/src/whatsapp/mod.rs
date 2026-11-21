@@ -22,6 +22,9 @@ mod blocklist;
 /// Calendar-event creation and RSVP, with the addressing the envelope needs.
 mod events;
 
+/// Community, subgroup, link and join operations, returned as domain data.
+mod communities;
+
 /// The inbound commit hook that makes the chat store the ack durability point.
 mod durability;
 

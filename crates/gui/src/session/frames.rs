@@ -311,6 +311,18 @@ impl<'a> Frames<'a> {
                 Some(waiting) => self.fail(waiting, &Failure::permanent("unexpected event answer")),
                 None => {}
             },
+            // A community operation's answer carries its own partial failures,
+            // so it must be claimed before the generic acknowledgement path
+            // can mistake it for one.
+            DaemonMessage::CommunityResult { id, result } => match take_pending(self.pending, id) {
+                Some(Awaiting::Community(tx)) => {
+                    let _ = tx.send(Ok(result));
+                }
+                Some(waiting) => {
+                    self.fail(waiting, &Failure::permanent("unexpected community answer"))
+                }
+                None => {}
+            },
             // Every command is answered under the id it was asked with, which
             // is why this side no longer has to guess what a failure was
             // about.

@@ -15,6 +15,7 @@ mod calls_ctl;
 pub mod chat_row;
 mod chats;
 mod commands;
+mod community_dialog;
 pub(crate) mod editing;
 mod event_dialog;
 mod events;
@@ -885,6 +886,10 @@ pub struct WhatsAppApp {
     /// An event creation waiting for its fields or its answer. Taken as soon
     /// as the request is sent, so a second press cannot create two cards.
     event_dialog: Option<event_dialog::EventDraftDialog>,
+    /// A community operation waiting for its fields or its typed answer.
+    /// Mutually exclusive with the other modal surfaces, so they share a focus
+    /// handle.
+    community_dialog: Option<community_dialog::CommunityDialog>,
     /// Where both paged lists continue, and whether either is asking. See
     /// [`paging`].
     pages: Entity<paging::Pages>,
@@ -1527,6 +1532,7 @@ impl WhatsAppApp {
             attempted_poll_votes: std::collections::HashMap::new(),
             attempted_event_rsvps: std::collections::HashMap::new(),
             event_dialog: None,
+            community_dialog: None,
             pages: cx.new(|_| paging::Pages::new()),
             watched_status: std::collections::HashSet::new(),
             viewer: cx.new(viewer::Viewer::new),
@@ -2404,6 +2410,7 @@ impl WhatsAppApp {
         self.attempted_poll_votes.clear();
         self.attempted_event_rsvps.clear();
         self.event_dialog = None;
+        self.community_dialog = None;
         // The reader is a selection too, and a JID-keyed one. Left alone, it
         // pointed the new account at the old account's contact: at their
         // updates if that contact exists there — watched by nobody in this
@@ -4594,6 +4601,19 @@ impl Render for WhatsAppApp {
             )
             .into_any_element()
         });
+        // The community form shares the deletion modal's focus handle for the
+        // same reason the event form does: only one of them is ever up, and
+        // adding another owner to `sync_overlay_focus` would change a call
+        // path for a form that never appears with a call card.
+        let community_dialog = self.community_dialog.as_ref().map(|dialog| {
+            community_dialog::render_community_dialog(
+                dialog,
+                cx.entity().clone(),
+                &self.message_delete_focus,
+                cx,
+            )
+            .into_any_element()
+        });
 
         // Outside the Settings-versus-conversation branch on purpose. The
         // card and the focus it takes were built by the conversation view
@@ -4606,9 +4626,13 @@ impl Render for WhatsAppApp {
         let paste_preview_open = paste_preview.is_some();
         let message_delete_open = message_delete.is_some();
         let event_dialog_open = event_dialog.is_some();
+        let community_dialog_open = community_dialog.is_some();
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
-        let modal_open =
-            paste_preview_open || message_delete_open || event_dialog_open || media_viewer_open;
+        let modal_open = paste_preview_open
+            || message_delete_open
+            || event_dialog_open
+            || community_dialog_open
+            || media_viewer_open;
         let call_overlay = (connected && !modal_open)
             .then(|| render_call_overlay(self, window, cx))
             .flatten();
@@ -4654,6 +4678,7 @@ impl Render for WhatsAppApp {
         .children(paste_preview)
         .children(message_delete)
         .children(event_dialog)
+        .children(community_dialog)
         .children(call_overlay)
         .child(self.notices().clone())
         // Cached views report their surfaces in prepaint. Move focus after
@@ -4665,7 +4690,7 @@ impl Render for WhatsAppApp {
                         app.keyboard_surfaces.call_card = call_card;
                         app.keyboard_surfaces.paste_preview = paste_preview_open;
                         app.keyboard_surfaces.message_delete =
-                            message_delete_open || event_dialog_open;
+                            message_delete_open || event_dialog_open || community_dialog_open;
                     });
                     let entity = entity.downgrade();
                     window.defer(cx, move |window, cx| {

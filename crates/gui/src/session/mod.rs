@@ -89,8 +89,9 @@ use std::sync::{Arc, Mutex};
 
 use log::error;
 use oxidezap_core::{
-    AccountId, CallState, Chat, ChatMessage, CreatedMessageRef, DownloadableMedia, EventRsvp,
-    QuotedMessage, UiEvent,
+    AccountId, CallState, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
+    CreatedMessageRef, DownloadableMedia, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest,
+    QuotedMessage, SubgroupDraft, UiEvent,
 };
 use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, RequestId};
 // The payload structs the protocol declares, named rather than glob-imported
@@ -333,6 +334,9 @@ enum Awaiting {
     /// A creation whose result is the message that was made, not just an
     /// acknowledgement: without it the window cannot name the card it drew.
     EventCreated(oneshot::Sender<Result<CreatedMessageRef, Failure>>),
+    /// A community operation whose typed result may be only partly successful.
+    /// The form that asked stays open until this answer or a hard failure.
+    Community(oneshot::Sender<Result<CommunityOperationResult, Failure>>),
     /// A mutation whose payload was staged through the media cache: a photo
     /// or video status. Carries the key for the reason a send does, since a
     /// request that never runs would otherwise leave the bytes behind.
@@ -422,6 +426,7 @@ impl Awaiting {
             Self::Account(tx) => tx.is_closed(),
             Self::Mutation(tx) => tx.is_closed(),
             Self::EventCreated(tx) => tx.is_closed(),
+            Self::Community(tx) => tx.is_closed(),
             Self::StagedMutation { tx, .. } => tx.is_closed(),
             Self::SyncedStickers(tx) => tx.is_closed(),
             Self::Download(tx) => tx.is_closed(),
@@ -472,6 +477,12 @@ impl Awaiting {
                 let _ = tx.send(Err(failure.clone()));
             }
             Self::EventCreated(tx) => {
+                let _ = tx.send(Err(failure.clone()));
+            }
+            // A refused community request leaves the form up, with the
+            // daemon's reason in the answer; the person who filled it in is
+            // the one who has to decide whether to try again.
+            Self::Community(tx) => {
                 let _ = tx.send(Err(failure.clone()));
             }
             Self::StagedMutation { tx, .. } => {
@@ -1617,6 +1628,58 @@ impl SessionHandle {
         self.ask(
             ClientRequest::CreateEvent(Box::new(request)),
             Awaiting::EventCreated(tx),
+        );
+        rx
+    }
+
+    /// Create a community, answered with whatever the daemon could finish.
+    pub fn create_community(
+        &self,
+        draft: CommunityDraft,
+    ) -> oneshot::Receiver<Result<CommunityOperationResult, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::CreateCommunity(draft),
+            Awaiting::Community(tx),
+        );
+        rx
+    }
+
+    /// Create a subgroup under a community.
+    pub fn create_community_subgroup(
+        &self,
+        draft: SubgroupDraft,
+    ) -> oneshot::Receiver<Result<CommunityOperationResult, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::CreateCommunitySubgroup(draft),
+            Awaiting::Community(tx),
+        );
+        rx
+    }
+
+    /// Link existing groups to a community.
+    pub fn link_community_subgroups(
+        &self,
+        request: LinkSubgroupsRequest,
+    ) -> oneshot::Receiver<Result<CommunityOperationResult, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::LinkCommunitySubgroups(request),
+            Awaiting::Community(tx),
+        );
+        rx
+    }
+
+    /// Join a community's subgroup.
+    pub fn join_community_subgroup(
+        &self,
+        request: JoinSubgroupRequest,
+    ) -> oneshot::Receiver<Result<CommunityOperationResult, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::JoinCommunitySubgroup(request),
+            Awaiting::Community(tx),
         );
         rx
     }

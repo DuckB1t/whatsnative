@@ -247,6 +247,77 @@ pub(super) async fn handle_request(
         ClientRequest::RespondEvent(request) => {
             acted(dispatch(hub, commands, Action::RespondEvent(request)).await)
         }
+        // Real account mutations with a typed, possibly partial answer: the
+        // result arrives from the task under the id, alongside the warnings
+        // and refused groups it could not finish.
+        ClientRequest::CreateCommunity(request) => {
+            let id = match addressed(id, "a community creation needs an id to answer under") {
+                Ok(id) => id,
+                Err(answer) => return answer,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::CreateCommunity {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::CreateCommunitySubgroup(request) => {
+            let id = match addressed(id, "a subgroup creation needs an id to answer under") {
+                Ok(id) => id,
+                Err(answer) => return answer,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::CreateCommunitySubgroup {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::LinkCommunitySubgroups(request) => {
+            let id = match addressed(id, "a subgroup link needs an id to answer under") {
+                Ok(id) => id,
+                Err(answer) => return answer,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::LinkCommunitySubgroups {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::JoinCommunitySubgroup(request) => {
+            let id = match addressed(id, "a subgroup join needs an id to answer under") {
+                Ok(id) => id,
+                Err(answer) => return answer,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::JoinCommunitySubgroup {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::CallDevices(request) => {
             let id = match addressed(id, "a device request needs an id") {
                 Ok(id) => id,

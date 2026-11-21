@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use oxidezap_core::CallOutcome;
+use oxidezap_core::{CallOutcome, CommunityOperationResult};
 use oxidezap_ipc::{
     CallAction, ChatSummary, DaemonEvent, DaemonMessage, PageCursor, ProtocolError, RequestId,
 };
@@ -243,6 +243,78 @@ impl Bridge {
                         other => mutation_answer(id, other),
                     };
                     answer_now(&answer_to, answered(id, result));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::CreateCommunity {
+                id,
+                request,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.create_community(request);
+                oxidezap_session::spawn(async move {
+                    let answer = community_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::CreateCommunitySubgroup {
+                id,
+                request,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.create_community_subgroup(request);
+                oxidezap_session::spawn(async move {
+                    let answer = community_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::LinkCommunitySubgroups {
+                id,
+                request,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.link_community_subgroups(request);
+                oxidezap_session::spawn(async move {
+                    let answer = community_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::JoinCommunitySubgroup {
+                id,
+                request,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.join_community_subgroup(request);
+                oxidezap_session::spawn(async move {
+                    let answer = community_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
                     let _ = reply.send(CommandOutcome::Accepted);
                     drop(permit);
                 });
@@ -1705,6 +1777,10 @@ impl Bridge {
         match action {
             Action::Wire { .. }
             | Action::CreateEvent { .. }
+            | Action::CreateCommunity { .. }
+            | Action::CreateCommunitySubgroup { .. }
+            | Action::LinkCommunitySubgroups { .. }
+            | Action::JoinCommunitySubgroup { .. }
             | Action::EditMessage { .. }
             | Action::RevokeMessage { .. }
             | Action::PublishStatus { .. }
@@ -2745,6 +2821,27 @@ fn event_draft(request: oxidezap_ipc::CreateEvent) -> EventDraft {
         location,
         is_scheduled_call,
         extra_guests_allowed,
+    }
+}
+
+/// A community operation's answer, which may report partial success.
+///
+/// A local validation or network refusal is a hard failure under the request's
+/// id; the typed result from the session is not an acknowledgement but the
+/// answer itself, including its warnings and refused groups.
+fn community_answer<E: std::fmt::Display>(
+    id: RequestId,
+    result: Result<Result<CommunityOperationResult, String>, E>,
+) -> Result<DaemonMessage, ProtocolError> {
+    match result {
+        Ok(Ok(result)) => Ok(DaemonMessage::CommunityResult { id, result }),
+        Ok(Err(detail)) => Err(ProtocolError::Failed {
+            detail,
+            retryable: true,
+        }),
+        Err(error) => Err(ProtocolError::NoSession {
+            detail: format!("the session stopped before the community operation finished: {error}"),
+        }),
     }
 }
 

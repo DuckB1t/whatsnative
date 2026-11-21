@@ -45,4 +45,7 @@ formatted_catalog! {
     username_lookup_failed(error) => ("Could not look up that username: {error}", "Não foi possível buscar esse usuário: {error}");
     event_time(start, end) => ("{start} – {end}", "{start} – {end}");
     event_start(start) => ("Starts {start}", "Começa {start}");
+    community_groups_created(count) => ("Groups created: {count}", "Grupos criados: {count}");
+    community_groups_linked(count) => ("Groups linked: {count}", "Grupos vinculados: {count}");
+    community_link_failed(jid, code) => ("Could not link {jid} (code {code}).", "Não foi possível vincular {jid} (código {code}).");
 }

@@ -4,6 +4,7 @@
 //! here and no state is written. What carrying one out looks like is
 //! [`super::act`].
 
+use oxidezap_core::{CommunityDraft, JoinSubgroupRequest, LinkSubgroupsRequest, SubgroupDraft};
 use oxidezap_ipc::{CallAction, RequestId};
 
 /// Something a client asked the session to do.
@@ -85,6 +86,28 @@ pub enum Action {
     /// Answer a calendar invitation, correlated like a vote so a refusal
     /// reaches the tap that painted the answer.
     RespondEvent(oxidezap_ipc::RespondEvent),
+    /// A community operation. Its result can be partial, so the answer is the
+    /// typed result under `id`, not a bare acknowledgement.
+    CreateCommunity {
+        id: RequestId,
+        request: CommunityDraft,
+        answer_to: Outbox,
+    },
+    CreateCommunitySubgroup {
+        id: RequestId,
+        request: SubgroupDraft,
+        answer_to: Outbox,
+    },
+    LinkCommunitySubgroups {
+        id: RequestId,
+        request: LinkSubgroupsRequest,
+        answer_to: Outbox,
+    },
+    JoinCommunitySubgroup {
+        id: RequestId,
+        request: JoinSubgroupRequest,
+        answer_to: Outbox,
+    },
     /// Fetch media and answer on `answer_to` rather than through the command's
     /// own reply, which resolves in microseconds while this takes seconds.
     Download {

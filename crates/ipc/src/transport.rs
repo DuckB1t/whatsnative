@@ -311,7 +311,13 @@ use std::path::PathBuf;
 /// is a correlated mutation like a poll vote. An older daemon knows neither
 /// request, so a window that draws an event card must not attach to one that
 /// would refuse both.
-pub const PROTOCOL_VERSION: u32 = 48;
+///
+/// 49 adds native community creation, subgroup creation, linking and joining.
+/// Their shared, correlated answer is `CommunityResult`, which carries partial
+/// successes and warnings as typed data. An older daemon knows none of the four
+/// requests, so a window drawing a community form must not attach to one that
+/// would refuse them.
+pub const PROTOCOL_VERSION: u32 = 49;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

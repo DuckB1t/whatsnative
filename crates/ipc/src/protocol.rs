@@ -1,9 +1,11 @@
 //! Messages exchanged over the socket.
 
 use oxidezap_core::{
-    AccountId, BlockedContact, CallState, CallVideoFrame, Chat, ChatMessage, CreatedMessageRef,
-    DownloadableMedia, EventLocation, EventRsvp, GroupHierarchy, GroupRoster, LogLevel,
-    OutgoingMedia, PluginAction, PluginSurface, QuotedMessage, UiEvent, UsernameLookupResult,
+    AccountId, BlockedContact, CallState, CallVideoFrame, Chat, ChatMessage, CommunityDraft,
+    CommunityOperationResult, CreatedMessageRef, DownloadableMedia, EventLocation, EventRsvp,
+    GroupHierarchy, GroupRoster, JoinSubgroupRequest, LinkSubgroupsRequest, LogLevel,
+    OutgoingMedia, PluginAction, PluginSurface, QuotedMessage, SubgroupDraft, UiEvent,
+    UsernameLookupResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -519,6 +521,16 @@ pub enum DaemonMessage {
     UsernameLookup {
         id: RequestId,
         result: UsernameLookupResult,
+    },
+    /// The typed answer to a community operation, under the request's id.
+    ///
+    /// A creation, link or join can succeed in part: the group may exist while
+    /// its description failed, or some linked groups may have been refused.
+    /// The whole result travels back so a front end can name what happened
+    /// without guessing from an acknowledgement.
+    CommunityResult {
+        id: RequestId,
+        result: CommunityOperationResult,
     },
     /// A module was installed, and the id it claimed.
     ///
@@ -1225,6 +1237,17 @@ pub enum ClientRequest {
     /// Correlated like a vote rather than staged like a send: the card paints
     /// the attempted answer first, so a refusal has to reach the same tap.
     RespondEvent(RespondEvent),
+    /// Create a community and, when asked, its general chat.
+    ///
+    /// Answered with [`DaemonMessage::CommunityResult`] under this request's
+    /// id: the created group can exist even when a follow-up step failed.
+    CreateCommunity(CommunityDraft),
+    /// Create a subgroup under an existing community.
+    CreateCommunitySubgroup(SubgroupDraft),
+    /// Attach existing groups to a community, with their visibility.
+    LinkCommunitySubgroups(LinkSubgroupsRequest),
+    /// Join one community's subgroup.
+    JoinCommunitySubgroup(JoinSubgroupRequest),
     /// One page of a chat's messages, older than `before`.
     ///
     /// Answered with [`DaemonMessage::Messages`] under the request's id. This
@@ -2116,6 +2139,90 @@ mod tests {
             serde_json::from_value::<ChatSummary>(json).expect("deserialize summary"),
             summary
         );
+    }
+
+    #[test]
+    fn community_requests_put_synthetic_drafts_on_the_wire() {
+        use oxidezap_core::CommunityVisibility;
+
+        let cases: Vec<(ClientRequest, &str)> = vec![
+            (
+                ClientRequest::CreateCommunity(CommunityDraft {
+                    name: "Synthetic community".into(),
+                    description: None,
+                    closed: false,
+                    allow_non_admin_sub_group_creation: false,
+                    create_general_chat: false,
+                }),
+                r#"{"request":"create_community","name":"Synthetic community"}"#,
+            ),
+            (
+                ClientRequest::CreateCommunitySubgroup(SubgroupDraft {
+                    parent_jid: "155555500001@g.us".into(),
+                    name: "Synthetic subgroup".into(),
+                    participants: vec![],
+                    visibility: CommunityVisibility::Visible,
+                }),
+                r#"{"request":"create_community_subgroup","parent_jid":"155555500001@g.us","name":"Synthetic subgroup","visibility":"visible"}"#,
+            ),
+            (
+                ClientRequest::LinkCommunitySubgroups(LinkSubgroupsRequest {
+                    community_jid: "155555500001@g.us".into(),
+                    groups: vec![oxidezap_core::LinkSubgroupTarget {
+                        jid: "155555500002@g.us".into(),
+                        visibility: CommunityVisibility::Hidden,
+                    }],
+                }),
+                r#"{"request":"link_community_subgroups","community_jid":"155555500001@g.us","groups":[{"jid":"155555500002@g.us","visibility":"hidden"}]}"#,
+            ),
+            (
+                ClientRequest::JoinCommunitySubgroup(JoinSubgroupRequest {
+                    community_jid: "155555500001@g.us".into(),
+                    subgroup_jid: "155555500003@g.us".into(),
+                }),
+                r#"{"request":"join_community_subgroup","community_jid":"155555500001@g.us","subgroup_jid":"155555500003@g.us"}"#,
+            ),
+        ];
+        for (frame, expected) in cases {
+            let line = serde_json::to_string(&frame).unwrap();
+            assert_eq!(line, expected);
+            assert_eq!(serde_json::from_str::<ClientRequest>(&line).unwrap(), frame);
+        }
+    }
+
+    #[test]
+    fn community_result_carries_partial_failures_and_defaults_additively() {
+        use oxidezap_core::{CommunityWarning, CommunityWarningStep};
+
+        let result = CommunityOperationResult {
+            groups: vec![oxidezap_core::CommunityGroupRef {
+                jid: "155555500001@g.us".into(),
+                subject: Some("Synthetic".into()),
+                description: None,
+            }],
+            linked_jids: vec!["155555500002@g.us".into()],
+            failed_groups: vec![oxidezap_core::CommunitySubgroupFailure {
+                jid: "155555500003@g.us".into(),
+                code: 403,
+            }],
+            warnings: vec![CommunityWarning {
+                step: CommunityWarningStep::SetDescription,
+                jid: Some("155555500001@g.us".into()),
+                detail: Some("synthetic description failure".into()),
+            }],
+        };
+        let frame = DaemonMessage::CommunityResult { id: 42, result };
+        let line = serde_json::to_string(&frame).unwrap();
+        assert_eq!(serde_json::from_str::<DaemonMessage>(&line).unwrap(), frame);
+        let empty = serde_json::from_str::<DaemonMessage>(
+            r#"{"type":"community_result","id":7,"result":{}}"#,
+        )
+        .unwrap();
+        let DaemonMessage::CommunityResult { id, result } = empty else {
+            panic!("expected a community result");
+        };
+        assert_eq!(id, 7);
+        assert_eq!(result, CommunityOperationResult::default());
     }
 
     #[test]

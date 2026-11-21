@@ -224,6 +224,34 @@ had `Events::create/respond/respond_raw`.
 **Gates.** fmt, clippy (`-D warnings`) and the full workspace test suite all
 green; synthetic fixtures only, no real event or RSVP was sent.
 
+### 9. Native communities (protocol 49)
+
+**Problem.** Groups had hierarchy badges but no way to create a community or
+subgroup, link existing groups, or join a subgroup. The library's community API
+can finish in part, so a bare acknowledgement was not enough.
+
+**Change.**
+- `session/whatsapp/communities.rs` wraps create/create-subgroup/link/join with
+  the library's `CreateSubgroupOptions`/`LinkSubgroupOptions` so per-target
+  visibility is kept. Partial cases become `Ok` with typed data: a failed
+  description write still reports the created group plus a `SetDescription`
+  warning; approval-pending join is a `JoinApprovalPending` warning; refused
+  groups stay typed failures. Hard errors become strings.
+- IPC adds four `ClientRequest` variants and a correlated
+  `DaemonMessage::CommunityResult { id, result }`; protocol version **49**.
+  The daemon answers out-of-band under the request id (like events) with
+  `ProtocolError::Failed`/`NoSession` for hard errors. No CLI wire changes.
+- GUI adds `Awaiting::Community`, four correlated `SessionHandle` methods, and
+  a four-mode dialog reachable from the Communities `+` button and empty
+  state. A typed result shows per-item notices and navigates to a created
+  group already in the chat list; a hard failure keeps the form open with the
+  daemon's reason. All strings are in the EN/PT catalog.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2594 passed). One pre-existing timing-sensitive sticker-animation test flakes
+under full-suite load (passes in isolation and on clean rerun); unrelated to
+this slice. Synthetic JIDs only; no real community operation was performed.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).
