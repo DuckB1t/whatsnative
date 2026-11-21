@@ -533,6 +533,14 @@
   picture — but it costs a second IQ for a community parent that has a picture.
   The alternative is carrying `is_parent_group` into the chat state, which is a
   protocol field the client does not model today.
+- **Old channel history cannot be reacted to or voted on until a live copy
+  arrives.** Channel reactions and poll votes address the server's content id,
+  which a live push carries but history sync does not. A forwarded-newsletter
+  context names the message in the *original* channel, so using it for the row
+  being stored could act on the wrong channel. The store keeps those rows and
+  the session returns an explicit "no server id yet" error instead of guessing.
+  Fetching ids for old channel messages would need a newsletter-history API
+  this stack does not expose.
 
 Clickable `div`s that remain are deliberate: a chat row and a media thumbnail
 are surfaces, not commands, and have no semantic component to compose from.

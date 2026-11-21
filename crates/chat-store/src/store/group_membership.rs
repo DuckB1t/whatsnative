@@ -41,6 +41,7 @@ pub(super) fn apply(
             text: None,
             proto: None,
             proto_codec: 0,
+            newsletter_server_id: None,
             status: wa::web_message_info::Status::READ as i32,
             history_status: None,
             starred: false,

@@ -1,11 +1,11 @@
 //! Messages exchanged over the socket.
 
 use oxidezap_core::{
-    AccountId, BlockedContact, CallState, CallVideoFrame, Chat, ChatMessage, CommunityDraft,
-    CommunityOperationResult, CreatedMessageRef, DownloadableMedia, EventLocation, EventRsvp,
-    GroupHierarchy, GroupRoster, JoinSubgroupRequest, LinkSubgroupsRequest, LogLevel,
-    OutgoingMedia, PluginAction, PluginSurface, QuotedMessage, SubgroupDraft, UiEvent,
-    UsernameLookupResult,
+    AccountId, BlockedContact, CallState, CallVideoFrame, ChannelPollCreated, ChannelPollDraft,
+    ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
+    CreatedMessageRef, DownloadableMedia, EventLocation, EventRsvp, GroupHierarchy, GroupRoster,
+    JoinSubgroupRequest, LinkSubgroupsRequest, LogLevel, OutgoingMedia, PluginAction,
+    PluginSurface, QuotedMessage, SubgroupDraft, UiEvent, UsernameLookupResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -578,6 +578,13 @@ pub enum DaemonMessage {
         id: RequestId,
         created: CreatedMessageRef,
     },
+    /// A channel poll was created, answering
+    /// [`ClientRequest::CreateChannelPoll`]. Only the message the window can
+    /// name crosses the socket; the session keeps the send details.
+    ChannelPollCreated {
+        id: RequestId,
+        created: ChannelPollCreated,
+    },
     /// A command reached the session. Carries no result beyond that: what the
     /// network makes of it arrives as [`DaemonMessage::Update`], or as
     /// [`DaemonMessage::SendFailed`] when it makes nothing of it at all.
@@ -857,6 +864,22 @@ pub struct EditMessage {
     pub jid: String,
     pub message_id: String,
     pub new_text: String,
+}
+
+/// A plain-text post to a channel. See [`ClientRequest::PostToChannel`].
+///
+/// Channels are plaintext and have no message secret, so there is no staging.
+/// The id a window drew its optimistic bubble under still travels: it becomes
+/// the message id the store records and WhatsApp is handed, so the bubble and
+/// the durable row never name two different messages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PostToChannel {
+    pub channel_jid: String,
+    pub text: String,
+    /// The optimistic bubble's id, when the sender draws one. A client that
+    /// draws nothing leaves it out and the session makes an id up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_id: Option<String>,
 }
 
 /// React to a message with an emoji. See [`ClientRequest::SendReaction`].
@@ -1237,6 +1260,16 @@ pub enum ClientRequest {
     /// Correlated like a vote rather than staged like a send: the card paints
     /// the attempted answer first, so a refusal has to reach the same tap.
     RespondEvent(RespondEvent),
+    /// Post plain text to a channel. Answered like a reaction: a refusal comes
+    /// back under this request's id rather than becoming a log line.
+    PostToChannel(PostToChannel),
+    /// Open a poll in a channel. The typed answer carries the message that was
+    /// created, under this request's id.
+    CreateChannelPoll(ChannelPollDraft),
+    /// React to a channel message, or remove our reaction with an empty emoji.
+    ReactToChannel(ChannelReact),
+    /// Replace a channel poll ballot by option index.
+    VoteChannelPoll(ChannelVotePoll),
     /// Create a community and, when asked, its general chat.
     ///
     /// Answered with [`DaemonMessage::CommunityResult`] under this request's
@@ -2902,6 +2935,81 @@ mod audio_played_tests {
         assert_eq!(
             serde_json::from_str::<ClientRequest>(&json).unwrap(),
             request
+        );
+    }
+
+    #[test]
+    fn channel_operations_round_trip_and_default_their_collections() {
+        const CHANNEL: &str = "155555500001@newsletter";
+        let post = ClientRequest::PostToChannel(PostToChannel {
+            channel_jid: CHANNEL.into(),
+            text: "Synthetic post".into(),
+            local_id: Some("SYNTHETIC-LOCAL".into()),
+        });
+        let json = serde_json::to_string(&post).unwrap();
+        assert_eq!(
+            json,
+            r#"{"request":"post_to_channel","channel_jid":"155555500001@newsletter","text":"Synthetic post","local_id":"SYNTHETIC-LOCAL"}"#
+        );
+        assert_eq!(serde_json::from_str::<ClientRequest>(&json).unwrap(), post);
+        let without_local_id: ClientRequest = serde_json::from_str(
+            r#"{"request":"post_to_channel","channel_jid":"155555500001@newsletter","text":"Synthetic post"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            without_local_id,
+            ClientRequest::PostToChannel(PostToChannel {
+                channel_jid: CHANNEL.into(),
+                text: "Synthetic post".into(),
+                local_id: None,
+            })
+        );
+
+        let poll: ChannelPollDraft = serde_json::from_str(
+            r#"{"channel_jid":"155555500001@newsletter","question":"Synthetic","selectable_count":1}"#,
+        )
+        .unwrap();
+        assert!(poll.options.is_empty());
+        let request = ClientRequest::CreateChannelPoll(poll);
+        let json = serde_json::to_string(&request).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&json).unwrap(),
+            request
+        );
+
+        let react = ClientRequest::ReactToChannel(ChannelReact {
+            channel_jid: CHANNEL.into(),
+            message_id: "SYNTHETIC-1".into(),
+            emoji: String::new(),
+        });
+        let json = serde_json::to_string(&react).unwrap();
+        assert!(json.contains("\"emoji\":\"\""));
+        assert_eq!(serde_json::from_str::<ClientRequest>(&json).unwrap(), react);
+
+        let vote: ChannelVotePoll = serde_json::from_str(
+            r#"{"channel_jid":"155555500001@newsletter","poll_message_id":"SYNTHETIC-2"}"#,
+        )
+        .unwrap();
+        assert!(vote.option_indices.is_empty());
+        let request = ClientRequest::VoteChannelPoll(vote);
+        let json = serde_json::to_string(&request).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&json).unwrap(),
+            request
+        );
+
+        let answer = DaemonMessage::ChannelPollCreated {
+            id: 9,
+            created: ChannelPollCreated {
+                channel_jid: CHANNEL.into(),
+                message_id: "SYNTHETIC-3".into(),
+            },
+        };
+        let json = serde_json::to_string(&answer).unwrap();
+        assert!(json.contains("\"type\":\"channel_poll_created\""));
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&json).unwrap(),
+            answer
         );
     }
 

@@ -5,6 +5,12 @@ use std::path::PathBuf;
 /// Bumped whenever a frame changes shape in a way an older peer would
 /// misread. The daemon refuses a mismatch rather than guessing.
 ///
+/// 50: Native channel operations cross the socket: `PostToChannel`,
+/// `CreateChannelPoll`, `ReactToChannel` and `VoteChannelPoll`, with
+/// `DaemonMessage::ChannelPollCreated` naming the poll a window just opened.
+/// An older daemon knows none of these requests and would refuse them after
+/// the tap; an older window has no surface that can ask for them.
+///
 /// 40: `ReconnectSession` interrupts the WhatsApp reconnect wait without
 /// replacing the account session. Older daemons cannot act on this request.
 ///
@@ -317,7 +323,7 @@ use std::path::PathBuf;
 /// successes and warnings as typed data. An older daemon knows none of the four
 /// requests, so a window drawing a community form must not attach to one that
 /// would refuse them.
-pub const PROTOCOL_VERSION: u32 = 49;
+pub const PROTOCOL_VERSION: u32 = 50;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

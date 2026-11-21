@@ -352,6 +352,9 @@ impl WhatsAppApp {
         if self.cancel_event_dialog(cx) {
             return;
         }
+        if self.cancel_channel_poll_dialog(cx) {
+            return;
+        }
         if self.cancel_community_dialog(cx) {
             return;
         }

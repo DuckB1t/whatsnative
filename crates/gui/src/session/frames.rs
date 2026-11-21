@@ -311,6 +311,17 @@ impl<'a> Frames<'a> {
                 Some(waiting) => self.fail(waiting, &Failure::permanent("unexpected event answer")),
                 None => {}
             },
+            DaemonMessage::ChannelPollCreated { id, created } => {
+                match take_pending(self.pending, id) {
+                    Some(Awaiting::ChannelPollCreated(tx)) => {
+                        let _ = tx.send(Ok(created));
+                    }
+                    Some(waiting) => {
+                        self.fail(waiting, &Failure::permanent("unexpected poll answer"))
+                    }
+                    None => {}
+                }
+            }
             // A community operation's answer carries its own partial failures,
             // so it must be claimed before the generic acknowledgement path
             // can mistake it for one.

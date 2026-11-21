@@ -12,6 +12,7 @@ mod body;
 mod call_devices;
 mod calls;
 mod calls_ctl;
+mod channel_poll_dialog;
 pub mod chat_row;
 mod chats;
 mod commands;
@@ -442,6 +443,15 @@ use oxidezap_core::{
 // ChatListCache is now in chats.rs and re-exported above
 // RecordingState is now in media/mod.rs and re-exported above
 // MessageListCache is now in messages.rs and re-exported above
+
+/// Whether a conversation address names a channel.
+///
+/// The suffix is the discriminator the daemon and session use too: a channel
+/// is not an E2E chat, and its reactions and votes carry a server message id
+/// rather than the stanza id drawn in the timeline.
+pub(crate) fn is_channel_jid(jid: &str) -> bool {
+    jid.ends_with("@newsletter")
+}
 
 /// Key context for chat list keyboard navigation
 const CHAT_LIST_CONTEXT: &str = "ChatList";
@@ -886,6 +896,8 @@ pub struct WhatsAppApp {
     /// An event creation waiting for its fields or its answer. Taken as soon
     /// as the request is sent, so a second press cannot create two cards.
     event_dialog: Option<event_dialog::EventDraftDialog>,
+    /// A channel poll waiting for its fields or the created message answer.
+    channel_poll_dialog: Option<channel_poll_dialog::ChannelPollDialog>,
     /// A community operation waiting for its fields or its typed answer.
     /// Mutually exclusive with the other modal surfaces, so they share a focus
     /// handle.
@@ -1532,6 +1544,7 @@ impl WhatsAppApp {
             attempted_poll_votes: std::collections::HashMap::new(),
             attempted_event_rsvps: std::collections::HashMap::new(),
             event_dialog: None,
+            channel_poll_dialog: None,
             community_dialog: None,
             pages: cx.new(|_| paging::Pages::new()),
             watched_status: std::collections::HashSet::new(),
@@ -2410,6 +2423,7 @@ impl WhatsAppApp {
         self.attempted_poll_votes.clear();
         self.attempted_event_rsvps.clear();
         self.event_dialog = None;
+        self.channel_poll_dialog = None;
         self.community_dialog = None;
         // The reader is a selection too, and a JID-keyed one. Left alone, it
         // pointed the new account at the old account's contact: at their
@@ -3443,6 +3457,49 @@ impl WhatsAppApp {
             return false;
         };
         let local_id = Self::next_local_id("local");
+
+        // A channel is plaintext and has no message secret: the E2E send would
+        // be refused. Its answer is correlated so a refusal can turn this
+        // optimistic bubble into a failed one instead of leaving a clock.
+        if is_channel_jid(jid) {
+            let waiting = client.post_to_channel(jid, text, local_id.clone());
+            let message = ChatMessage::new_outgoing(local_id.clone(), text.to_string());
+            self.ensure_chat(jid);
+            self.add_message_to_chat(jid, message, cx);
+            cx.notify();
+            let target = jid.to_string();
+            cx.spawn(async move |entity, cx| {
+                let failure = match waiting.await {
+                    Ok(Ok(())) => None,
+                    Ok(Err(failure)) => Some(failure),
+                    Err(_) => Some(crate::session::Failure::worth_retrying(crate::tr!(
+                        DaemonDisconnectedBeforeAnswer
+                    ))),
+                };
+                let _ = entity.update(cx, |app, cx| {
+                    if let Some(chat) = app.find_chat_mut(&target) {
+                        if let Some(message) = chat.messages.iter_mut().find(|m| m.id == local_id) {
+                            message.status = if failure.is_some() {
+                                MessageStatus::Failed
+                            } else {
+                                MessageStatus::Sent
+                            };
+                        }
+                        app.invalidate_message_cache(&target, cx);
+                    }
+                    if let Some(failure) = failure {
+                        app.notify_user(
+                            what_went_wrong(crate::tr!(CouldNotPostToChannel), &failure),
+                            notices::Tone::Problem,
+                            cx,
+                        );
+                    }
+                });
+            })
+            .detach();
+            return true;
+        }
+
         client.send_message(jid, text, local_id.clone(), quoted.clone());
 
         // MessageIdAssigned replaces the local id once the daemon accepts the send.
@@ -4601,6 +4658,18 @@ impl Render for WhatsAppApp {
             )
             .into_any_element()
         });
+        // The channel poll form shares the same focus handle as the other
+        // mutually exclusive forms: only one is ever up, and the call overlay
+        // must not learn about another owner just for a channel form.
+        let channel_poll_dialog = self.channel_poll_dialog.as_ref().map(|dialog| {
+            channel_poll_dialog::render_channel_poll_dialog(
+                dialog,
+                cx.entity().clone(),
+                &self.message_delete_focus,
+                cx,
+            )
+            .into_any_element()
+        });
         // The community form shares the deletion modal's focus handle for the
         // same reason the event form does: only one of them is ever up, and
         // adding another owner to `sync_overlay_focus` would change a call
@@ -4626,11 +4695,13 @@ impl Render for WhatsAppApp {
         let paste_preview_open = paste_preview.is_some();
         let message_delete_open = message_delete.is_some();
         let event_dialog_open = event_dialog.is_some();
+        let channel_poll_dialog_open = channel_poll_dialog.is_some();
         let community_dialog_open = community_dialog.is_some();
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
         let modal_open = paste_preview_open
             || message_delete_open
             || event_dialog_open
+            || channel_poll_dialog_open
             || community_dialog_open
             || media_viewer_open;
         let call_overlay = (connected && !modal_open)
@@ -4678,6 +4749,7 @@ impl Render for WhatsAppApp {
         .children(paste_preview)
         .children(message_delete)
         .children(event_dialog)
+        .children(channel_poll_dialog)
         .children(community_dialog)
         .children(call_overlay)
         .child(self.notices().clone())
@@ -4689,8 +4761,10 @@ impl Render for WhatsAppApp {
                     entity.update(cx, |app, _| {
                         app.keyboard_surfaces.call_card = call_card;
                         app.keyboard_surfaces.paste_preview = paste_preview_open;
-                        app.keyboard_surfaces.message_delete =
-                            message_delete_open || event_dialog_open || community_dialog_open;
+                        app.keyboard_surfaces.message_delete = message_delete_open
+                            || event_dialog_open
+                            || channel_poll_dialog_open
+                            || community_dialog_open;
                     });
                     let entity = entity.downgrade();
                     window.defer(cx, move |window, cx| {

@@ -7,6 +7,8 @@
 //! what keeps this crate from depending on the transport it serves.
 
 use oxidezap_chat_store::MessageCoverage;
+use oxidezap_core::{ChannelPollCreated, ChannelPollDraft, ChannelReact, ChannelVotePoll};
+use whatsapp_rust::wacore::poll::compute_option_hash;
 use whatsapp_rust::wacore::proto_helpers::MessageExt as _;
 use whatsapp_rust::wacore_binary::jid::{Jid, JidExt as _};
 use whatsapp_rust::waproto::whatsapp as wa;
@@ -1081,6 +1083,172 @@ impl WhatsAppClient {
         })
     }
 
+    /// Post plain text to a channel the account can write to.
+    ///
+    /// The local id travels with the request when the sender drew the bubble:
+    /// using it as the WhatsApp message id keeps the optimistic row and the
+    /// durable row the same message, the way a chat send's rename does without
+    /// needing a second event.
+    pub fn post_to_channel(
+        &self,
+        channel_jid: String,
+        text: String,
+        local_id: Option<String>,
+    ) -> Task<Result<(), String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let channel = parse_channel_jid(&channel_jid)?;
+            if text.trim().is_empty() {
+                return Err("channel post must not be empty".to_string());
+            }
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let mut message = wa::Message::default();
+            message.conversation = Some(text);
+
+            let message_id = match local_id {
+                Some(id) if !id.trim().is_empty() => id,
+                Some(_) => return Err("a channel post needs a nonempty message id".to_string()),
+                None => live.client.generate_message_id().into_string(),
+            };
+            let protocol_id = whatsapp_rust::MessageId::try_from(message_id.clone())
+                .map_err(|_| "a channel post needs a valid message id".to_string())?;
+            super::record_outgoing(
+                &live.chat_store,
+                &channel,
+                &message_id,
+                &message,
+                &live.resolve_chat_names,
+            )?;
+            let options = whatsapp_rust::SendOptions::default().with_message_id(protocol_id);
+            match live
+                .client
+                .send(whatsapp_rust::SendRequest::new(&channel, message).with_options(options))
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(error) => {
+                    super::mark_send_failed(&live.chat_store, &channel, &message_id);
+                    Err(error.to_string())
+                }
+            }
+        })
+    }
+
+    /// Open a text poll in a channel.
+    pub fn create_channel_poll(
+        &self,
+        draft: ChannelPollDraft,
+    ) -> Task<Result<ChannelPollCreated, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let channel = parse_channel_jid(&draft.channel_jid)?;
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let sent = live
+                .client
+                .newsletter()
+                .send_poll(
+                    &channel,
+                    &draft.question,
+                    &draft.options,
+                    draft.selectable_count,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            // `send_poll` builds its own message and id, so the row can only
+            // be recorded after the send. The store's deferred-ack queue holds
+            // an early acknowledgement until this insert reaches the writer.
+            let message_id = sent.message_id.to_string();
+            if let Err(error) = super::record_outgoing(
+                &live.chat_store,
+                &channel,
+                &message_id,
+                &sent.message,
+                &live.resolve_chat_names,
+            ) {
+                log::warn!("channel poll was created but could not be stored: {error}");
+            }
+            Ok(ChannelPollCreated {
+                channel_jid: draft.channel_jid,
+                message_id,
+            })
+        })
+    }
+
+    /// React to a channel message, or remove our reaction with an empty emoji.
+    ///
+    /// Channels are addressed by the server's content id, not the client-side
+    /// stanza id the timeline draws. That id is captured when the message is
+    /// materialized; a row without one cannot be reacted to safely.
+    pub fn react_to_channel(&self, react: ChannelReact) -> Task<Result<(), String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let channel = parse_channel_jid(&react.channel_jid)?;
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let stored = live
+                .chat_store
+                .message(&channel, &react.message_id)
+                .await
+                .map_err(|e| format!("database query failed: {e}"))?
+                .ok_or_else(|| "channel message not found".to_string())?;
+            let server_id = require_channel_server_id(&stored)?;
+            let stanza = live
+                .client
+                .newsletter()
+                .send_reaction_raw(&channel, server_id, &react.emoji)
+                .await
+                .map_err(|e| e.to_string())?;
+            if let Err(error) = live.chat_store.record_operation(&channel, stanza.as_str()) {
+                log::warn!(
+                    "channel reaction was sent but its acknowledgement could not be tracked: {error}"
+                );
+            }
+            Ok(())
+        })
+    }
+
+    /// Replace a channel poll ballot by the indices of its stored options.
+    pub fn vote_channel_poll(&self, vote: ChannelVotePoll) -> Task<Result<(), String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let channel = parse_channel_jid(&vote.channel_jid)?;
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let stored = live
+                .chat_store
+                .message(&channel, &vote.poll_message_id)
+                .await
+                .map_err(|e| format!("database query failed: {e}"))?
+                .ok_or_else(|| "channel poll not found".to_string())?;
+            let server_id = require_channel_server_id(&stored)?;
+            let proto = stored
+                .message
+                .as_deref()
+                .ok_or_else(|| "that message has no poll content".to_string())?;
+            let creation = poll_creation_of(proto.get_base_message())
+                .ok_or_else(|| "that message is not a poll".to_string())?;
+            let hashes = channel_option_hashes(creation, &vote.option_indices)?;
+            let stanza = live
+                .client
+                .newsletter()
+                .send_poll_vote_raw(&channel, server_id, &hashes)
+                .await
+                .map_err(|e| e.to_string())?;
+            if let Err(error) = live.chat_store.record_operation(&channel, stanza.as_str()) {
+                log::warn!(
+                    "channel poll vote was sent but its acknowledgement could not be tracked: {error}"
+                );
+            }
+            Ok(())
+        })
+    }
+
     /// Download one message's media bytes.
     pub fn download_media_by_id(
         &self,
@@ -1492,6 +1660,55 @@ fn poll_view_of(stored: oxidezap_chat_store::StoredMessage) -> Option<PollView> 
     })
 }
 
+/// Whether an address names a channel. The suffix is the whole discriminator:
+/// a parsed JID is only a newsletter when the server is `newsletter`, and the
+/// daemon, GUI and session all see the same string.
+pub(crate) fn is_channel_jid(jid: &str) -> bool {
+    jid.ends_with("@newsletter")
+}
+
+fn parse_channel_jid(raw: &str) -> Result<Jid, String> {
+    if !is_channel_jid(raw) {
+        return Err("not a channel address".to_string());
+    }
+    let jid: Jid = raw
+        .parse()
+        .map_err(|_| "not a channel address".to_string())?;
+    if jid.is_newsletter() {
+        Ok(jid)
+    } else {
+        Err("not a channel address".to_string())
+    }
+}
+
+fn require_channel_server_id(stored: &oxidezap_chat_store::StoredMessage) -> Result<u64, String> {
+    stored.newsletter_server_id.ok_or_else(|| {
+        "this channel message has no server id yet; reactions and votes need the server's copy"
+            .to_string()
+    })
+}
+
+/// Map stored option indices onto the hashes the channel vote node sends.
+///
+/// The name is hashed exactly as stored. Normalizing it, or re-typing what the
+/// poll displays, would hash to an option the server does not know.
+fn channel_option_hashes(
+    creation: &wa::message::PollCreationMessage,
+    indices: &[u32],
+) -> Result<Vec<[u8; 32]>, String> {
+    indices
+        .iter()
+        .map(|index| {
+            let name = creation
+                .options
+                .get(*index as usize)
+                .and_then(|option| option.option_name.as_deref())
+                .ok_or_else(|| format!("channel poll has no option {index}"))?;
+            Ok(compute_option_hash(name))
+        })
+        .collect()
+}
+
 /// A subscribed channel as a plain view.
 fn channel_view_of(meta: whatsapp_rust::features::NewsletterMetadata) -> ChannelView {
     ChannelView {
@@ -1538,5 +1755,66 @@ mod status_exclusion_tests {
         .await
         .unwrap();
         assert_eq!(audience, vec![allowed]);
+    }
+}
+
+#[cfg(test)]
+mod channel_tests {
+    use super::*;
+
+    #[test]
+    fn only_newsletter_addresses_are_channel_addresses() {
+        assert!(is_channel_jid("155555500001@newsletter"));
+        assert!(!is_channel_jid("120363000000000001@g.us"));
+        assert!(!is_channel_jid("155555500001@s.whatsapp.net"));
+        assert!(parse_channel_jid("155555500001@newsletter").is_ok());
+        assert!(parse_channel_jid("120363000000000001@g.us").is_err());
+        assert!(parse_channel_jid("not a jid").is_err());
+    }
+
+    #[test]
+    fn a_row_without_a_server_id_cannot_be_reacted_to_or_voted_on() {
+        let stored = oxidezap_chat_store::StoredMessage {
+            group_membership: None,
+            chat_jid: "155555500001@newsletter".parse().unwrap(),
+            id: "SYNTHETIC".into(),
+            sender_jid: "155555500001@newsletter".parse().unwrap(),
+            from_me: false,
+            timestamp: whatsapp_rust::wacore::time::now_utc(),
+            kind: oxidezap_chat_store::MessageKind::Text,
+            text: Some("synthetic".into()),
+            message: None,
+            newsletter_server_id: None,
+            status: oxidezap_chat_store::MessageStatus::Delivered,
+            starred: false,
+            edited_at: None,
+            revoked: false,
+            local_revoke_placeholder: false,
+            received_as_shared_history: false,
+            seq: 1,
+        };
+        assert!(require_channel_server_id(&stored).is_err());
+
+        let mut with_zero = stored;
+        with_zero.newsletter_server_id = Some(0);
+        assert_eq!(require_channel_server_id(&with_zero), Ok(0));
+    }
+
+    #[test]
+    fn channel_votes_hash_the_stored_option_names() {
+        let mut creation = wa::message::PollCreationMessage::default();
+        creation.name = Some("Synthetic question".into());
+        creation.options = ["First", "Second"]
+            .into_iter()
+            .map(|name| {
+                let mut option = wa::message::poll_creation_message::Option::default();
+                option.option_name = Some(name.into());
+                option
+            })
+            .collect();
+        creation.selectable_options_count = Some(1);
+        let hashes = channel_option_hashes(&creation, &[1]).expect("maps an existing option");
+        assert_eq!(hashes, vec![compute_option_hash("Second")]);
+        assert!(channel_option_hashes(&creation, &[2]).is_err());
     }
 }

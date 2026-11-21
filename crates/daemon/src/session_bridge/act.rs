@@ -248,6 +248,27 @@ impl Bridge {
                 });
                 None
             }
+            Action::CreateChannelPoll {
+                id,
+                request,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.create_channel_poll(request);
+                oxidezap_session::spawn(async move {
+                    let result = match task.await {
+                        Ok(Ok(created)) => Ok(DaemonMessage::ChannelPollCreated { id, created }),
+                        other => mutation_answer(id, other),
+                    };
+                    answer_now(&answer_to, answered(id, result));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::CreateCommunity {
                 id,
                 request,
@@ -1777,6 +1798,7 @@ impl Bridge {
         match action {
             Action::Wire { .. }
             | Action::CreateEvent { .. }
+            | Action::CreateChannelPoll { .. }
             | Action::CreateCommunity { .. }
             | Action::CreateCommunitySubgroup { .. }
             | Action::LinkCommunitySubgroups { .. }
@@ -1988,6 +2010,51 @@ impl Bridge {
                     .vote_poll(chat_jid, poll_id, selected_option_indices)
                     .await
                 {
+                    Ok(Ok(())) => CommandOutcome::Accepted,
+                    Ok(Err(detail)) => CommandOutcome::Refused(detail),
+                    Err(_) => CommandOutcome::Refused(
+                        "the session stopped before it answered".to_string(),
+                    ),
+                };
+                drop(permit);
+                outcome
+            }
+            Action::PostToChannel(request) => {
+                let Some(permit) = self.permit() else {
+                    return too_busy();
+                };
+                let outcome = match client
+                    .post_to_channel(request.channel_jid, request.text, request.local_id)
+                    .await
+                {
+                    Ok(Ok(())) => CommandOutcome::Accepted,
+                    Ok(Err(detail)) => CommandOutcome::Refused(detail),
+                    Err(_) => CommandOutcome::Refused(
+                        "the session stopped before it answered".to_string(),
+                    ),
+                };
+                drop(permit);
+                outcome
+            }
+            Action::ReactToChannel(request) => {
+                let Some(permit) = self.permit() else {
+                    return too_busy();
+                };
+                let outcome = match client.react_to_channel(request).await {
+                    Ok(Ok(())) => CommandOutcome::Accepted,
+                    Ok(Err(detail)) => CommandOutcome::Refused(detail),
+                    Err(_) => CommandOutcome::Refused(
+                        "the session stopped before it answered".to_string(),
+                    ),
+                };
+                drop(permit);
+                outcome
+            }
+            Action::VoteChannelPoll(request) => {
+                let Some(permit) = self.permit() else {
+                    return too_busy();
+                };
+                let outcome = match client.vote_channel_poll(request).await {
                     Ok(Ok(())) => CommandOutcome::Accepted,
                     Ok(Err(detail)) => CommandOutcome::Refused(detail),
                     Err(_) => CommandOutcome::Refused(

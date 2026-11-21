@@ -473,6 +473,7 @@ fn apply_writer_msg(
                     text: text.as_deref(),
                     proto: Some(&proto_bytes),
                     proto_codec,
+                    newsletter_server_id: None,
                     status: wa::web_message_info::Status::PENDING as i32,
                     history_status: None,
                     starred: false,

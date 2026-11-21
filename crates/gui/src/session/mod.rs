@@ -89,9 +89,10 @@ use std::sync::{Arc, Mutex};
 
 use log::error;
 use oxidezap_core::{
-    AccountId, CallState, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
-    CreatedMessageRef, DownloadableMedia, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest,
-    QuotedMessage, SubgroupDraft, UiEvent,
+    AccountId, CallState, ChannelPollCreated, ChannelPollDraft, ChannelReact, ChannelVotePoll,
+    Chat, ChatMessage, CommunityDraft, CommunityOperationResult, CreatedMessageRef,
+    DownloadableMedia, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest, QuotedMessage,
+    SubgroupDraft, UiEvent,
 };
 use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, RequestId};
 // The payload structs the protocol declares, named rather than glob-imported
@@ -99,7 +100,8 @@ use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, Request
 // request's own payload, built here and moved onto the wire unchanged.
 use oxidezap_ipc::{
     CreateEvent, Download, EditMessage, LoadChats, LoadMessages, MarkRead, MarkStatusWatched,
-    RespondEvent, RevokeMessage, SendAudio, SendMedia, SendReaction, SendText, Typing, VotePoll,
+    PostToChannel, RespondEvent, RevokeMessage, SendAudio, SendMedia, SendReaction, SendText,
+    Typing, VotePoll,
 };
 use portable_atomic::AtomicU64;
 use tokio::sync::oneshot;
@@ -334,6 +336,9 @@ enum Awaiting {
     /// A creation whose result is the message that was made, not just an
     /// acknowledgement: without it the window cannot name the card it drew.
     EventCreated(oneshot::Sender<Result<CreatedMessageRef, Failure>>),
+    /// A channel poll creation, answered with the message the server made so
+    /// the form can stop waiting and the timeline can name it.
+    ChannelPollCreated(oneshot::Sender<Result<ChannelPollCreated, Failure>>),
     /// A community operation whose typed result may be only partly successful.
     /// The form that asked stays open until this answer or a hard failure.
     Community(oneshot::Sender<Result<CommunityOperationResult, Failure>>),
@@ -426,6 +431,7 @@ impl Awaiting {
             Self::Account(tx) => tx.is_closed(),
             Self::Mutation(tx) => tx.is_closed(),
             Self::EventCreated(tx) => tx.is_closed(),
+            Self::ChannelPollCreated(tx) => tx.is_closed(),
             Self::Community(tx) => tx.is_closed(),
             Self::StagedMutation { tx, .. } => tx.is_closed(),
             Self::SyncedStickers(tx) => tx.is_closed(),
@@ -477,6 +483,9 @@ impl Awaiting {
                 let _ = tx.send(Err(failure.clone()));
             }
             Self::EventCreated(tx) => {
+                let _ = tx.send(Err(failure.clone()));
+            }
+            Self::ChannelPollCreated(tx) => {
                 let _ = tx.send(Err(failure.clone()));
             }
             // A refused community request leaves the form up, with the
@@ -1571,6 +1580,32 @@ impl SessionHandle {
         rx
     }
 
+    /// Post plain text to a channel, answered like any other mutation.
+    pub fn post_to_channel(
+        &self,
+        channel_jid: &str,
+        text: &str,
+        local_id: String,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::PostToChannel(PostToChannel {
+                channel_jid: channel_jid.to_string(),
+                text: text.to_string(),
+                local_id: Some(local_id),
+            }),
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// React to a channel message, or remove our reaction with an empty emoji.
+    pub fn react_to_channel(&self, react: ChannelReact) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(ClientRequest::ReactToChannel(react), Awaiting::Mutation(tx));
+        rx
+    }
+
     /// Report playback after the audio sink advances.
     pub fn mark_audio_played(&self, jid: String, message_id: String) {
         self.tell(ClientRequest::MarkAudioPlayed(
@@ -1612,6 +1647,29 @@ impl SessionHandle {
                 selected_option_indices,
             }),
             Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Vote in a channel poll, by the indices shown in its bubble.
+    pub fn vote_channel_poll(
+        &self,
+        vote: ChannelVotePoll,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(ClientRequest::VoteChannelPoll(vote), Awaiting::Mutation(tx));
+        rx
+    }
+
+    /// Open a channel poll, answered with the message that carries it.
+    pub fn create_channel_poll(
+        &self,
+        draft: ChannelPollDraft,
+    ) -> oneshot::Receiver<Result<ChannelPollCreated, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::CreateChannelPoll(draft),
+            Awaiting::ChannelPollCreated(tx),
         );
         rx
     }

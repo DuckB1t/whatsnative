@@ -454,6 +454,16 @@ catalog! {
     OutgoingConnected => ("connected", "conectada");
     CreateEvent => ("Create event", "Criar evento");
     NewEvent => ("New event", "Novo evento");
+    CreateChannelPoll => ("Create poll", "Criar enquete");
+    NewChannelPoll => ("New poll", "Nova enquete");
+    ChannelPollQuestion => ("Question", "Pergunta");
+    ChannelPollOptions => ("Options, one per line", "Opções, uma por linha");
+    ChannelPollSelectableCount => ("Choices allowed (0 or 1)", "Opções permitidas (0 ou 1)");
+    ChannelPollQuestionRequired => ("Give the poll a question first.", "Dê primeiro uma pergunta à enquete.");
+    ChannelPollOptionsInvalid => ("Give the poll between 2 and 12 different, non-empty options.", "Dê entre 2 e 12 opções diferentes e não vazias.");
+    ChannelPollSelectableCountInvalid => ("Choices allowed must be 0 or 1.", "As opções permitidas devem ser 0 ou 1.");
+    CouldNotCreateChannelPoll => ("Could not create poll", "Não foi possível criar a enquete");
+    CouldNotPostToChannel => ("Could not post to channel", "Não foi possível publicar no canal");
     EventName => ("Event name", "Nome do evento");
     EventDescription => ("Description (optional)", "Descrição (opcional)");
     EventStart => ("Start (Unix seconds, optional)", "Início (segundos Unix, opcional)");

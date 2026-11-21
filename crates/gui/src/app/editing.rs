@@ -40,6 +40,7 @@ impl WhatsAppApp {
             || self.edit_draft.is_some()
             || self.delete_confirmation.is_some()
             || self.event_dialog.is_some()
+            || self.channel_poll_dialog.is_some()
             || self.community_dialog.is_some()
             || self
                 .pending_message_actions

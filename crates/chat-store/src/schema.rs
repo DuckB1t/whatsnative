@@ -50,6 +50,10 @@ diesel::table! {
         local_revoke_placeholder -> Bool,
         received_as_shared_history -> Bool,
         group_membership -> Nullable<Text>,
+        // Server content id of a newsletter message, retained bitwise in a
+        // signed INTEGER: `u64 as i64` and back recovers every value, including
+        // zero and values above i64::MAX.
+        newsletter_server_id -> Nullable<BigInt>,
     }
 }
 

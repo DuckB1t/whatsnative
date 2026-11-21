@@ -284,6 +284,9 @@ pub(crate) struct MessageRow {
     local_revoke_placeholder: bool,
     received_as_shared_history: bool,
     group_membership: Option<String>,
+    // Appended by the migration, so it last in the table's column order.
+    // Signed storage of a u64; cast back rather than narrowing on read.
+    newsletter_server_id: Option<i64>,
 }
 
 /// Fold an author-equivalent legacy copy for a read without hiding a
@@ -534,6 +537,7 @@ impl From<MessageRow> for StoredMessage {
             kind: MessageKind::from_db(row.kind),
             text: row.text_content,
             message,
+            newsletter_server_id: row.newsletter_server_id.map(|id| id as u64),
             status: MessageStatus::from_raw(row.status),
             starred: row.starred,
             edited_at: row.edited_at_ms.and_then(ms_to_utc),

@@ -19,6 +19,8 @@ pub(super) struct NewMessage<'a> {
     pub(super) proto: Option<&'a [u8]>,
     /// [`crate::storage_proto`] representation of `proto` (raw vs zlib).
     pub(super) proto_codec: i32,
+    /// Stored as a signed INTEGER but retained bitwise, so every u64 survives.
+    pub(super) newsletter_server_id: Option<u64>,
     pub(super) status: i32,
     /// Explicit WebMessageInfo status, never a placeholder insertion default.
     pub(super) history_status: Option<i32>,
@@ -119,10 +121,18 @@ pub(super) fn insert_message(
             return Ok(StoredRow::Skipped);
         }
         if !new.overwrite {
-            // History is a stale copy: live rows and placeholders win.
+            // History is a stale copy: live rows and placeholders win. It has
+            // no trustworthy server id of its own, so it cannot add one here.
             return Ok(StoredRow::Skipped);
         }
-        type ExistingMessage = (bool, Option<String>, Option<Vec<u8>>, i32, Option<i64>);
+        type ExistingMessage = (
+            bool,
+            Option<String>,
+            Option<Vec<u8>>,
+            i32,
+            Option<i64>,
+            Option<i64>,
+        );
         let existing_content: ExistingMessage = dsl::messages
             .filter(dsl::id.eq(existing.id))
             .select((
@@ -131,14 +141,21 @@ pub(super) fn insert_message(
                 dsl::proto,
                 dsl::proto_codec,
                 dsl::edited_at_ms,
+                dsl::newsletter_server_id,
             ))
             .first(conn)?;
-        let (revoked, text, proto, codec, edited_at_ms) = existing_content;
+        let (revoked, text, proto, codec, edited_at_ms, existing_server_id) = existing_content;
+        // A live copy can carry a server id that older history did not. That
+        // alone is worth a refresh: reactions and votes cannot be sent without
+        // it, and the content below may already be identical.
+        let server_id_changed = new.newsletter_server_id.is_some()
+            && existing_server_id != new.newsletter_server_id.map(|id| id as i64);
         if revoked
             || edited_at_ms.is_some()
             || (text.as_deref() == new.text
                 && proto.as_deref() == new.proto
-                && codec == new.proto_codec)
+                && codec == new.proto_codec
+                && !server_id_changed)
         {
             return Ok(StoredRow::Skipped);
         }
@@ -155,6 +172,10 @@ pub(super) fn insert_message(
             dsl::text_content.eq(new.text),
             dsl::proto.eq(new.proto),
             dsl::proto_codec.eq(new.proto_codec),
+            dsl::newsletter_server_id.eq(new
+                .newsletter_server_id
+                .map(|id| id as i64)
+                .or(existing_server_id)),
         ))
         .execute(conn)?;
         return Ok(if refreshed > 0 {
@@ -176,6 +197,7 @@ pub(super) fn insert_message(
             dsl::text_content.eq(new.text),
             dsl::proto.eq(new.proto),
             dsl::proto_codec.eq(new.proto_codec),
+            dsl::newsletter_server_id.eq(new.newsletter_server_id.map(|id| id as i64)),
             dsl::status.eq(new.status),
             dsl::starred.eq(new.starred),
         ))

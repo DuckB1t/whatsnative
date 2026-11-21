@@ -4,8 +4,11 @@
 //! here and no state is written. What carrying one out looks like is
 //! [`super::act`].
 
-use oxidezap_core::{CommunityDraft, JoinSubgroupRequest, LinkSubgroupsRequest, SubgroupDraft};
-use oxidezap_ipc::{CallAction, RequestId};
+use oxidezap_core::{
+    ChannelPollDraft, ChannelReact, ChannelVotePoll, CommunityDraft, JoinSubgroupRequest,
+    LinkSubgroupsRequest, SubgroupDraft,
+};
+use oxidezap_ipc::{CallAction, PostToChannel, RequestId};
 
 /// Something a client asked the session to do.
 ///
@@ -86,6 +89,20 @@ pub enum Action {
     /// Answer a calendar invitation, correlated like a vote so a refusal
     /// reaches the tap that painted the answer.
     RespondEvent(oxidezap_ipc::RespondEvent),
+    /// Post plain text to a channel. Correlated like a reaction so a refusal
+    /// reaches the press that offered the post.
+    PostToChannel(PostToChannel),
+    /// Open a channel poll. The created message reference travels back under
+    /// this request's id, like a calendar event's card.
+    CreateChannelPoll {
+        id: RequestId,
+        request: ChannelPollDraft,
+        answer_to: Outbox,
+    },
+    /// React to a channel message, or remove our reaction with an empty emoji.
+    ReactToChannel(ChannelReact),
+    /// Replace a channel poll ballot by option index.
+    VoteChannelPoll(ChannelVotePoll),
     /// A community operation. Its result can be partial, so the answer is the
     /// typed result under `id`, not a bare acknowledgement.
     CreateCommunity {

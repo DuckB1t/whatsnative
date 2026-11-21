@@ -315,6 +315,9 @@ pub struct StoredMessage {
     pub kind: MessageKind,
     pub text: Option<String>,
     pub message: Option<Box<wa::Message>>,
+    /// Server content id for a channel (newsletter) message. None for every
+    /// other chat and for older history rows that never carried the field.
+    pub newsletter_server_id: Option<u64>,
     pub status: MessageStatus,
     pub starred: bool,
     pub edited_at: Option<DateTime<Utc>>,

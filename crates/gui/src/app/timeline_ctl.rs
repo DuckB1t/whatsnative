@@ -1,6 +1,7 @@
 //! Acting on a message: replying, retrying, reacting, jumping to a quote.
 
 use super::*;
+use oxidezap_core::{ChannelReact, ChannelVotePoll};
 
 /// [`Resend`] with the message let go of.
 ///
@@ -206,7 +207,17 @@ impl WhatsAppApp {
             return;
         }
         if let Some(client) = self.client.as_ref() {
-            let waiting = client.vote_poll(chat_jid, message_id, vec![option_index]);
+            // A channel poll is not an E2E poll: its ballot names the server's
+            // content id and hashes the option text stored with the message.
+            let waiting = if is_channel_jid(chat_jid) {
+                client.vote_channel_poll(ChannelVotePoll {
+                    channel_jid: chat_jid.to_string(),
+                    poll_message_id: message_id.to_string(),
+                    option_indices: vec![option_index],
+                })
+            } else {
+                client.vote_poll(chat_jid, message_id, vec![option_index])
+            };
             let key = (chat_jid.to_string(), message_id.to_string());
             self.attempted_poll_votes.insert(key.clone(), option_index);
             self.invalidate_message_cache(chat_jid, cx);
@@ -373,7 +384,18 @@ impl WhatsAppApp {
         // else. `control()` is the process-wide connection beside it, which
         // is why this sent nothing on a page until it moved here.
         if let Some(session) = &self.client {
-            let waiting = session.send_reaction(&chat_jid, message_id, &send);
+            // Channels are addressed by the server's content id, which the
+            // session resolves from the stored row. An ordinary chat keeps the
+            // E2E reaction path and the local bubble echo.
+            let waiting = if is_channel_jid(&chat_jid) {
+                session.react_to_channel(ChannelReact {
+                    channel_jid: chat_jid.clone(),
+                    message_id: message_id.to_string(),
+                    emoji: send.clone(),
+                })
+            } else {
+                session.send_reaction(&chat_jid, message_id, &send)
+            };
             let target_chat = chat_jid.clone();
             let target_id = message_id.to_string();
             cx.spawn(async move |entity, cx| {
@@ -413,5 +435,19 @@ impl WhatsAppApp {
         }
         self.reaction_picker_for = None;
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_routing_uses_the_newsletter_suffix() {
+        assert!(is_channel_jid("155555500001@newsletter"));
+        assert!(!is_channel_jid("120363000000000001@g.us"));
+        assert!(!is_channel_jid("155555500001@s.whatsapp.net"));
+        assert!(!is_channel_jid("status@broadcast"));
+        assert!(!is_channel_jid("not a jid"));
     }
 }

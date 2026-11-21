@@ -10,7 +10,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{Icon, IconName};
 
-use crate::app::WhatsAppApp;
+use crate::app::{WhatsAppApp, is_channel_jid};
 use crate::components::avatar::Presence;
 use crate::responsive::ResponsiveLayout;
 use crate::theme::Metrics;
@@ -301,13 +301,16 @@ fn render_actions(
     // An event needs a chat the library can address, not a broadcast row or a
     // newsletter. The offline rule is the same one the call buttons follow.
     let can_create_event = addressable && can_send;
+    let can_create_channel_poll = is_channel_jid(&chat.jid) && can_send;
     let call_jid = chat.jid.clone();
     let video_jid = chat.jid.clone();
     let event_jid = chat.jid.clone();
+    let poll_jid = chat.jid.clone();
     let overflow_jid = chat.jid.clone();
     let call_entity = entity.clone();
     let video_entity = entity.clone();
     let event_entity = entity.clone();
+    let poll_entity = entity.clone();
     let overflow_entity = entity.clone();
     let search_entity = entity;
 
@@ -368,6 +371,24 @@ fn render_actions(
                 }),
             )
         })
+        .when(
+            can_create_channel_poll && layout.show_call_buttons(),
+            |el| {
+                el.child(
+                    action(
+                        "create-channel-poll",
+                        Icon::new(IconName::ChartPie),
+                        crate::tr!(CreateChannelPoll),
+                    )
+                    .cursor_pointer()
+                    .on_click(move |_, window, cx| {
+                        poll_entity.update(cx, |app, cx| {
+                            app.begin_channel_poll_dialog(&poll_jid, window, cx);
+                        });
+                    }),
+                )
+            },
+        )
         .when(callable && layout.show_call_buttons(), |el| {
             el.child(
                 action(
@@ -394,6 +415,7 @@ fn render_actions(
         })
         .child(render_overflow_menu(
             callable,
+            can_create_channel_poll,
             overflow_jid,
             overflow_entity,
             layout,
@@ -408,12 +430,14 @@ fn render_actions(
 /// which is exactly why it cannot be a subset.
 fn render_overflow_menu(
     callable: bool,
+    can_create_channel_poll: bool,
     jid: String,
     entity: Entity<WhatsAppApp>,
     layout: ResponsiveLayout,
 ) -> impl IntoElement + use<> {
     let search_entity = entity.clone();
     let video_entity = entity.clone();
+    let poll_entity = entity.clone();
     let call_entity = entity;
 
     parts::icon_button(
@@ -427,7 +451,9 @@ fn render_overflow_menu(
         let search_entity = search_entity.clone();
         let call_entity = call_entity.clone();
         let video_entity = video_entity.clone();
+        let poll_entity = poll_entity.clone();
         let video_jid = jid.clone();
+        let poll_jid = jid.clone();
         let jid = jid.clone();
 
         let menu = menu.item(
@@ -438,6 +464,19 @@ fn render_overflow_menu(
                 }),
         );
 
+        let menu = if can_create_channel_poll {
+            menu.item(
+                PopupMenuItem::new(crate::tr!(CreateChannelPoll))
+                    .icon(IconName::ChartPie)
+                    .on_click(move |_, window, cx| {
+                        poll_entity.update(cx, |app, cx| {
+                            app.begin_channel_poll_dialog(&poll_jid, window, cx);
+                        });
+                    }),
+            )
+        } else {
+            menu
+        };
         if !callable {
             return menu;
         }

@@ -247,6 +247,32 @@ pub(super) async fn handle_request(
         ClientRequest::RespondEvent(request) => {
             acted(dispatch(hub, commands, Action::RespondEvent(request)).await)
         }
+        ClientRequest::PostToChannel(request) => {
+            acted(dispatch(hub, commands, Action::PostToChannel(request)).await)
+        }
+        ClientRequest::CreateChannelPoll(request) => {
+            let id = match addressed(id, "a channel poll needs an id to answer under") {
+                Ok(id) => id,
+                Err(answer) => return answer,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::CreateChannelPoll {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::ReactToChannel(request) => {
+            acted(dispatch(hub, commands, Action::ReactToChannel(request)).await)
+        }
+        ClientRequest::VoteChannelPoll(request) => {
+            acted(dispatch(hub, commands, Action::VoteChannelPoll(request)).await)
+        }
         // Real account mutations with a typed, possibly partial answer: the
         // result arrives from the task under the id, alongside the warnings
         // and refused groups it could not finish.

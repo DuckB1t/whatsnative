@@ -75,6 +75,9 @@ pub(super) fn apply_inbound(
                     text: text.as_deref(),
                     proto: Some(&proto_bytes),
                     proto_codec,
+                    // Live newsletter pushes carry the server content id that
+                    // reactions and poll votes need; zero is a real id.
+                    newsletter_server_id: info.newsletter_server_id,
                     status: if info.source.is_from_me {
                         wa::web_message_info::Status::SERVER_ACK as i32
                     } else {

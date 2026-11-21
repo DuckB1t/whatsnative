@@ -369,6 +369,7 @@ mod tests {
             kind: oxidezap_chat_store::MessageKind::Poll,
             text: None,
             message: Some(Box::new(proto)),
+            newsletter_server_id: Some(7),
             status: oxidezap_chat_store::MessageStatus::Delivered,
             starred: false,
             edited_at: None,

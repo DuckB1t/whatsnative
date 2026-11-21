@@ -70,6 +70,7 @@ pub(super) fn apply_event(
                     proto: None,
                     // No bytes, no representation.
                     proto_codec: crate::storage_proto::CODEC_RAW,
+                    newsletter_server_id: undec.info.newsletter_server_id,
                     status: wa::web_message_info::Status::DELIVERY_ACK as i32,
                     history_status: None,
                     starred: false,

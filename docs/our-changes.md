@@ -252,6 +252,47 @@ can finish in part, so a bare acknowledgement was not enough.
 under full-suite load (passes in isolation and on clean rerun); unrelated to
 this slice. Synthetic JIDs only; no real community operation was performed.
 
+### 10. Native channel posts, polls, reactions and votes (protocol 50)
+
+**Problem.** Channels were a read-only destination with a shared composer.
+Posting was unnamed and left no durable row; reactions and poll votes went
+through the E2E APIs, which reject newsletter JIDs, because the server content
+id they need was never captured. The prepared `core::Channel*` types were inert.
+
+**Change.**
+- A new `messages.newsletter_server_id BIGINT` column (nullable) carries the
+  server content id from live newsletter pushes
+  (`InboundMessage.info.newsletter_server_id`). Zero is a real id; only SQL
+  `NULL` means absent. The value is stored as `u64 as i64` and read back
+  bitwise, so ids above `i64::MAX` survive. A live copy can fill a missing id
+  on a stale history row without rewriting its content.
+- History sync deliberately stores **no** id: a forwarded-newsletter context
+  names the message in the *original* channel, not the row being stored, and
+  using it could react to the wrong channel. Older history rows therefore
+  return a clear "no server id yet" error until a live copy arrives.
+- `session/whatsapp/ops.rs` adds `post_to_channel`, `create_channel_poll`,
+  `react_to_channel` and `vote_channel_poll`. A post carries the window's
+  optimistic id as its WhatsApp message id and records the outgoing row
+  before sending, so the bubble and the durable row are one message. Poll
+  creation records the returned proto/id after the send; the store's deferred
+  ack queue absorbs an early acknowledgement. Reactions and votes load the
+  stored row, require its server id, and hash the exact stored option names
+  with `wacore::poll::compute_option_hash`.
+- IPC adds `ClientRequest::{PostToChannel, CreateChannelPoll, ReactToChannel,
+  VoteChannelPoll}` and `DaemonMessage::ChannelPollCreated { id, created }`;
+  protocol version **50**. Poll creation is answered out-of-band under the
+  request id; the other three use the correlated mutation path so refusals
+  reach the press that made them. No CLI/wire changes and no call-path changes.
+- GUI routes channel text, reactions and votes to the channel session methods;
+  ordinary chats keep the E2E paths. A channel-only "Create poll" action in
+  the chat header and overflow menu opens a validated form (question, 2–12
+  distinct options, 0 or 1 choice) with EN/PT strings. A successful creation
+  reveals the new bubble; a failure raises a notice.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2601 passed, 44 ignored). Synthetic JIDs and fixtures only; no channel post,
+poll, reaction or vote was sent to the paired account.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

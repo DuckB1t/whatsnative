@@ -242,6 +242,7 @@ impl WhatsAppApp {
         if !self.can_send()
             || self.community_dialog.is_some()
             || self.event_dialog.is_some()
+            || self.channel_poll_dialog.is_some()
             || self.delete_confirmation.is_some()
             || self.paste_preview.is_some()
             || self.edit_draft.is_some()

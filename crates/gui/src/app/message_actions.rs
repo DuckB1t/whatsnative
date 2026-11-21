@@ -121,6 +121,7 @@ impl WhatsAppApp {
             || self.edit_draft.is_some()
             || self.paste_preview.is_some()
             || self.event_dialog.is_some()
+            || self.channel_poll_dialog.is_some()
             || self.community_dialog.is_some()
         {
             return;

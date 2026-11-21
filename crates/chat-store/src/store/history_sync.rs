@@ -388,6 +388,10 @@ pub(super) fn apply_history_message(
                         text: text.as_deref(),
                         proto: Some(&proto_bytes),
                         proto_codec,
+                        // A forwarded-newsletter context names the *original*
+                        // channel's message, not this row's. Only a live push
+                        // carries the id this row can safely react to.
+                        newsletter_server_id: None,
                         status: wmi
                             .status
                             .map(|s| s as i32)
