@@ -94,6 +94,17 @@ pub enum SystemNotice {
     GroupChanged(String),
     /// Membership identities remain separate from their current labels.
     GroupMembership(Box<crate::GroupMembership>),
+    /// Someone shared a group's earlier history into this conversation.
+    ///
+    /// The counts come from the notice's own metadata, so a front end can
+    /// localize the sentence instead of showing the store's English projection.
+    /// `text` is that projection for rows written before metadata was kept;
+    /// it is shown verbatim when `count` is absent.
+    History {
+        count: Option<u32>,
+        receivers: Option<u32>,
+        text: Option<String>,
+    },
 }
 
 /// `m:ss`, or `h:mm:ss` past an hour.
@@ -181,6 +192,23 @@ mod tests {
         assert_eq!(
             record(true, CallOutcome::Declined).detail(),
             "outgoing · declined"
+        );
+    }
+
+    /// This enum crosses the daemon/front-end boundary inside a session event,
+    /// so the structured history variant's field names are part of the wire.
+    #[test]
+    fn history_notice_metadata_survives_the_wire() {
+        let notice = SystemNotice::History {
+            count: Some(3),
+            receivers: Some(2),
+            text: None,
+        };
+        let line = serde_json::to_string(&notice).expect("a notice serializes");
+        assert_eq!(line, r#"{"history":{"count":3,"receivers":2,"text":null}}"#);
+        assert_eq!(
+            serde_json::from_str::<SystemNotice>(&line).expect("a notice parses"),
+            notice
         );
     }
 }

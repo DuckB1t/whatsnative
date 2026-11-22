@@ -337,6 +337,16 @@
   than to anything here; the alternative — not dropping — is the one thing
   this path exists to do.
 
+- **Shared group history is a system row with its own meaning, not a group
+  rename.** The receive/validate/queue/repair pipeline was already complete;
+  what was missing was the client surface. Until protocol 55 the store's English
+  sentence was relabelled as `SystemNotice::GroupChanged` during hydration, the
+  GUI showed it verbatim in every locale, and the legacy wire DTO called it a
+  call. The notice now carries its own count and receiver count so the window
+  can localize it; rows saved before metadata was projected still show their
+  stored sentence. There is no "view shared history" affordance: the imported
+  messages are ordinary timeline rows and the bundle envelope is consumed, so
+  there is no distinct batch left to browse. None of this has been live-validated.
 - **Saved messages and pins now have a native home, with two honest horizons.**
   Protocol 53 carries `SetMessagePinned`, a bounded account-wide
   `StarredResults` answer, and the `PinChanged` event: the window has a saved

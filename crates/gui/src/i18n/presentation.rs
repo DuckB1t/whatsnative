@@ -215,6 +215,33 @@ impl Language {
             }
         }
     }
+
+    /// The sentence for a shared-history notice, projected from the notice's
+    /// own metadata rather than the store's English sentence.
+    ///
+    /// Rows written before the metadata was kept carry only `text`; when
+    /// `count` is absent that sentence is shown verbatim rather than guessed
+    /// at. If the numbers themselves are incomplete, a language-appropriate
+    /// sentence without numbers is safer than a half-localized one.
+    pub fn history_notice(
+        self,
+        count: Option<u32>,
+        receivers: Option<u32>,
+        text: Option<&str>,
+    ) -> String {
+        let (Some(count), Some(receivers)) = (count, receivers) else {
+            return match text {
+                Some(legacy) if count.is_none() => legacy.to_owned(),
+                _ => self.history_notice_unknown(),
+            };
+        };
+        match (count == 1, receivers == 1) {
+            (true, true) => self.history_notice_one_each(count, receivers),
+            (true, false) => self.history_notice_one_message(count, receivers),
+            (false, true) => self.history_notice_one_member(count, receivers),
+            (false, false) => self.history_notice_many(count, receivers),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -387,6 +414,83 @@ mod tests {
         assert_eq!(
             Language::Portuguese.membership(&event),
             "Você adicionou Contato desconhecido"
+        );
+    }
+
+    #[test]
+    fn history_notice_agrees_with_both_counts_in_each_language() {
+        for (count, receivers, english, portuguese) in [
+            (
+                2,
+                3,
+                "Shared 2 earlier messages with 3 group members",
+                "Compartilhou 2 mensagens anteriores com 3 membros do grupo",
+            ),
+            (
+                1,
+                3,
+                "Shared 1 earlier message with 3 group members",
+                "Compartilhou 1 mensagem anterior com 3 membros do grupo",
+            ),
+            (
+                2,
+                1,
+                "Shared 2 earlier messages with 1 group member",
+                "Compartilhou 2 mensagens anteriores com 1 membro do grupo",
+            ),
+            (
+                1,
+                1,
+                "Shared 1 earlier message with 1 group member",
+                "Compartilhou 1 mensagem anterior com 1 membro do grupo",
+            ),
+            (
+                0,
+                0,
+                "Shared 0 earlier messages with 0 group members",
+                "Compartilhou 0 mensagens anteriores com 0 membros do grupo",
+            ),
+        ] {
+            assert_eq!(
+                Language::English.history_notice(Some(count), Some(receivers), None),
+                english
+            );
+            assert_eq!(
+                Language::Portuguese.history_notice(Some(count), Some(receivers), None),
+                portuguese
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_history_text_is_kept_verbatim_and_missing_counts_are_localized() {
+        let legacy = "Shared 7 messages with 2 members (legacy)";
+        for language in Language::ALL {
+            assert_eq!(language.history_notice(None, None, Some(legacy)), legacy);
+        }
+        assert_eq!(
+            Language::English.history_notice(None, None, None),
+            "Shared earlier messages with group members"
+        );
+        assert_eq!(
+            Language::Portuguese.history_notice(None, None, None),
+            "Compartilhou mensagens anteriores com membros do grupo"
+        );
+        // A legacy row keeps its sentence as soon as the message count is
+        // absent, even if a receiver count survived alongside it.
+        assert_eq!(
+            Language::English.history_notice(None, Some(2), Some(legacy)),
+            legacy
+        );
+        // A count without its partner is not enough for a sentence with
+        // numbers, and the legacy sentence is not a translation of that pair.
+        assert_eq!(
+            Language::Portuguese.history_notice(Some(3), None, Some(legacy)),
+            "Compartilhou mensagens anteriores com membros do grupo"
+        );
+        assert_eq!(
+            Language::English.history_notice(Some(3), None, None),
+            "Shared earlier messages with group members"
         );
     }
 }

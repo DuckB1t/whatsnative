@@ -350,7 +350,13 @@ use std::path::PathBuf;
 /// authoritative row reaches every front end through the library's app-state
 /// updates, which the store already applies. An older daemon knows none of
 /// these frames, so a window that offers them must not attach to one.
-pub const PROTOCOL_VERSION: u32 = 54;
+///
+/// 55 gives a deliberately shared group history its own `SystemNotice::History`
+/// inside a session event. Earlier front ends relabelled it as an ordinary
+/// group change and showed the store's English sentence. An older front end that does
+/// not know the variant cannot decode the event, so it must not attach to a
+/// daemon that can emit it.
+pub const PROTOCOL_VERSION: u32 = 55;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

@@ -109,17 +109,24 @@ pub(crate) fn chat_to_dto(chat: oxidezap_core::Chat) -> ChatDto {
 }
 
 pub(crate) fn chat_message_to_dto(chat_jid: &str, msg: ChatMessage) -> MessageDto {
-    let summary = match &msg.system {
+    let summary = match msg.system.as_ref() {
         Some(oxidezap_core::SystemNotice::GroupMembership(event)) => Some(event.summary()),
         _ => msg.business.as_ref().map(|b| b.summary()),
     };
+    // A system notice says what it is. Calls keep their own kind; everything
+    // else — including a shared history notice — is a system row, never a
+    // call that no one placed.
+    let system_kind = match msg.system.as_ref() {
+        Some(oxidezap_core::SystemNotice::Call(_)) => Some("call"),
+        Some(oxidezap_core::SystemNotice::History { .. })
+        | Some(oxidezap_core::SystemNotice::GroupChanged(_))
+        | Some(oxidezap_core::SystemNotice::GroupMembership(_)) => Some("system"),
+        None => None,
+    };
     let (kind, media) = if msg.revoked {
         ("revoked", None)
-    } else if matches!(
-        msg.system,
-        Some(oxidezap_core::SystemNotice::GroupMembership(_))
-    ) {
-        ("system", None)
+    } else if let Some(kind) = system_kind {
+        (kind, None)
     } else if let Some(media) = &msg.media {
         let kind = match media.media_type {
             oxidezap_core::MediaType::Image => "image",
@@ -154,8 +161,6 @@ pub(crate) fn chat_message_to_dto(chat_jid: &str, msg: ChatMessage) -> MessageDt
             local_path,
         };
         (kind, Some(dto))
-    } else if msg.system.is_some() {
-        ("call", None)
     } else if msg.poll.is_some() {
         ("poll", None)
     } else {
@@ -412,6 +417,44 @@ mod tests {
         assert_eq!(dto.sender_jid, group);
         assert_eq!(dto.kind, "system");
         assert_eq!(dto.text.as_deref(), Some(expected.as_str()));
+    }
+
+    /// A shared history notice is a system row, not a call; a real call row
+    /// still has to read as a call to scripted front ends.
+    #[test]
+    fn history_and_call_notices_keep_their_own_kinds() {
+        use oxidezap_core::{CallOutcome, CallRecord, SystemNotice};
+
+        let group = "155555500001@g.us";
+        let sentence = "Synthetic history was shared to this group";
+
+        let mut history = ChatMessage::new_incoming(
+            "history-synthetic-0".to_owned(),
+            group.to_owned(),
+            sentence.to_owned(),
+        );
+        history.system = Some(SystemNotice::History {
+            count: Some(3),
+            receivers: Some(2),
+            text: None,
+        });
+        let dto = chat_message_to_dto(group, history);
+        assert_ne!(dto.kind, "call");
+        assert_eq!(dto.kind, "system");
+        assert_eq!(dto.text.as_deref(), Some(sentence));
+
+        let mut call = ChatMessage::new_incoming(
+            "call-synthetic-0".to_owned(),
+            group.to_owned(),
+            "Missed voice call".to_owned(),
+        );
+        call.system = Some(SystemNotice::Call(CallRecord {
+            is_video: false,
+            is_outgoing: false,
+            outcome: CallOutcome::Missed,
+        }));
+        let dto = chat_message_to_dto(group, call);
+        assert_eq!(dto.kind, "call");
     }
 
     /// The wire status values stay the ones the CLI documents.

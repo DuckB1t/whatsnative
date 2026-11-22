@@ -109,6 +109,14 @@ Accepted rows keep their original timestamps and media protobufs. Store
 invalidations hydrate the public UI after commit. Visible notices have their own
 kind and render as group system lines, without unread attention.
 
+A later client pass (protocol 55) kept the notice's own metadata when hydrating
+the row, so the front ends localize "shared N earlier messages with M members"
+instead of replaying the store's hardcoded English sentence. Rows written before
+that change still carry and show their projected sentence. The legacy wire DTO
+also stopped calling every non-membership system notice a call; only real call
+records keep that kind. The receive, validate, queue and repair behaviour
+described above was not changed by that pass.
+
 A versioned startup repair moves old unknown carriers to the pending table,
 reclassifies visible notices, removes hidden notices and corrects carrier badge
 contributions. When a sender-matched revoke placeholder precedes its content,

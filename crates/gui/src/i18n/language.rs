@@ -89,8 +89,10 @@ macro_rules! formatted_catalog {
         #[test]
         fn formatted_messages_preserve_each_named_argument() {
             for language in Language::ALL {
-                $(let value = language.$key($(stringify!($arg)),*);
-                  $(assert!(value.contains(stringify!($arg)), "{language:?}: {value}");)*
+                // The binding is named with an underscore so a key with no
+                // placeholders (a fallback sentence) does not warn as unused.
+                $(let _value = language.$key($(stringify!($arg)),*);
+                  $(assert!(_value.contains(stringify!($arg)), "{language:?}: {_value}");)*
                 )*
             }
         }

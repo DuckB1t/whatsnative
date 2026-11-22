@@ -1,6 +1,13 @@
 // Named placeholders may be reordered by a translator. Rust checks both formats.
 formatted_catalog! {
     replying_to(name) => ("Replying to {name}", "Respondendo a {name}");
+    // One key per plurality pair: Portuguese agrees both the message and the
+    // member with their own count, so a single sentence cannot serve all four.
+    history_notice_many(count, receivers) => ("Shared {count} earlier messages with {receivers} group members", "Compartilhou {count} mensagens anteriores com {receivers} membros do grupo");
+    history_notice_one_message(count, receivers) => ("Shared {count} earlier message with {receivers} group members", "Compartilhou {count} mensagem anterior com {receivers} membros do grupo");
+    history_notice_one_member(count, receivers) => ("Shared {count} earlier messages with {receivers} group member", "Compartilhou {count} mensagens anteriores com {receivers} membro do grupo");
+    history_notice_one_each(count, receivers) => ("Shared {count} earlier message with {receivers} group member", "Compartilhou {count} mensagem anterior com {receivers} membro do grupo");
+    history_notice_unknown() => ("Shared earlier messages with group members", "Compartilhou mensagens anteriores com membros do grupo");
     send_files(count) => ("Send {count} files?", "Enviar {count} arquivos?");
     on_call_with(name) => ("On call with {name}", "Em chamada com {name}");
     retry_in(secs) => ("Retry in {secs}s", "Tentar em {secs}s");

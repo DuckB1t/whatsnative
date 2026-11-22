@@ -493,6 +493,35 @@ daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
 session type-checks. CLI release unchanged at 1,682,904 B (<2 MiB). No real
 chat state was changed on the paired account.
 
+### 17. Shared group history keeps its own meaning (protocol 55)
+
+**Problem.** Receiving a deliberately shared group history was already complete
+in the store and session (see `shared-group-history.md`), but the client side
+erased what it was: hydration relabelled the notice as a generic group change,
+the window showed the store's hardcoded English sentence in every locale, and
+the legacy wire DTO called it a call.
+
+**Change.**
+- IPC moves to version **55**. `SystemNotice::History` carries the notice's own
+  message count and receiver count inside the existing session event — no new
+  IPC frame. Hydration reads them from the stored notice proto; rows written
+  before metadata was projected keep their sentence in a `text` field and show
+  it verbatim. The store's text projection is unchanged for previews and FTS.
+- The GUI gives the notice its own non-interactive system row with a clock
+  glyph, and the same localized EN/PT sentence is used in the chat-list preview.
+  Portuguese agrees both the message and the member with their own count, so
+  the sentence has four plurality forms plus a numberless fallback. There is no
+  "view history" control: the imported messages are already ordinary timeline
+  rows and the bundle envelope is consumed, so no distinct batch remains.
+- The legacy wire DTO now classifies notice kinds explicitly: only real call
+  records are `"call"`; history, group changes and membership are `"system"`.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2656 passed, 44 ignored, 0 failed). Web gates green: shared-view ban, wasm
+daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
+session type-checks. xtask (52 passed) and the plugin-host ignored test pass;
+CLI release unchanged at 1,682,904 B (<2 MiB). No real chat state was changed.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

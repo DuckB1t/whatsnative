@@ -762,6 +762,10 @@ fn event_strings(event: &UiEvent) -> usize {
                                 })
                                 .sum::<usize>()
                     }
+                    oxidezap_core::SystemNotice::History { text, .. } => {
+                        std::mem::size_of::<Option<u32>>() * 2
+                            + text.as_deref().map(string_bytes).unwrap_or_default()
+                    }
                     oxidezap_core::SystemNotice::Call(_) => 0,
                 }
         }

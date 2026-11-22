@@ -285,6 +285,15 @@ fn body_for(last: &ChatMessage) -> String {
             SystemNotice::GroupMembership(event) => {
                 single_line(&crate::i18n::Language::current().membership(event))
             }
+            SystemNotice::History {
+                count,
+                receivers,
+                text,
+            } => single_line(&crate::i18n::Language::current().history_notice(
+                *count,
+                *receivers,
+                text.as_deref(),
+            )),
         };
     }
     if !last.content.is_empty() {
@@ -491,6 +500,27 @@ mod tests {
         };
         assert_eq!(text, "olha isso");
         assert_eq!(glyph, Some(PreviewGlyph::Audio), "the glyph still applies");
+    }
+
+    #[test]
+    fn a_shared_history_notice_previews_with_the_localized_sentence() {
+        let mut chat = fixtures::chat("155555500001@g.us", 0);
+        let mut msg = message(false, "");
+        msg.system = Some(SystemNotice::History {
+            count: Some(2),
+            receivers: Some(3),
+            text: None,
+        });
+        chat.messages.push(msg);
+        let Preview::Message { text, prefix, .. } = ChatRow::new(&chat, None, None, false).preview
+        else {
+            panic!("expected a message preview");
+        };
+        assert_eq!(
+            text,
+            crate::i18n::Language::current().history_notice(Some(2), Some(3), None)
+        );
+        assert_eq!(prefix, None, "a system row has no author");
     }
 
     #[test]

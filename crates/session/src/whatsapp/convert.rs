@@ -90,12 +90,36 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
         true
     };
     let quoted = base_message.and_then(quoted_from);
+    // The notice's own metadata outlives the English sentence the store keeps
+    // for previews and FTS. Reading it here lets a front end localize the row
+    // instead of relabelling a history notice as an ordinary group change.
+    let history = base_message
+        .and_then(|message| message.message_history_notice.as_option())
+        .map(|notice| {
+            let metadata = notice.message_history_metadata.as_option();
+            oxidezap_core::SystemNotice::History {
+                count: metadata
+                    .and_then(|m| m.message_count)
+                    .filter(|count| *count >= 0)
+                    .map(|count| count as u32),
+                receivers: metadata.map(|m| m.history_receivers.len() as u32),
+                text: None,
+            }
+        });
     let system = stored
         .group_membership
         .map(|event| oxidezap_core::SystemNotice::GroupMembership(Box::new(event)))
+        .or(history)
         .or_else(|| match stored.kind {
+            // A row written before the metadata was projected still has the
+            // sentence the store built; keep showing it rather than an empty
+            // pill. New rows carry structured counts above.
             oxidezap_chat_store::MessageKind::HistoryNotice => {
-                Some(oxidezap_core::SystemNotice::GroupChanged(content.clone()))
+                Some(oxidezap_core::SystemNotice::History {
+                    count: None,
+                    receivers: None,
+                    text: stored.text.clone(),
+                })
             }
             oxidezap_chat_store::MessageKind::GroupMembership => Some(
                 oxidezap_core::SystemNotice::GroupChanged("Group membership changed".to_owned()),
@@ -105,6 +129,9 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
     let content = match &system {
         Some(oxidezap_core::SystemNotice::GroupMembership(event)) => event.summary(),
         Some(oxidezap_core::SystemNotice::GroupChanged(text)) => text.clone(),
+        Some(oxidezap_core::SystemNotice::History {
+            text: Some(text), ..
+        }) => text.clone(),
         _ => content,
     };
     ChatMessage {
@@ -392,14 +419,40 @@ mod tests {
         assert!(messages[1].is_read);
         let mut notice = stored_poll_creation();
         notice.kind = oxidezap_chat_store::MessageKind::HistoryNotice;
-        notice.text = Some("Shared earlier messages with group members".into());
-        notice.message = None;
-        let rendered = stored_to_chat_message(notice);
-        assert!(matches!(
+        notice.text = Some("Shared 3 earlier messages with 2 group members".into());
+        let mut history_notice = wa::Message::default();
+        history_notice.message_history_notice = MessageField::some({
+            let mut notice = wa::message::MessageHistoryNotice::default();
+            let mut metadata = wa::message::MessageHistoryMetadata::default();
+            metadata.message_count = Some(3);
+            metadata.history_receivers =
+                vec!["155555500001@g.us".into(), "155555500002@g.us".into()];
+            notice.message_history_metadata = MessageField::some(metadata);
+            notice
+        });
+        notice.message = Some(Box::new(history_notice));
+        let rendered = stored_to_chat_message(notice.clone());
+        assert_eq!(
             rendered.system,
-            Some(oxidezap_core::SystemNotice::GroupChanged(_))
-        ));
+            Some(oxidezap_core::SystemNotice::History {
+                count: Some(3),
+                receivers: Some(2),
+                text: None,
+            })
+        );
         assert!(!rendered.content.contains("unknown"));
+
+        // A row saved before the metadata was projected still has its sentence.
+        notice.message = None;
+        let legacy = stored_to_chat_message(notice);
+        assert_eq!(
+            legacy.system,
+            Some(oxidezap_core::SystemNotice::History {
+                count: None,
+                receivers: None,
+                text: Some("Shared 3 earlier messages with 2 group members".into()),
+            })
+        );
     }
 
     #[test]

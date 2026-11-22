@@ -110,6 +110,66 @@ pub fn render_notice(text: String, metrics: Metrics, cx: &App) -> impl IntoEleme
         .child(text)
 }
 
+/// Earlier messages shared into this conversation.
+///
+/// Its own row rather than the group-change pill: the imported messages are
+/// already ordinary rows in the timeline, so there is nothing to browse here
+/// and nothing to click. The clock is the quiet glyph already used for pending
+/// state; no new asset is needed to make this read as history.
+pub fn render_history_notice(text: String, metrics: Metrics, cx: &App) -> impl IntoElement + use<> {
+    div()
+        .flex()
+        .items_center()
+        .gap(metrics.space_sm())
+        .px(metrics.space_lg())
+        .py(metrics.space_sm())
+        .rounded(metrics.radius_lg())
+        .bg(cx.theme().secondary)
+        .border_1()
+        .border_color(cx.theme().border)
+        .max_w(metrics.call_card_width_wide())
+        .child(
+            Icon::new(ProductIcon::Clock)
+                .size(metrics.icon_small())
+                .flex_shrink_0()
+                .text_color(cx.theme().muted_foreground),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .text_size(metrics.text_small())
+                .text_color(cx.theme().muted_foreground)
+                .child(text),
+        )
+}
+
+/// Which row a system notice takes, decided without a window so the routing
+/// can be tested. The sentence is resolved here as well, so the timeline and
+/// the chat list cannot disagree about what a notice says.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum NoticeRow {
+    Call(CallRecord),
+    /// The centred pill: a group change or another sentence without a row.
+    Notice(String),
+    /// Shared history, which gets its own non-interactive row.
+    History(String),
+}
+
+impl NoticeRow {
+    fn of(notice: &SystemNotice, language: crate::i18n::Language) -> Self {
+        match notice {
+            SystemNotice::Call(record) => Self::Call(*record),
+            SystemNotice::GroupMembership(event) => Self::Notice(language.membership(event)),
+            SystemNotice::GroupChanged(text) => Self::Notice(text.clone()),
+            SystemNotice::History {
+                count,
+                receivers,
+                text,
+            } => Self::History(language.history_notice(*count, *receivers, text.as_deref())),
+        }
+    }
+}
+
 /// The standing notice at the head of every conversation.
 ///
 /// Not a stored message: it is a property of the conversation rather than
@@ -156,19 +216,68 @@ pub fn render_system_row(
     metrics: Metrics,
     cx: &App,
 ) -> gpui::AnyElement {
-    match notice {
-        SystemNotice::Call(record) => {
-            render_call_record(*record, peer_jid, message_id, entity, metrics, cx)
-                .into_any_element()
+    match NoticeRow::of(notice, crate::i18n::Language::current()) {
+        NoticeRow::Call(record) => {
+            render_call_record(record, peer_jid, message_id, entity, metrics, cx).into_any_element()
         }
-        SystemNotice::GroupMembership(event) => render_notice(
-            crate::i18n::Language::current().membership(event),
-            metrics,
-            cx,
-        )
-        .into_any_element(),
-        SystemNotice::GroupChanged(text) => {
-            render_notice(text.clone(), metrics, cx).into_any_element()
+        NoticeRow::Notice(text) => render_notice(text, metrics, cx).into_any_element(),
+        NoticeRow::History(text) => render_history_notice(text, metrics, cx).into_any_element(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NoticeRow, SystemNotice};
+    use crate::i18n::Language;
+
+    #[test]
+    fn shared_history_takes_its_own_row_not_the_group_change_pill() {
+        let group = "155555500001@g.us";
+        let notice = SystemNotice::History {
+            count: Some(4),
+            receivers: Some(2),
+            text: None,
+        };
+        assert_eq!(
+            NoticeRow::of(&notice, Language::English),
+            NoticeRow::History("Shared 4 earlier messages with 2 group members".into())
+        );
+        assert_eq!(
+            NoticeRow::of(&notice, Language::Portuguese),
+            NoticeRow::History("Compartilhou 4 mensagens anteriores com 2 membros do grupo".into())
+        );
+
+        // The same notice on a message in a synthetic group still takes the
+        // history row, while a real group change stays on the generic pill.
+        let mut message = oxidezap_core::fixtures::message("synthetic-history", group, "");
+        message.system = Some(notice);
+        let system = message.system.as_ref().expect("the notice we just set");
+        assert!(matches!(
+            NoticeRow::of(system, Language::English),
+            NoticeRow::History(_)
+        ));
+        assert!(matches!(
+            NoticeRow::of(
+                &SystemNotice::GroupChanged("Group membership changed".into()),
+                Language::English
+            ),
+            NoticeRow::Notice(_)
+        ));
+    }
+
+    #[test]
+    fn a_legacy_history_row_keeps_its_sentence_on_the_history_row() {
+        let legacy = "Shared 9 earlier messages with 3 group members (legacy)";
+        let notice = SystemNotice::History {
+            count: None,
+            receivers: None,
+            text: Some(legacy.into()),
+        };
+        for language in Language::ALL {
+            assert_eq!(
+                NoticeRow::of(&notice, language),
+                NoticeRow::History(legacy.into())
+            );
         }
     }
 }
