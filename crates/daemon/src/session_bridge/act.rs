@@ -884,6 +884,28 @@ impl Bridge {
                 });
                 None
             }
+            Action::SetGroupMemberLabel {
+                id,
+                group_jid,
+                label,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.set_group_member_label(group_jid, label);
+                oxidezap_session::spawn(async move {
+                    // No `hub.signal`: upstream has no label-change push event,
+                    // and other front ends refresh the group's metadata. The
+                    // id carries only this request's ack or refusal.
+                    let answer = mutation_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::MarkUnread {
                 id,
                 chat_jid,
@@ -2266,7 +2288,8 @@ impl Bridge {
             | Action::PublishStatus { .. }
             | Action::PublishStatusMedia { .. }
             | Action::SyncedStickers { .. }
-            | Action::ReuseComposerMedia { .. } => {
+            | Action::ReuseComposerMedia { .. }
+            | Action::SetGroupMemberLabel { .. } => {
                 unreachable!("addressed actions are handled in begin_slow")
             }
             Action::SendText(oxidezap_ipc::SendText {
@@ -3806,6 +3829,46 @@ mod tests {
             ));
             assert_eq!(completed.await.unwrap(), CommandOutcome::Accepted);
         }
+        client.close(Duration::from_secs(1)).await;
+    }
+
+    /// A member label is executed by `begin_slow`, not by `act`: it takes a
+    /// permit, calls the session wrapper and answers under its own id. The
+    /// synthetic client has no session, so the correlated refusal is the proof
+    /// that execution arm ran — no network and no real account data.
+    #[tokio::test]
+    async fn a_group_member_label_is_dispatched_as_a_correlated_mutation() {
+        let mut bridge = connected();
+        let client = client();
+        let (answer_to, mut answers) = tokio::sync::mpsc::channel(2);
+        let (reply, completed) = tokio::sync::oneshot::channel();
+        assert!(
+            bridge
+                .begin_slow(
+                    &client,
+                    Action::SetGroupMemberLabel {
+                        id: 91,
+                        group_jid: "155555500001@g.us".to_owned(),
+                        label: "synthetic label".to_owned(),
+                        answer_to: answer_to.clone(),
+                    },
+                    reply,
+                )
+                .is_none()
+        );
+        let frame: DaemonMessage =
+            serde_json::from_str(&answers.recv().await.expect("correlated answer")).unwrap();
+        assert!(
+            matches!(
+                frame,
+                DaemonMessage::Error {
+                    id: Some(91),
+                    error: ProtocolError::Refused { .. }
+                }
+            ),
+            "got {frame:?}"
+        );
+        assert_eq!(completed.await.unwrap(), CommandOutcome::Accepted);
         client.close(Duration::from_secs(1)).await;
     }
 

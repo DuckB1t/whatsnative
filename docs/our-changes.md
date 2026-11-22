@@ -522,6 +522,39 @@ daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
 session type-checks. xtask (52 passed) and the plugin-host ignored test pass;
 CLI release unchanged at 1,682,904 B (<2 MiB). No real chat state was changed.
 
+### 18. My own group member label (protocol 56)
+
+**Problem.** The group roster, roles, topic, description and permissions were
+already available in the native client, but the one group mutation the upstream
+library exposes for a member label had no front-end surface. Arbitrary
+per-member tags are not actually possible: upstream's mutation takes a group
+JID and a label but no target member, and `participant_label` is read-only
+server metadata with no live change action. Group status has classification and
+history support but no public sender. Those remain documented gaps, not dead UI.
+
+**Change.**
+- IPC moves to version **56** with `SetGroupMemberLabel { group_jid, label }`, a
+  correlated mutation where the empty string clears. It keeps the label
+  verbatim, including `""`; the GUI trims whitespace before deciding that a
+  box means clear. No new event: upstream has no label-change push, so other
+  front ends see a label only when they refresh group metadata.
+- The session wrapper parses the JID and calls upstream
+  `Groups::update_member_label`, which sends an end-to-end encrypted protocol
+  message and rejects non-group addresses itself. The daemon routes the frame
+  out of band, requires a request id, and keeps it in the network branch.
+- The GUI adds "My group label…" to the group overflow menu, gated on the group
+  JID and the connection. Its dialog has a 64-character local bound, rejects
+  newlines, offers explicit **Save label** / **Clear label** buttons, and
+  correlates the answer so a cancelled form's reply cannot raise a notice over
+  its replacement. EN/PT strings cover the whole flow. No member picker was
+  added, because the API has no target.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2665 passed, 44 ignored, 0 failed). Web gates green: shared-view ban, wasm
+daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
+session type-checks. xtask (52 passed) and the plugin-host ignored test pass;
+CLI release unchanged at 1,682,904 B (<2 MiB). No real group label was changed.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

@@ -337,6 +337,16 @@
   than to anything here; the alternative — not dropping — is the one thing
   this path exists to do.
 
+- **Group member labels are self-only, and group status has no sender.**
+  Protocol 56 gives the window a "My group label…" action that sets or clears
+  the account's own label in a group. Upstream's mutation takes a group JID and
+  a label but no target member, so there is no honest way to tag somebody else;
+  `participant_label` is read-only metadata and has no live change action. Group
+  status/stories have classification and history support upstream but no public
+  composer or sender — `Status::send_raw` is the status-broadcast path, not a
+  group-status post. Topic, description, roster roles and permissions were
+  already available; this slice adds only the label control. None of it has
+  been live-validated.
 - **Shared group history is a system row with its own meaning, not a group
   rename.** The receive/validate/queue/repair pipeline was already complete;
   what was missing was the client surface. Until protocol 55 the store's English

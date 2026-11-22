@@ -28,6 +28,7 @@ mod frame_cost;
 mod media;
 mod media_ctl;
 mod media_materialization;
+pub(crate) mod member_label_dialog;
 mod message_actions;
 mod messages;
 pub mod notices;
@@ -978,6 +979,10 @@ pub struct WhatsAppApp {
     /// the pasted invite and the preview that answered it, and never the
     /// invite token as something to draw.
     call_link_dialog: Option<call_link_dialog::CallLinkDialog>,
+    /// The label this window is setting for itself in one group. Kept until
+    /// its answer arrives so a second press cannot send two mutations, and so
+    /// a reply to a form that was closed cannot raise a notice on its behalf.
+    member_label_dialog: Option<member_label_dialog::MemberLabelDialog>,
     /// An event creation waiting for its fields or its answer. Taken as soon
     /// as the request is sent, so a second press cannot create two cards.
     event_dialog: Option<event_dialog::EventDraftDialog>,
@@ -1688,6 +1693,7 @@ impl WhatsAppApp {
             attempted_poll_votes: std::collections::HashMap::new(),
             attempted_event_rsvps: std::collections::HashMap::new(),
             call_link_dialog: None,
+            member_label_dialog: None,
             event_dialog: None,
             channel_poll_dialog: None,
             community_dialog: None,
@@ -2587,6 +2593,7 @@ impl WhatsAppApp {
         self.attempted_poll_votes.clear();
         self.attempted_event_rsvps.clear();
         self.call_link_dialog = None;
+        self.member_label_dialog = None;
         self.event_dialog = None;
         self.channel_poll_dialog = None;
         self.community_dialog = None;
@@ -2685,6 +2692,7 @@ impl WhatsAppApp {
         // Left alone it would reappear over the next account's conversation
         // with a token from the old one still in its input.
         self.call_link_dialog = None;
+        self.member_label_dialog = None;
         self.pending_message_actions.clear();
         if self.recorder.read(cx).state() != RecordingState::Idle {
             self.cancel_recording(cx);
@@ -4774,6 +4782,7 @@ impl Render for WhatsAppApp {
         self.search
             .update(cx, |search, cx| search.refresh_language(window, cx));
         self.retire_conflicting_call_link_dialog(cx);
+        self.retire_conflicting_member_label_dialog(cx);
         self.reconcile_media_owner(cx);
         self.observe_window_activation(window, cx);
         // First, because every dimension below resolves from the scale this
@@ -4843,7 +4852,7 @@ impl Render for WhatsAppApp {
                 // is dismissed at the one place every Escape reaches first.
                 // A press spent here is not also allowed to close a surface
                 // underneath the modal.
-                if !app.cancel_call_link_dialog(cx) {
+                if !app.cancel_call_link_dialog(cx) && !app.cancel_member_label_dialog(cx) {
                     app.close_overlay(window, cx);
                 }
             }))
@@ -4966,6 +4975,17 @@ impl Render for WhatsAppApp {
             )
             .into_any_element()
         });
+        // The label form shares the deletion modal's focus handle for the same
+        // reason: it never appears with the other full-screen surfaces.
+        let member_label_dialog = self.member_label_dialog.as_ref().map(|dialog| {
+            member_label_dialog::render_member_label_dialog(
+                dialog,
+                cx.entity().clone(),
+                &self.message_delete_focus,
+                cx,
+            )
+            .into_any_element()
+        });
 
         // The account-wide search floats above the body but below the notices,
         // so a failure from the query that opened it stays readable on top.
@@ -5068,6 +5088,7 @@ impl Render for WhatsAppApp {
         let channel_poll_dialog_open = channel_poll_dialog.is_some();
         let community_dialog_open = community_dialog.is_some();
         let call_link_dialog_open = call_link_dialog.is_some();
+        let member_label_dialog_open = member_label_dialog.is_some();
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
         let modal_open = paste_preview_open
             || message_delete_open
@@ -5075,6 +5096,7 @@ impl Render for WhatsAppApp {
             || channel_poll_dialog_open
             || community_dialog_open
             || call_link_dialog_open
+            || member_label_dialog_open
             || media_viewer_open
             || global_search_open
             || saved_messages_open
@@ -5128,6 +5150,7 @@ impl Render for WhatsAppApp {
         .children(channel_poll_dialog)
         .children(community_dialog)
         .children(call_link_dialog)
+        .children(member_label_dialog)
         .children(global_search)
         .children(saved_messages)
         .children(pinned_messages)
@@ -5146,7 +5169,8 @@ impl Render for WhatsAppApp {
                             || event_dialog_open
                             || channel_poll_dialog_open
                             || community_dialog_open
-                            || call_link_dialog_open;
+                            || call_link_dialog_open
+                            || member_label_dialog_open;
                         app.keyboard_surfaces.global_search = global_search_open;
                         app.keyboard_surfaces.saved_messages = saved_messages_open;
                         app.keyboard_surfaces.pinned_messages = pinned_messages_open;

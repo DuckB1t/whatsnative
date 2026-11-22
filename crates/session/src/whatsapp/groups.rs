@@ -434,6 +434,33 @@ impl WhatsAppClient {
         })
     }
 
+    /// Set or clear this device's own member label in a group.
+    ///
+    /// Upstream sends this as an ordinary end-to-end encrypted protocol message
+    /// (`appdata=member_tag`) rather than an IQ, and validates the group JID
+    /// itself. An empty label clears it. This is the account's label on itself:
+    /// the API takes no target member, so it cannot tag somebody else.
+    pub fn set_group_member_label(
+        &self,
+        group_jid: String,
+        label: String,
+    ) -> Task<Result<(), String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let group: Jid = group_jid
+                .parse()
+                .map_err(|_| "not a group address".to_string())?;
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            live.client
+                .groups()
+                .update_member_label(&group, label)
+                .await
+                .map_err(|e| e.to_string())
+        })
+    }
+
     /// Pending membership requests for a group.
     pub fn list_group_join_requests(
         &self,

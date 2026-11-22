@@ -10,7 +10,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{Icon, IconName};
 
-use crate::app::{WhatsAppApp, is_channel_jid};
+use crate::app::{WhatsAppApp, is_channel_jid, member_label_dialog::can_set_member_label};
 use crate::components::avatar::Presence;
 use crate::responsive::ResponsiveLayout;
 use crate::theme::Metrics;
@@ -309,6 +309,9 @@ fn render_actions(
     // newsletter. The offline rule is the same one the call buttons follow.
     let can_create_event = addressable && can_send;
     let can_create_channel_poll = is_channel_jid(&chat.jid) && can_send;
+    // No member picker: the upstream mutation takes no target, so the only
+    // honest action is the one that names this account's own label.
+    let can_edit_my_label = can_set_member_label(&chat.jid, can_send);
     let call_jid = chat.jid.clone();
     let video_jid = chat.jid.clone();
     let event_jid = chat.jid.clone();
@@ -319,6 +322,7 @@ fn render_actions(
     let call_link_entity = entity.clone();
     let event_entity = entity.clone();
     let poll_entity = entity.clone();
+    let label_entity = entity.clone();
     let overflow_entity = entity.clone();
     let search_entity = entity;
 
@@ -443,6 +447,7 @@ fn render_actions(
             callable,
             can_send,
             can_create_channel_poll,
+            can_edit_my_label.then_some(label_entity),
             overflow_jid,
             overflow_entity,
             layout,
@@ -459,6 +464,7 @@ fn render_overflow_menu(
     callable: bool,
     can_send: bool,
     can_create_channel_poll: bool,
+    member_label: Option<Entity<WhatsAppApp>>,
     jid: String,
     entity: Entity<WhatsAppApp>,
     layout: ResponsiveLayout,
@@ -467,6 +473,7 @@ fn render_overflow_menu(
     let video_entity = entity.clone();
     let call_link_entity = entity.clone();
     let poll_entity = entity.clone();
+    let member_label = member_label.clone();
     let call_entity = entity;
 
     parts::icon_button(
@@ -482,8 +489,10 @@ fn render_overflow_menu(
         let video_entity = video_entity.clone();
         let call_link_entity = call_link_entity.clone();
         let poll_entity = poll_entity.clone();
+        let member_label = member_label.clone();
         let video_jid = jid.clone();
         let poll_jid = jid.clone();
+        let label_jid = jid.clone();
         let jid = jid.clone();
 
         let menu = menu.item(
@@ -517,6 +526,22 @@ fn render_overflow_menu(
                     .on_click(move |_, window, cx| {
                         call_link_entity.update(cx, |app, cx| {
                             app.begin_call_link_dialog(window, cx);
+                        });
+                    }),
+            )
+        } else {
+            menu
+        };
+        // The mutation has no target-member argument: this is my label in
+        // this group, never a way to tag somebody else. Direct chats and
+        // offline windows never get the item at all.
+        let menu = if let Some(label_entity) = member_label {
+            menu.separator().item(
+                PopupMenuItem::new(crate::tr!(MyGroupLabel))
+                    .icon(IconName::CircleUser)
+                    .on_click(move |_, window, cx| {
+                        label_entity.update(cx, |app, cx| {
+                            app.begin_member_label_dialog(&label_jid, window, cx);
                         });
                     }),
             )
@@ -610,6 +635,14 @@ mod tests {
             oxidezap_core::is_group_jid("120363012345678901@g.us"),
             "the toolbar gate, the outgoing card and the request must agree"
         );
+    }
+
+    #[test]
+    fn my_group_label_is_not_offered_in_a_direct_chat() {
+        assert!(can_set_member_label("155555500001@g.us", true));
+        assert!(!can_set_member_label("155555500002@s.whatsapp.net", true));
+        assert!(!can_set_member_label("155555500003@lid", true));
+        assert!(!can_set_member_label("155555500001@g.us", false));
     }
 
     fn typing(name: &str) -> TypingSummary {

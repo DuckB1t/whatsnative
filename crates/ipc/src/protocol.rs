@@ -1499,6 +1499,16 @@ pub enum ClientRequest {
     /// only goes to the network when the server has said its snapshot is
     /// stale.
     GroupMembers(GroupMembers),
+    /// Set or clear this account's own member label in a group.
+    ///
+    /// A correlated mutation: the ack says whether the protocol message was
+    /// sent, and an empty label clears it. The upstream API takes no target
+    /// member, so this cannot tag anybody else. There is no push event for a
+    /// label change; other front ends refresh group metadata to see one.
+    SetGroupMemberLabel {
+        group_jid: String,
+        label: String,
+    },
     /// Read the account's block list.
     ///
     /// Answered with [`DaemonMessage::Blocklist`] under this request's id.
@@ -3546,6 +3556,34 @@ mod audio_played_tests {
                 frame
             );
             assert!(!frame.is_read(), "a chat mutation is not a local read");
+        }
+    }
+
+    /// Protocol 56's member-label frame keeps the empty-string clear on the
+    /// wire: an omitted label would be a different request. Synthetic group.
+    #[test]
+    fn protocol_56_member_label_puts_the_same_bytes_on_the_wire() {
+        for (label, expected) in [
+            (
+                "synthetic label",
+                r#"{"request":"set_group_member_label","group_jid":"155555500001@g.us","label":"synthetic label"}"#,
+            ),
+            (
+                "",
+                r#"{"request":"set_group_member_label","group_jid":"155555500001@g.us","label":""}"#,
+            ),
+        ] {
+            let frame = ClientRequest::SetGroupMemberLabel {
+                group_jid: "155555500001@g.us".into(),
+                label: label.into(),
+            };
+            let line = serde_json::to_string(&frame).expect("a request serializes");
+            assert_eq!(line, expected);
+            assert_eq!(
+                serde_json::from_str::<ClientRequest>(&line).expect("a request parses"),
+                frame
+            );
+            assert!(!frame.is_read(), "a member label is a correlated mutation");
         }
     }
 }

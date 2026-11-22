@@ -356,7 +356,12 @@ use std::path::PathBuf;
 /// group change and showed the store's English sentence. An older front end that does
 /// not know the variant cannot decode the event, so it must not attach to a
 /// daemon that can emit it.
-pub const PROTOCOL_VERSION: u32 = 55;
+///
+/// 56 adds `SetGroupMemberLabel`, a correlated mutation that sets or clears the
+/// account's own label in a group. There is no push event for labels: other
+/// front ends see one only by refreshing group metadata. An older daemon knows
+/// no such frame, so a window offering this action must not attach to one.
+pub const PROTOCOL_VERSION: u32 = 56;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

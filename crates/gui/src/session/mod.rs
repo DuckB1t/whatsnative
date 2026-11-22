@@ -1330,6 +1330,28 @@ impl SessionHandle {
         rx
     }
 
+    /// Set or clear this account's own label in a group.
+    ///
+    /// The label goes onto the wire verbatim, including the empty string:
+    /// clearing is not a different frame. The ack belongs to this request;
+    /// there is no push event for a label change, so another front end sees it
+    /// only when it refreshes group metadata.
+    pub fn set_group_member_label(
+        &self,
+        group_jid: &str,
+        label: &str,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::SetGroupMemberLabel {
+                group_jid: group_jid.to_string(),
+                label: label.to_string(),
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
     /// Pin or unpin a conversation in the chat list.
     ///
     /// This is the chat-list pin, not a message pin: the row moves for every

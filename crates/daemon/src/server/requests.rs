@@ -653,6 +653,28 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        // Setting this device's own member label is a correlated mutation
+        // like a chat pin: the session's answer under this id is the ack,
+        // and other front ends refresh the group's metadata themselves.
+        // Upstream has no label-change push event to mirror here.
+        ClientRequest::SetGroupMemberLabel { group_jid, label } => {
+            let id = match addressed(id, "a member label needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::SetGroupMemberLabel {
+                    id,
+                    group_jid,
+                    label,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::Blocklist => {
             let id = match addressed(id, "a block list needs an id to answer under") {
                 Ok(id) => id,

@@ -968,6 +968,80 @@ async fn chat_list_mutations_are_addressed_and_reach_the_session() {
     }
 }
 
+/// Protocol 56's member-label mutation is addressed like the other correlated
+/// mutations: no id is refused before dispatch, and both the group address and
+/// the label — including the empty clear — reach the session unchanged.
+#[tokio::test]
+async fn a_group_member_label_is_addressed_and_reaches_the_session() {
+    let hub = connected_hub();
+    let group = "155555500001@g.us";
+
+    for label in ["synthetic label", ""] {
+        let request = ClientRequest::SetGroupMemberLabel {
+            group_jid: group.into(),
+            label: label.into(),
+        };
+
+        // No id: nothing for the session's later answer to be addressed to.
+        let (commands, _taken) = bridge(CommandOutcome::Accepted);
+        let refused = handle_request(
+            Request {
+                id: None,
+                request: request.clone(),
+            },
+            &hub,
+            &no_plugins(),
+            &commands,
+            &outbox(),
+        )
+        .await;
+        assert!(
+            matches!(
+                parse(refused.frame),
+                DaemonMessage::Error {
+                    id: None,
+                    error: ProtocolError::Malformed { .. }
+                }
+            ),
+            "an unaddressed {request:?} was not refused"
+        );
+
+        // With an id: the mutation is handed to the session, and the real
+        // answer arrives later on the connection's outbox.
+        let (commands, taken) = bridge(CommandOutcome::Accepted);
+        let answer = handle_request(
+            Request {
+                id: Some(77),
+                request,
+            },
+            &hub,
+            &no_plugins(),
+            &commands,
+            &outbox(),
+        )
+        .await;
+        assert!(
+            answer.frame.is_none(),
+            "the member label has not completed yet"
+        );
+        let action = taken.await.unwrap().unwrap();
+        assert!(action.needs_network(), "a member label reaches WhatsApp");
+        match action {
+            Action::SetGroupMemberLabel {
+                id,
+                group_jid,
+                label: sent,
+                ..
+            } => {
+                assert_eq!(id, 77);
+                assert_eq!(group_jid, group);
+                assert_eq!(sent, label);
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn status_post_keeps_its_explicit_audience_until_the_session_confirms() {
     let hub = connected_hub();

@@ -255,6 +255,17 @@ pub enum Action {
         request: oxidezap_ipc::GroupMembers,
         answer_to: Outbox,
     },
+    /// Set or clear this device's own label in a group. A network mutation
+    /// like a chat pin: upstream sends an encrypted stanza and validates the
+    /// group JID itself. An empty label clears it. Answered under `id`; there
+    /// is no label-change push event, so other front ends refresh the group's
+    /// metadata themselves.
+    SetGroupMemberLabel {
+        id: RequestId,
+        group_jid: String,
+        label: String,
+        answer_to: Outbox,
+    },
     /// The account's block list. The server owns it, so this is a network read
     /// answered on `answer_to` rather than a query against the local store.
     Blocklist {
@@ -698,6 +709,29 @@ mod chat_list_action_tests {
                 answer_to,
             },
         ] {
+            assert!(action.needs_network(), "{action:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod group_action_tests {
+    use super::*;
+
+    /// A member label is a real WhatsApp mutation even though no push event
+    /// describes it. It must stay in the network branch of `needs_network`,
+    /// not alongside the local reads and writes — clearing with an empty label
+    /// is as much a stanza as setting one.
+    #[test]
+    fn setting_a_group_member_label_needs_a_live_connection() {
+        let (answer_to, _rx) = tokio::sync::mpsc::channel(4);
+        for label in ["synthetic label", ""] {
+            let action = Action::SetGroupMemberLabel {
+                id: 7,
+                group_jid: "155555500001@g.us".to_owned(),
+                label: label.to_owned(),
+                answer_to: answer_to.clone(),
+            };
             assert!(action.needs_network(), "{action:?}");
         }
     }

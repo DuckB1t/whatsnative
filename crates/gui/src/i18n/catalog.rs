@@ -14,6 +14,17 @@ catalog! {
     CallLinkInvalid => ("That is not a valid WhatsApp call link.", "Esse não é um link de chamada válido do WhatsApp.");
     CallLinkMediaMismatch => ("That link's call type does not match your choice.", "O tipo de chamada desse link não corresponde à sua escolha.");
     CallLinkWaitingRoom => ("Waiting room", "Sala de espera");
+    MyGroupLabel => ("My group label…", "Meu rótulo no grupo…");
+    MemberLabelTitle => ("My group label", "Meu rótulo no grupo");
+    MemberLabelHint => ("Your own label in this group. Leave it empty to clear it.", "Seu próprio rótulo neste grupo. Deixe vazio para removê-lo.");
+    MemberLabelPlaceholder => ("For example, Admin", "Por exemplo, Admin");
+    MemberLabelSave => ("Save label", "Salvar rótulo");
+    MemberLabelClear => ("Clear label", "Limpar rótulo");
+    MemberLabelTooLong => ("That label is too long.", "Esse rótulo é longo demais.");
+    MemberLabelSingleLine => ("A label must be a single line.", "O rótulo deve ser uma única linha.");
+    MemberLabelSaved => ("My label saved", "Meu rótulo salvo");
+    MemberLabelCleared => ("My label cleared", "Meu rótulo removido");
+    MemberLabelFailed => ("Could not update my group label", "Não foi possível atualizar meu rótulo no grupo");
     More => ("More", "Mais");
     You => ("You", "Você");
     TypeAMessage => ("Type a message", "Digite uma mensagem");
