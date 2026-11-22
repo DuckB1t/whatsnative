@@ -531,6 +531,7 @@ catalog! {
     CommunityOperationCreate => ("Create community", "Criar comunidade");
     CommunityOperationSubgroup => ("New subgroup", "Novo subgrupo");
     CommunityOperationLink => ("Link groups", "Vincular grupos");
+    CommunityOperationUnlink => ("Unlink groups", "Desvincular grupos");
     CommunityOperationJoin => ("Join subgroup", "Entrar no subgrupo");
     CommunityName => ("Name", "Nome");
     CommunityDescription => ("Description (optional)", "Descrição (opcional)");
@@ -538,6 +539,7 @@ catalog! {
     CommunityParticipants => ("Participants (one address per line, optional)", "Participantes (um endereço por linha, opcional)");
     CommunityJid => ("Community JID", "JID da comunidade");
     CommunityGroups => ("Groups to link (one address per line)", "Grupos a vincular (um endereço por linha)");
+    CommunityGroupsToUnlink => ("Groups to unlink (one address per line)", "Grupos a desvincular (um endereço por linha)");
     CommunitySubgroupJid => ("Subgroup JID", "JID do subgrupo");
     CommunityClosed => ("Closed", "Fechada");
     CommunityAllowNonAdmin => ("Members can create subgroups", "Membros podem criar subgrupos");

@@ -255,7 +255,11 @@ fn community_warning_to_wire(warning: core::CommunityWarning) -> wire::Community
 }
 
 /// Partial successes are the answer, not a footnote: linked and refused groups
-/// and every warning keep their order and their optional fields.
+/// and every warning keep their order and their optional fields. `unlinked_jids`
+/// is not mapped: no wire request can unlink yet, so only an IPC community
+/// result can carry it. This mapping is deliberately explicit rather than a
+/// blanket conversion, which is why a new core field cannot leak into a wire
+/// frame by accident.
 #[must_use]
 pub(crate) fn community_operation_result_to_wire(
     result: core::CommunityOperationResult,

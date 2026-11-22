@@ -342,7 +342,7 @@ impl<'a> Frames<'a> {
             // can mistake it for one.
             DaemonMessage::CommunityResult { id, result } => match take_pending(self.pending, id) {
                 Some(Awaiting::Community(tx)) => {
-                    let _ = tx.send(Ok(result));
+                    let _ = tx.send(Ok(*result));
                 }
                 Some(waiting) => {
                     self.fail(waiting, &Failure::permanent("unexpected community answer"))

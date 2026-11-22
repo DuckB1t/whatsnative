@@ -524,6 +524,23 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        ClientRequest::UnlinkCommunitySubgroups(request) => {
+            let id = match addressed(id, "a subgroup unlink needs an id to answer under") {
+                Ok(id) => id,
+                Err(answer) => return answer,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::UnlinkCommunitySubgroups {
+                    id,
+                    request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::JoinCommunitySubgroup(request) => {
             let id = match addressed(id, "a subgroup join needs an id to answer under") {
                 Ok(id) => id,

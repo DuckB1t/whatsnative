@@ -588,6 +588,43 @@ daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
 session type-checks. xtask (52 passed) and the plugin-host ignored test pass;
 CLI release unchanged at 1,682,904 B (<2 MiB). No status was posted.
 
+### 20. Unlinking community subgroups (protocol 58)
+
+**Problem.** The community dialog could create and link subgroups, but not
+detach one. Upstream exposes `Community::unlink_subgroups` publicly and reports
+per-group failures; nothing in the client used it. The rest of the advertised
+"channel admin" surface is not honest to draw: channel roles and admin metadata
+are dropped at every boundary in this stack, pin/reaction-settings/admin-invite
+operations exist only as raw MEX IQ types, and pinned posts are not parsed or
+fetched. Those stay documented gaps rather than dead buttons.
+
+**Change.**
+- IPC moves to version **58** with one addressed request,
+  `UnlinkCommunitySubgroups { community_jid, groups, remove_orphan_members }`.
+  The destructive orphan-member flag defaults to false on the wire and has no
+  GUI checkbox: turning it on removes members left without a group.
+- The result uses the existing `CommunityResult` frame and the GUI's existing
+  correlated community answer path. `CommunityOperationResult` gains
+  `unlinked_jids`, defaulted so older frames still decode; the frame is now
+  boxed because a fifth result vector pushed it past the shared size budget.
+  Partial success is reported as linked/unlinked counts plus one notice per
+  refused group, not collapsed into an acknowledgement.
+- The session wrapper validates `@g.us` addresses and calls upstream
+  `unlink_subgroups`. The daemon requires a request id and dispatches the
+  mutation out of band, like link/join. The wire mapping deliberately does not
+  copy `unlinked_jids`: no wire command can unlink in this slice.
+- The community dialog gains an **Unlink groups** mode beside Link. It reuses
+  the community and group boxes, relabels the group box, keeps the two modes'
+  text separate, and reports what was detached. EN/PT strings cover the whole
+  flow. No channel settings, post pinning or role controls were invented.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2679 passed, 44 ignored, 0 failed). Web gates green: shared-view ban, wasm
+daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
+session type-checks. xtask (52 passed) and the plugin-host ignored test pass;
+CLI release unchanged at 1,682,904 B (<2 MiB). No community or group was
+changed; all fixtures are synthetic `@g.us` addresses.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

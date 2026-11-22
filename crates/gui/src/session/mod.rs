@@ -92,7 +92,7 @@ use oxidezap_core::{
     AccountId, CallLinkMedia, CallLinkPreview, CallState, ChannelPollCreated, ChannelPollDraft,
     ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
     CreatedMessageRef, DownloadableMedia, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest,
-    QuotedMessage, SubgroupDraft, UiEvent,
+    QuotedMessage, SubgroupDraft, UiEvent, UnlinkSubgroupsRequest,
 };
 use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, RequestId};
 // The payload structs the protocol declares, named rather than glob-imported
@@ -1968,6 +1968,19 @@ impl SessionHandle {
         let (tx, rx) = oneshot::channel();
         self.ask(
             ClientRequest::LinkCommunitySubgroups(request),
+            Awaiting::Community(tx),
+        );
+        rx
+    }
+
+    /// Detach groups from a community, with a typed partial result.
+    pub fn unlink_community_subgroups(
+        &self,
+        request: UnlinkSubgroupsRequest,
+    ) -> oneshot::Receiver<Result<CommunityOperationResult, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::UnlinkCommunitySubgroups(request),
             Awaiting::Community(tx),
         );
         rx

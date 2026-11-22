@@ -58,6 +58,21 @@ pub struct LinkSubgroupsRequest {
     pub groups: Vec<LinkSubgroupTarget>,
 }
 
+/// Detach existing groups from a community in one operation.
+///
+/// `remove_orphan_members` is deliberately false in the first native path:
+/// upstream can remove members left without a group when it is true, which is
+/// a much more destructive act than unlinking. Partial failures stay reportable
+/// in [`CommunityOperationResult`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnlinkSubgroupsRequest {
+    pub community_jid: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub remove_orphan_members: bool,
+}
+
 /// Ask to join a community's subgroup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinSubgroupRequest {
@@ -110,6 +125,9 @@ pub struct CommunityOperationResult {
     pub groups: Vec<CommunityGroupRef>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub linked_jids: Vec<String>,
+    /// Groups actually detached by an unlink. An older frame has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unlinked_jids: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub failed_groups: Vec<CommunitySubgroupFailure>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -129,6 +147,7 @@ mod tests {
                 description: None,
             }],
             linked_jids: vec!["155555500002@g.us".into()],
+            unlinked_jids: vec!["155555500005@g.us".into()],
             failed_groups: vec![CommunitySubgroupFailure {
                 jid: "155555500003@g.us".into(),
                 code: 403,
@@ -152,8 +171,22 @@ mod tests {
         assert_eq!(result, CommunityOperationResult::default());
         assert!(result.groups.is_empty());
         assert!(result.linked_jids.is_empty());
+        assert!(result.unlinked_jids.is_empty());
         assert!(result.failed_groups.is_empty());
         assert!(result.warnings.is_empty());
+    }
+
+    /// The destructive flag and an empty group list are absent on the wire;
+    /// an unlink request must not require either to be spelled out.
+    #[test]
+    fn an_unlink_request_defaults_its_optional_parts() {
+        let request: UnlinkSubgroupsRequest = serde_json::from_str(
+            r#"{"community_jid":"155555500001@g.us","groups":["155555500002@g.us"]}"#,
+        )
+        .unwrap();
+        assert_eq!(request.community_jid, "155555500001@g.us");
+        assert_eq!(request.groups, vec!["155555500002@g.us"]);
+        assert!(!request.remove_orphan_members);
     }
 
     #[test]

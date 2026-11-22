@@ -6,7 +6,7 @@
 
 use oxidezap_core::{
     ChannelPollDraft, ChannelReact, ChannelVotePoll, CommunityDraft, JoinSubgroupRequest,
-    LinkSubgroupsRequest, SubgroupDraft,
+    LinkSubgroupsRequest, SubgroupDraft, UnlinkSubgroupsRequest,
 };
 use oxidezap_ipc::{CallAction, PostToChannel, RequestId};
 
@@ -205,6 +205,11 @@ pub enum Action {
     LinkCommunitySubgroups {
         id: RequestId,
         request: LinkSubgroupsRequest,
+        answer_to: Outbox,
+    },
+    UnlinkCommunitySubgroups {
+        id: RequestId,
+        request: UnlinkSubgroupsRequest,
         answer_to: Outbox,
     },
     JoinCommunitySubgroup {

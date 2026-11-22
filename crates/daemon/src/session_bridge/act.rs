@@ -366,6 +366,24 @@ impl Bridge {
                 });
                 None
             }
+            Action::UnlinkCommunitySubgroups {
+                id,
+                request,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.unlink_community_subgroups(request);
+                oxidezap_session::spawn(async move {
+                    let answer = community_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::JoinCommunitySubgroup {
                 id,
                 request,
@@ -2285,6 +2303,7 @@ impl Bridge {
             | Action::CreateCommunity { .. }
             | Action::CreateCommunitySubgroup { .. }
             | Action::LinkCommunitySubgroups { .. }
+            | Action::UnlinkCommunitySubgroups { .. }
             | Action::JoinCommunitySubgroup { .. }
             | Action::EditMessage { .. }
             | Action::RevokeMessage { .. }
@@ -3421,7 +3440,10 @@ fn community_answer<E: std::fmt::Display>(
     result: Result<Result<CommunityOperationResult, String>, E>,
 ) -> Result<DaemonMessage, ProtocolError> {
     match result {
-        Ok(Ok(result)) => Ok(DaemonMessage::CommunityResult { id, result }),
+        Ok(Ok(result)) => Ok(DaemonMessage::CommunityResult {
+            id,
+            result: Box::new(result),
+        }),
         Ok(Err(detail)) => Err(ProtocolError::Failed {
             detail,
             retryable: true,

@@ -1042,6 +1042,72 @@ async fn a_group_member_label_is_addressed_and_reaches_the_session() {
     }
 }
 
+/// Protocol 58's unlink is addressed like the other correlated mutations: a
+/// missing id is refused before dispatch, and the community, groups and the
+/// always-off orphan flag reach the session unchanged. The answer itself is
+/// the typed community result, not a bare acknowledgement.
+#[tokio::test]
+async fn a_subgroup_unlink_is_addressed_and_reaches_the_session() {
+    let hub = connected_hub();
+    let request = ClientRequest::UnlinkCommunitySubgroups(oxidezap_core::UnlinkSubgroupsRequest {
+        community_jid: "155555500001@g.us".into(),
+        groups: vec!["155555500002@g.us".into()],
+        remove_orphan_members: false,
+    });
+
+    let (commands, _taken) = bridge(CommandOutcome::Accepted);
+    let refused = handle_request(
+        Request {
+            id: None,
+            request: request.clone(),
+        },
+        &hub,
+        &no_plugins(),
+        &commands,
+        &outbox(),
+    )
+    .await;
+    assert!(
+        matches!(
+            parse(refused.frame),
+            DaemonMessage::Error {
+                id: None,
+                error: ProtocolError::Malformed { .. }
+            }
+        ),
+        "an unaddressed unlink was not refused"
+    );
+
+    let (commands, taken) = bridge(CommandOutcome::Accepted);
+    let answer = handle_request(
+        Request {
+            id: Some(88),
+            request,
+        },
+        &hub,
+        &no_plugins(),
+        &commands,
+        &outbox(),
+    )
+    .await;
+    assert!(answer.frame.is_none(), "the unlink has not completed yet");
+    let action = taken.await.unwrap().unwrap();
+    assert!(action.needs_network(), "an unlink reaches WhatsApp");
+    match action {
+        Action::UnlinkCommunitySubgroups {
+            id,
+            request,
+            answer_to: _,
+        } => {
+            assert_eq!(id, 88);
+            assert_eq!(request.community_jid, "155555500001@g.us");
+            assert_eq!(request.groups, vec!["155555500002@g.us"]);
+            assert!(!request.remove_orphan_members);
+        }
+        other => panic!("unexpected action: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn status_post_keeps_its_explicit_audience_and_style_until_the_session_confirms() {
     let hub = connected_hub();
@@ -2077,6 +2143,8 @@ fn wire_family_dtos_convert_without_losing_defaults() {
                 description: None,
             }],
             linked_jids: vec!["155555500002@g.us".into()],
+            // No wire request can unlink, so this field has nowhere to go.
+            unlinked_jids: Vec::new(),
             failed_groups: vec![core::CommunitySubgroupFailure {
                 jid: "155555500003@g.us".into(),
                 code: 403,
@@ -2105,6 +2173,13 @@ fn wire_family_dtos_convert_without_losing_defaults() {
             }],
         }
     );
+    // An IPC-only result cannot silently grow a wire field: the mapping is
+    // explicit, and a future wire command must add its own field on purpose.
+    let ipc_only = community_operation_result_to_wire(core::CommunityOperationResult {
+        unlinked_jids: vec!["155555500005@g.us".into()],
+        ..Default::default()
+    });
+    assert!(ipc_only.linked_jids.is_empty());
     assert_eq!(
         channel_poll_created_to_wire(core::ChannelPollCreated {
             channel_jid: "155555500001@newsletter".into(),

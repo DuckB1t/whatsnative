@@ -366,7 +366,11 @@ use std::path::PathBuf;
 /// can style a text status must not attach to a daemon that would ignore it;
 /// the field is still optional on the wire so an unstyled frame keeps its old
 /// meaning. An older window cannot decode the extra field.
-pub const PROTOCOL_VERSION: u32 = 57;
+///
+/// 58 adds `UnlinkCommunitySubgroups`, an addressed community mutation answered
+/// by the existing `CommunityResult` with typed partial failures. It reuses the
+/// GUI's community answer path; an older daemon knows no such request.
+pub const PROTOCOL_VERSION: u32 = 58;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

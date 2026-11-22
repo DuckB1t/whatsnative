@@ -54,5 +54,7 @@ formatted_catalog! {
     event_start(start) => ("Starts {start}", "Começa {start}");
     community_groups_created(count) => ("Groups created: {count}", "Grupos criados: {count}");
     community_groups_linked(count) => ("Groups linked: {count}", "Grupos vinculados: {count}");
+    community_groups_unlinked(count) => ("Groups unlinked: {count}", "Grupos desvinculados: {count}");
     community_link_failed(jid, code) => ("Could not link {jid} (code {code}).", "Não foi possível vincular {jid} (código {code}).");
+    community_unlink_failed(jid, code) => ("Could not unlink {jid} (code {code}).", "Não foi possível desvincular {jid} (código {code}).");
 }

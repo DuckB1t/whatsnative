@@ -6,7 +6,8 @@ use oxidezap_core::{
     ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
     CreatedMessageRef, DownloadableMedia, EventLocation, EventRsvp, GroupHierarchy, GroupRoster,
     JoinSubgroupRequest, LinkSubgroupsRequest, LogLevel, OutgoingMedia, PluginAction,
-    PluginSurface, QuotedMessage, StatusStyle, SubgroupDraft, UiEvent, UsernameLookupResult,
+    PluginSurface, QuotedMessage, StatusStyle, SubgroupDraft, UiEvent, UnlinkSubgroupsRequest,
+    UsernameLookupResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -573,7 +574,9 @@ pub enum DaemonMessage {
     /// without guessing from an acknowledgement.
     CommunityResult {
         id: RequestId,
-        result: CommunityOperationResult,
+        /// Heap-backed: a fifth result vector took this frame past the size
+        /// budget every frame pays for. `Box` is transparent on the wire.
+        result: Box<CommunityOperationResult>,
     },
     /// A module was installed, and the id it claimed.
     ///
@@ -1469,6 +1472,11 @@ pub enum ClientRequest {
     CreateCommunitySubgroup(SubgroupDraft),
     /// Attach existing groups to a community, with their visibility.
     LinkCommunitySubgroups(LinkSubgroupsRequest),
+    /// Detach existing groups from a community. Answered with the existing
+    /// [`DaemonMessage::CommunityResult`], whose `unlinked_jids` says what was
+    /// actually detached and whose failures say what was not. The destructive
+    /// orphan-member flag is defaulted off on the wire.
+    UnlinkCommunitySubgroups(UnlinkSubgroupsRequest),
     /// Join one community's subgroup.
     JoinCommunitySubgroup(JoinSubgroupRequest),
     /// One page of a chat's messages, older than `before`.
@@ -2496,6 +2504,14 @@ mod tests {
                 r#"{"request":"link_community_subgroups","community_jid":"155555500001@g.us","groups":[{"jid":"155555500002@g.us","visibility":"hidden"}]}"#,
             ),
             (
+                ClientRequest::UnlinkCommunitySubgroups(UnlinkSubgroupsRequest {
+                    community_jid: "155555500001@g.us".into(),
+                    groups: vec!["155555500002@g.us".into()],
+                    remove_orphan_members: false,
+                }),
+                r#"{"request":"unlink_community_subgroups","community_jid":"155555500001@g.us","groups":["155555500002@g.us"]}"#,
+            ),
+            (
                 ClientRequest::JoinCommunitySubgroup(JoinSubgroupRequest {
                     community_jid: "155555500001@g.us".into(),
                     subgroup_jid: "155555500003@g.us".into(),
@@ -2521,6 +2537,7 @@ mod tests {
                 description: None,
             }],
             linked_jids: vec!["155555500002@g.us".into()],
+            unlinked_jids: vec!["155555500004@g.us".into()],
             failed_groups: vec![oxidezap_core::CommunitySubgroupFailure {
                 jid: "155555500003@g.us".into(),
                 code: 403,
@@ -2531,7 +2548,10 @@ mod tests {
                 detail: Some("synthetic description failure".into()),
             }],
         };
-        let frame = DaemonMessage::CommunityResult { id: 42, result };
+        let frame = DaemonMessage::CommunityResult {
+            id: 42,
+            result: Box::new(result),
+        };
         let line = serde_json::to_string(&frame).unwrap();
         assert_eq!(serde_json::from_str::<DaemonMessage>(&line).unwrap(), frame);
         let empty = serde_json::from_str::<DaemonMessage>(
@@ -2542,7 +2562,7 @@ mod tests {
             panic!("expected a community result");
         };
         assert_eq!(id, 7);
-        assert_eq!(result, CommunityOperationResult::default());
+        assert_eq!(*result, CommunityOperationResult::default());
     }
 
     #[test]

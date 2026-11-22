@@ -1,6 +1,6 @@
 //! The form behind native community operations.
 //!
-//! One dialog, four operations. The mode selector is the navigation: the
+//! One dialog, five operations. The mode selector is the navigation: the
 //! fields that do not belong to the chosen operation are not drawn, so a
 //! person cannot send a link request carrying a half-filled name. Every field
 //! stays plain text until submit, where a pure builder turns it into a domain
@@ -18,6 +18,7 @@ use gpui_component::{ActiveTheme as _, Sizable as _, v_flex};
 use oxidezap_core::{
     CommunityDraft, CommunityOperationResult, CommunityVisibility, CommunityWarningStep,
     JoinSubgroupRequest, LinkSubgroupTarget, LinkSubgroupsRequest, SubgroupDraft,
+    UnlinkSubgroupsRequest,
 };
 
 use super::notices::Tone;
@@ -30,6 +31,7 @@ enum CommunityOperation {
     Create,
     CreateSubgroup,
     Link,
+    Unlink,
     Join,
 }
 
@@ -67,6 +69,7 @@ enum CommunityFormError {
 struct CommunityOutcome {
     created: usize,
     linked: usize,
+    unlinked: usize,
     joined: bool,
     failed: Vec<(String, u32)>,
     description_warnings: usize,
@@ -78,6 +81,7 @@ impl CommunityOutcome {
         let mut outcome = Self {
             created: result.groups.len(),
             linked: result.linked_jids.len(),
+            unlinked: result.unlinked_jids.len(),
             ..Self::default()
         };
         outcome.failed = result
@@ -194,6 +198,28 @@ fn draft_link(
     Ok(LinkSubgroupsRequest {
         community_jid: community_jid.to_string(),
         groups: targets,
+    })
+}
+
+/// Unlink reuses the link form's community and group boxes. The destructive
+/// orphan-member flag is not exposed: leaving it off is the only thing this
+/// native path asks for, and a checkbox for it would invite data loss.
+fn draft_unlink(
+    community_jid: &str,
+    groups: &str,
+) -> Result<UnlinkSubgroupsRequest, CommunityFormError> {
+    let community_jid = community_jid.trim();
+    if community_jid.is_empty() {
+        return Err(CommunityFormError::MissingCommunity);
+    }
+    let targets = split_lines(groups);
+    if targets.is_empty() {
+        return Err(CommunityFormError::GroupsAbsent);
+    }
+    Ok(UnlinkSubgroupsRequest {
+        community_jid: community_jid.to_string(),
+        groups: targets,
+        remove_orphan_members: false,
     })
 }
 
@@ -346,6 +372,10 @@ impl WhatsAppApp {
                 Ok(request) => client.link_community_subgroups(request),
                 Err(error) => return self.invalid_community_form(error, cx),
             },
+            CommunityOperation::Unlink => match draft_unlink(&community_jid, &groups) {
+                Ok(request) => client.unlink_community_subgroups(request),
+                Err(error) => return self.invalid_community_form(error, cx),
+            },
             CommunityOperation::Join => match draft_join(&community_jid, &subgroup_jid) {
                 Ok(request) => client.join_community_subgroup(request),
                 Err(error) => return self.invalid_community_form(error, cx),
@@ -411,6 +441,22 @@ impl WhatsAppApp {
                 for (jid, code) in &outcome.failed {
                     self.notify_user(
                         crate::tr!(community_link_failed, jid, code),
+                        Tone::Problem,
+                        cx,
+                    );
+                }
+            }
+            CommunityOperation::Unlink => {
+                if outcome.unlinked > 0 {
+                    self.notify_user(
+                        crate::tr!(community_groups_unlinked, outcome.unlinked),
+                        Tone::Info,
+                        cx,
+                    );
+                }
+                for (jid, code) in &outcome.failed {
+                    self.notify_user(
+                        crate::tr!(community_unlink_failed, jid, code),
                         Tone::Problem,
                         cx,
                     );
@@ -533,6 +579,13 @@ pub(super) fn render_community_dialog(
                             CommunityOperation::Link,
                         ))
                         .child(mode_button(
+                            "community-mode-unlink",
+                            crate::tr!(CommunityOperationUnlink),
+                            mode == CommunityOperation::Unlink,
+                            app.clone(),
+                            CommunityOperation::Unlink,
+                        ))
+                        .child(mode_button(
                             "community-mode-join",
                             crate::tr!(CommunityOperationJoin),
                             mode == CommunityOperation::Join,
@@ -577,7 +630,12 @@ pub(super) fn render_community_dialog(
                     ))
                 })
                 .when(
-                    matches!(mode, CommunityOperation::Link | CommunityOperation::Join),
+                    matches!(
+                        mode,
+                        CommunityOperation::Link
+                            | CommunityOperation::Unlink
+                            | CommunityOperation::Join
+                    ),
                     |el| {
                         el.child(field(
                             crate::tr!(CommunityJid).into(),
@@ -587,14 +645,21 @@ pub(super) fn render_community_dialog(
                         ))
                     },
                 )
-                .when(mode == CommunityOperation::Link, |el| {
-                    el.child(field(
-                        crate::tr!(CommunityGroups).into(),
-                        &dialog.groups,
-                        metrics,
-                        cx,
-                    ))
-                })
+                .when(
+                    matches!(mode, CommunityOperation::Link | CommunityOperation::Unlink),
+                    |el| {
+                        el.child(field(
+                            if mode == CommunityOperation::Unlink {
+                                crate::tr!(CommunityGroupsToUnlink).into()
+                            } else {
+                                crate::tr!(CommunityGroups).into()
+                            },
+                            &dialog.groups,
+                            metrics,
+                            cx,
+                        ))
+                    },
+                )
                 .when(mode == CommunityOperation::Join, |el| {
                     el.child(field(
                         crate::tr!(CommunitySubgroupJid).into(),
@@ -686,6 +751,7 @@ impl CommunityOperation {
             Self::Create => crate::tr!(CommunityOperationCreate),
             Self::CreateSubgroup => crate::tr!(CommunityOperationSubgroup),
             Self::Link => crate::tr!(CommunityOperationLink),
+            Self::Unlink => crate::tr!(CommunityOperationUnlink),
             Self::Join => crate::tr!(CommunityOperationJoin),
         }
     }
@@ -853,6 +919,33 @@ mod tests {
     }
 
     #[test]
+    fn an_unlink_draft_never_removes_orphan_members() {
+        let request = draft_unlink(
+            " 155555500001@g.us ",
+            "155555500002@g.us\n 155555500003@g.us \n",
+        )
+        .unwrap();
+        assert_eq!(request.community_jid, "155555500001@g.us");
+        assert_eq!(
+            request.groups,
+            vec!["155555500002@g.us", "155555500003@g.us"]
+        );
+        assert!(!request.remove_orphan_members);
+    }
+
+    #[test]
+    fn an_unlink_needs_a_community_and_at_least_one_group() {
+        assert_eq!(
+            draft_unlink("  ", "155555500002@g.us").unwrap_err(),
+            CommunityFormError::MissingCommunity
+        );
+        assert_eq!(
+            draft_unlink("155555500001@g.us", " \n ").unwrap_err(),
+            CommunityFormError::GroupsAbsent
+        );
+    }
+
+    #[test]
     fn an_outcome_groups_partial_success_and_each_warning() {
         let result = CommunityOperationResult {
             groups: vec![oxidezap_core::CommunityGroupRef {
@@ -861,6 +954,7 @@ mod tests {
                 description: None,
             }],
             linked_jids: vec!["155555500002@g.us".into()],
+            unlinked_jids: vec!["155555500004@g.us".into()],
             failed_groups: vec![oxidezap_core::CommunitySubgroupFailure {
                 jid: "155555500003@g.us".into(),
                 code: 403,
@@ -881,6 +975,7 @@ mod tests {
         let outcome = CommunityOutcome::from_result(&result);
         assert_eq!(outcome.created, 1);
         assert_eq!(outcome.linked, 1);
+        assert_eq!(outcome.unlinked, 1);
         assert_eq!(outcome.failed, vec![("155555500003@g.us".into(), 403)]);
         assert_eq!(outcome.description_warnings, 1);
         assert_eq!(outcome.approval_pending, 1);

@@ -14,7 +14,7 @@ use log::warn;
 use oxidezap_core::{
     CommunityDraft, CommunityGroupRef, CommunityOperationResult, CommunitySubgroupFailure,
     CommunityVisibility, CommunityWarning, CommunityWarningStep, JoinSubgroupRequest,
-    LinkSubgroupsRequest, SubgroupDraft,
+    LinkSubgroupsRequest, SubgroupDraft, UnlinkSubgroupsRequest,
 };
 use whatsapp_rust::wacore_binary::jid::{Jid, JidExt as _};
 use whatsapp_rust::{
@@ -122,6 +122,48 @@ impl WhatsAppClient {
                         .map(|jid| jid.to_string())
                         .collect(),
                     failed_groups: linked
+                        .failed_groups
+                        .into_iter()
+                        .map(|failure: SubgroupFailure| CommunitySubgroupFailure {
+                            jid: failure.jid.to_string(),
+                            code: failure.code,
+                        })
+                        .collect(),
+                    ..Default::default()
+                });
+            settle(answer)
+        })
+    }
+
+    /// Detach groups from a community. One refused group does not hide the
+    /// ones that were unlinked, and the orphan-member flag stays as asked —
+    /// the GUI leaves it off because turning it on removes members.
+    pub fn unlink_community_subgroups(
+        &self,
+        request: UnlinkSubgroupsRequest,
+    ) -> Task<Result<CommunityOperationResult, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let community = group_jid(&request.community_jid, "the community")?;
+            let mut groups = Vec::with_capacity(request.groups.len());
+            for jid in &request.groups {
+                groups.push(group_jid(jid, "a group to unlink")?);
+            }
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let answer = live
+                .client
+                .community()
+                .unlink_subgroups(community, &groups, request.remove_orphan_members)
+                .await
+                .map(|unlinked| CommunityOperationResult {
+                    unlinked_jids: unlinked
+                        .unlinked_jids
+                        .into_iter()
+                        .map(|jid| jid.to_string())
+                        .collect(),
+                    failed_groups: unlinked
                         .failed_groups
                         .into_iter()
                         .map(|failure: SubgroupFailure| CommunitySubgroupFailure {

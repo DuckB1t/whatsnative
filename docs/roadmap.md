@@ -610,6 +610,17 @@
   Fetching ids for old channel messages would need a newsletter-history API
   this stack does not expose.
 
+- **Channel administration is read-only here, and only some of it.** Upstream's
+  `Newsletter` handle exposes update, picture, delete, owner transfer and
+  demotion, but this stack drops role and admin metadata at every boundary, so
+  a role-gated dialog would have to guess who is allowed to press it. Pinning,
+  reaction settings, admin-profile settings and admin invites exist only as raw
+  MEX operations with no public wrapper, and pinned posts are neither parsed nor
+  fetched. Drawing controls for them would be a dead surface; protocol 58
+  therefore covers only the one public community hierarchy mutation that can be
+  reported honestly — unlinking subgroups, with per-group failures. Wire/CLI
+  parity for that unlink is not part of the slice.
+
 Clickable `div`s that remain are deliberate: a chat row and a media thumbnail
 are surfaces, not commands, and have no semantic component to compose from.
 Anything that *is* a command (call accept/decline, back) is a `Button`.

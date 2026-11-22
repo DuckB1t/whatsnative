@@ -76,7 +76,7 @@ pub use chat::{fallback_chat_name, fallback_sender_name};
 pub use community::{
     CommunityDraft, CommunityGroupRef, CommunityOperationResult, CommunitySubgroupFailure,
     CommunityVisibility, CommunityWarning, CommunityWarningStep, JoinSubgroupRequest,
-    LinkSubgroupTarget, LinkSubgroupsRequest, SubgroupDraft,
+    LinkSubgroupTarget, LinkSubgroupsRequest, SubgroupDraft, UnlinkSubgroupsRequest,
 };
 pub use event::{CreatedMessageRef, EventCard, EventLocation, EventRsvp};
 pub use events::{AvatarOutcome, AvatarResolution, ReceiptType, UiEvent};
