@@ -607,6 +607,14 @@ catalog! {
     PinnedMessages => ("Pinned messages", "Mensagens fixadas");
     NoPinnedMessages => ("No pinned messages in loaded chats", "Nenhuma mensagem fixada nas conversas carregadas");
 
+    // Protocol 59's media jump list. It is a list of rows to open, not a
+    // gallery: no thumbnail, kind filter or cache-state promise.
+    MediaMessages => ("Media messages", "Mensagens com mídia");
+    OpenMediaMessages => ("Open media messages", "Abrir mensagens com mídia");
+    NoMediaMessages => ("No messages with media yet", "Nenhuma mensagem com mídia ainda");
+    CouldNotLoadMediaMessages => ("Could not load media messages", "Não foi possível carregar as mensagens com mídia");
+    MediaListGuidance => ("Browse messages with media from your stored history, newest first. No thumbnails or filters — open a row to see the message.", "Navegue pelas mensagens com mídia do histórico armazenado, mais recentes primeiro. Sem miniaturas ou filtros — abra uma linha para ver a mensagem.");
+
     // Protocol 54's chat-list management. "Mute" alone names the call's
     // microphone in this catalog, so these say which mute they mean.
     MarkChatUnread => ("Mark as unread", "Marcar como não lida");

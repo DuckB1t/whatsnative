@@ -751,6 +751,41 @@ async fn a_command_reaches_the_session_rather_than_being_refused() {
     ));
 }
 
+/// The media jump list is a local read: it routes to the session bridge even
+/// with no connection, and the action does not demand one. Synthetic ids only.
+#[tokio::test]
+async fn a_media_listing_dispatches_without_a_live_connection() {
+    let hub = StateHub::new();
+    let (commands, taken) = bridge(CommandOutcome::Accepted);
+
+    let request = Request {
+        id: Some(77),
+        request: ClientRequest::ListMediaMessages { limit: 25 },
+    };
+    // The rows and their ack come from the bridge's task, not this loop, so
+    // there is deliberately no immediate frame to read here.
+    let answer = handle_request(request, &hub, &no_plugins(), &commands, &outbox()).await;
+    assert!(answer.frame.is_none());
+    assert!(!answer.shutdown);
+    let action = taken.await.unwrap().expect("a command was dispatched");
+    match action {
+        Action::ListMediaMessages { id, limit, .. } => {
+            assert_eq!(id, 77);
+            assert_eq!(limit, 25);
+            assert!(
+                !Action::ListMediaMessages {
+                    id,
+                    limit,
+                    answer_to: outbox()
+                }
+                .needs_network(),
+                "a store read needs no connection"
+            );
+        }
+        other => panic!("expected Action::ListMediaMessages, got {other:?}"),
+    }
+}
+
 /// The payload moves rather than being unpacked and rebuilt, so what the
 /// session is handed is the struct the client sent. A field dropped between
 /// the two compiles and arrives as a document called "file" with no type on

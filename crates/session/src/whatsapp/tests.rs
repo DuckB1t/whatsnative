@@ -1924,6 +1924,79 @@ async fn starred_and_pending_media_reads_project_rehydrated_quotes() {
     assert_eq!(quote.kind, Some(oxidezap_core::QuotedKind::Image));
 }
 
+/// The media jump list is a bounded, search-shaped view of the store's
+/// media rows: newest first, no caption necessary, and every row marked as
+/// carrying media. Both addresses below are synthetic.
+#[tokio::test]
+async fn media_hits_are_newest_first_bounded_and_search_shaped() {
+    let (chat_store, client) = test_session("media-jump-list").await;
+    let photo = || {
+        let mut constructed: wa::Message = Default::default();
+        constructed.image_message = MessageField::some({
+            let mut constructed: wa::message::ImageMessage = Default::default();
+            constructed.mimetype = Some("image/jpeg".into());
+            constructed
+        });
+        constructed
+    };
+    for (chat, id, ts) in [
+        (TEST_GROUP, "MEDIA-OLD", 1_700_000_000),
+        (TEST_PEER, "MEDIA-MID", 1_700_000_060),
+        (TEST_GROUP, "MEDIA-NEW", 1_700_000_120),
+    ] {
+        feed(&chat_store, incoming_in(chat, photo(), id, ts)).await;
+    }
+    // A plain text row must never appear in the media list.
+    feed(
+        &chat_store,
+        incoming_in(
+            TEST_GROUP,
+            wa::Message::text("no media here"),
+            "TEXT-1",
+            1_700_000_180,
+        ),
+    )
+    .await;
+
+    // Populate the one session slot a wrapper needs for a local read.
+    let live = Arc::new(super::Session {
+        client: client.clone(),
+        chat_store: chat_store.clone(),
+        names: Arc::new(book_with(&chat_store)),
+        resolve_chat_names: super::chat_names::ChatNameResolveSignal::new(),
+        stickers: Arc::new(super::sticker_sync::StickerSync::default()),
+    });
+    let wrapper = WhatsAppClient::new().expect("an executor");
+    *wrapper.session.lock().await = Some(live);
+
+    let hits = wrapper
+        .list_media_hits(2)
+        .await
+        .expect("the listing runs")
+        .expect("the store answers");
+    assert_eq!(hits.len(), 2, "the bound is carried to the store");
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.message_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["MEDIA-NEW", "MEDIA-MID"],
+        "newest first, across chats"
+    );
+    assert_eq!(hits[0].chat_jid, TEST_GROUP);
+    assert_eq!(hits[1].chat_jid, TEST_PEER);
+    assert!(hits.iter().all(|hit| hit.has_media));
+    assert_eq!(hits[0].snippet, "[image]", "the kind stands in for no text");
+
+    // The same clamp as the other local listings: zero asks for one row.
+    let one = wrapper
+        .list_media_hits(0)
+        .await
+        .expect("the listing runs")
+        .expect("the store answers");
+    assert_eq!(one.len(), 1);
+    crate::exec::let_go(wrapper).await;
+}
+
 async fn test_session(name: &str) -> (Arc<ChatStore>, Arc<Client>) {
     let (chat_store, bot) = test_bot(name).await;
     (chat_store, bot.client())

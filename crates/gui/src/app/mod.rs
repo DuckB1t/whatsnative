@@ -144,6 +144,8 @@ enum KeyboardOwner {
     SavedMessages,
     /// The pinned messages panel, listing the pins this window has seen.
     PinnedMessages,
+    /// The media messages jump list, listing store rows carrying media.
+    MediaMessages,
     /// A call that is ringing — not one that has been answered, which is a
     /// call people type through.
     RingingCall(String),
@@ -196,6 +198,8 @@ pub struct KeyboardSurfaces {
     /// The saved and pinned message panels, over the same body.
     pub saved_messages: bool,
     pub pinned_messages: bool,
+    /// The media messages jump list, over the same body.
+    pub media_messages: bool,
     /// The call card, which only the connected screens float.
     pub call_card: bool,
 }
@@ -851,9 +855,10 @@ pub struct WhatsAppApp {
     /// Focus target for the account-wide search overlay. Its own handle keeps
     /// the keyboard from being handed back to the composer mid-query.
     global_search_focus: FocusHandle,
-    /// Focus targets for the saved and pinned panels, for the same reason.
+    /// Focus targets for the saved, pinned and media panels, for the same reason.
     saved_messages_focus: FocusHandle,
     pinned_messages_focus: FocusHandle,
+    media_messages_focus: FocusHandle,
     /// Focus target for the window itself, so the actions hung off the root
     /// are reachable whatever else is on screen — including on the screens on
     /// the way to a conversation, which have no list and no composer to
@@ -1184,10 +1189,14 @@ pub struct WhatsAppApp {
     /// Rows from the latest store-wide starred listing, newest first. Kept
     /// while the saved panel is closed so reopening it is not briefly empty.
     saved_messages: Vec<oxidezap_ipc::MessageSearchHit>,
-    /// Whether either message panel is on screen. The rows live in the fields
+    /// Rows from the latest store-wide media listing, newest first. Like the
+    /// saved rows, these are kept while the panel is closed.
+    media_messages: Vec<oxidezap_ipc::MessageSearchHit>,
+    /// Whether a message panel is on screen. The rows live in the fields
     /// above and in `pinned_rows`, not in these flags.
     saved_messages_panel: bool,
     pinned_messages_panel: bool,
+    media_messages_panel: bool,
     /// The row a global-search hit asked to see, so it can be outlined after
     /// the timeline has been scrolled to it. Cleared by the next hit.
     focused_message: Option<(String, String)>,
@@ -1599,6 +1608,11 @@ impl WhatsAppApp {
                     FromDaemon::StarredResults { results } => entity.update(cx, |app, cx| {
                         app.adopt_starred_results(results, cx);
                     }),
+                    // The store's answer to the media jump list. No request id
+                    // on the frame either, so the newest answer wins here too.
+                    FromDaemon::MediaResults { results } => entity.update(cx, |app, cx| {
+                        app.adopt_media_results(results, cx);
+                    }),
                     // The tray's "Open", or another front end asking on a
                     // user's behalf. One window, so there is one to raise.
                     // The connection ended, and why. One screen drew three
@@ -1671,6 +1685,7 @@ impl WhatsAppApp {
             global_search_focus: cx.focus_handle(),
             saved_messages_focus: cx.focus_handle(),
             pinned_messages_focus: cx.focus_handle(),
+            media_messages_focus: cx.focus_handle(),
             root_focus: cx.focus_handle(),
             keyboard_owner: None,
             window_focused: false,
@@ -1776,8 +1791,10 @@ impl WhatsAppApp {
             starred_messages: HashSet::new(),
             pinned_messages: HashSet::new(),
             saved_messages: Vec::new(),
+            media_messages: Vec::new(),
             saved_messages_panel: false,
             pinned_messages_panel: false,
+            media_messages_panel: false,
             focused_message: None,
             pending_message_actions: HashSet::new(),
             #[cfg(test)]
@@ -2665,8 +2682,10 @@ impl WhatsAppApp {
         self.starred_messages.clear();
         self.pinned_messages.clear();
         self.saved_messages.clear();
+        self.media_messages.clear();
         self.saved_messages_panel = false;
         self.pinned_messages_panel = false;
+        self.media_messages_panel = false;
         cx.notify();
     }
 
@@ -5038,8 +5057,9 @@ impl Render for WhatsAppApp {
         };
         let global_search_open = global_search.is_some();
 
-        // The two message panels use the same hit rows as the search. Only one
-        // of the three overlays is open at a time, so they share the layer.
+        // The saved, pinned and media panels use the same hit rows as the
+        // search. Only one of the four overlays is open at a time, so they
+        // share the layer.
         let saved_messages = self.saved_messages_panel.then(|| {
             let rows = self.saved_rows();
             saved_messages::render_panel(
@@ -5062,8 +5082,20 @@ impl Render for WhatsAppApp {
             )
             .into_any_element()
         });
+        let media_messages = self.media_messages_panel.then(|| {
+            let rows = self.media_rows();
+            saved_messages::render_panel(
+                saved_messages::MessagePanel::Media,
+                &rows,
+                &self.media_messages_focus,
+                &cx.entity(),
+                cx,
+            )
+            .into_any_element()
+        });
         let saved_messages_open = saved_messages.is_some();
         let pinned_messages_open = pinned_messages.is_some();
+        let media_messages_open = media_messages.is_some();
 
         // A forward's destination picker, over the body but under notices too.
         let forward_picker = self.forward_picker.as_ref().map(|_draft| {
@@ -5109,6 +5141,7 @@ impl Render for WhatsAppApp {
             || global_search_open
             || saved_messages_open
             || pinned_messages_open
+            || media_messages_open
             || forward_picker_open;
         let call_overlay = (connected && !modal_open)
             .then(|| render_call_overlay(self, window, cx))
@@ -5162,6 +5195,7 @@ impl Render for WhatsAppApp {
         .children(global_search)
         .children(saved_messages)
         .children(pinned_messages)
+        .children(media_messages)
         .children(forward_picker)
         .children(call_overlay)
         .child(self.notices().clone())
@@ -5182,6 +5216,7 @@ impl Render for WhatsAppApp {
                         app.keyboard_surfaces.global_search = global_search_open;
                         app.keyboard_surfaces.saved_messages = saved_messages_open;
                         app.keyboard_surfaces.pinned_messages = pinned_messages_open;
+                        app.keyboard_surfaces.media_messages = media_messages_open;
                         app.keyboard_surfaces.forward_picker = forward_picker_open;
                     });
                     let entity = entity.downgrade();

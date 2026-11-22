@@ -576,6 +576,12 @@ impl<'a> Frames<'a> {
             DaemonMessage::StarredResults { results } => {
                 self.publish(FromDaemon::StarredResults { results })?;
             }
+            // The media jump list answers a local read the same way: rows
+            // without a request id, so an explicit arm is needed or the
+            // catch-all below would silently drop them.
+            DaemonMessage::MediaResults { results } => {
+                self.publish(FromDaemon::MediaResults { results })?;
+            }
             // Chat summaries, which this front end derives from the session
             // stream instead. The version still advances: it describes how far
             // the *state* has been carried, not how much of it this client
@@ -1342,6 +1348,35 @@ mod tests {
         assert!(matches!(
             events.try_recv(),
             Ok(FromDaemon::StarredResults { results }) if results.len() == 1 && results[0].message_id == "STAR-1"
+        ));
+    }
+
+    /// The catch-all would otherwise swallow the answer to the media listing,
+    /// leaving the panel open and empty with no failure said.
+    #[test]
+    fn media_results_are_published_not_dropped() {
+        let (sink, mut events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+
+        let _ = frames.apply(DaemonMessage::MediaResults {
+            results: vec![oxidezap_ipc::MessageSearchHit {
+                chat_jid: "155555500001@g.us".into(),
+                message_id: "SYNTHETIC-MEDIA-1".into(),
+                snippet: "[image]".into(),
+                sender_jid: None,
+                timestamp_ms: 1_700_000_000_000,
+                has_media: true,
+            }],
+        });
+
+        assert!(matches!(
+            events.try_recv(),
+            Ok(FromDaemon::MediaResults { results })
+                if results.len() == 1
+                    && results[0].message_id == "SYNTHETIC-MEDIA-1"
+                    && results[0].has_media
         ));
     }
 

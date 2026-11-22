@@ -275,6 +275,12 @@ pub enum FromDaemon {
     StarredResults {
         results: Vec<oxidezap_ipc::MessageSearchHit>,
     },
+    /// Messages carrying media across every chat, answering the media listing
+    /// opened from Storage & media settings. Like a starred listing it has no
+    /// request id: the window keeps the newest answer it has seen.
+    MediaResults {
+        results: Vec<oxidezap_ipc::MessageSearchHit>,
+    },
 }
 
 /// Why something a front end asked for did not happen.
@@ -1419,6 +1425,20 @@ impl SessionHandle {
         let (tx, rx) = oneshot::channel();
         self.ask(
             ClientRequest::ListStarredMessages { limit },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// List the account's messages carrying media, newest first.
+    ///
+    /// The ack says the read ran; the rows arrive separately as
+    /// [`FromDaemon::MediaResults`], without a request id, because the daemon
+    /// answers every front end that can use them.
+    pub fn list_media_messages(&self, limit: usize) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::ListMediaMessages { limit },
             Awaiting::Mutation(tx),
         );
         rx

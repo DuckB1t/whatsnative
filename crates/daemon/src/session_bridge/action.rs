@@ -104,6 +104,13 @@ pub enum Action {
         limit: usize,
         answer_to: Outbox,
     },
+    /// Messages carrying media across every chat, answered with `MediaResults`
+    /// on the asking outbox. Another bounded local-store read like a search.
+    ListMediaMessages {
+        id: RequestId,
+        limit: usize,
+        answer_to: Outbox,
+    },
     SyncedStickers {
         id: RequestId,
         favorites: bool,
@@ -450,6 +457,7 @@ impl Action {
                     | Self::LoadChats { .. }
                     | Self::SearchMessages { .. }
                     | Self::ListStarredMessages { .. }
+                    | Self::ListMediaMessages { .. }
                     | Self::RefreshAvatars
                     | Self::Download { .. }
                     | Self::GroupMembers { .. }

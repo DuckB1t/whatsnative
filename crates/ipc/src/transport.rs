@@ -370,7 +370,14 @@ use std::path::PathBuf;
 /// 58 adds `UnlinkCommunitySubgroups`, an addressed community mutation answered
 /// by the existing `CommunityResult` with typed partial failures. It reuses the
 /// GUI's community answer path; an older daemon knows no such request.
-pub const PROTOCOL_VERSION: u32 = 58;
+///
+/// 59 adds `ClientRequest::ListMediaMessages`, answered by the dedicated
+/// `DaemonMessage::MediaResults`. It is a bounded, locally stored jump list of
+/// messages carrying media, opened from Storage & media settings: no
+/// thumbnails, no kind filters, no cache-state keys and no wire or CLI parity.
+/// An older daemon cannot decode the request, and an older window cannot
+/// decode the answer, so neither half may attach across this version.
+pub const PROTOCOL_VERSION: u32 = 59;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

@@ -620,6 +620,14 @@
   therefore covers only the one public community hierarchy mutation that can be
   reported honestly — unlinking subgroups, with per-group failures. Wire/CLI
   parity for that unlink is not part of the slice.
+- **The media tab is a jump list, not a gallery.** Protocol 59 lists the
+  account's stored messages that carry media, newest first, from the local
+  store and opens a row at its chat. Upstream has no public gallery, cache
+  accounting or thumbnail API, and the stored hit carries only a boolean media
+  flag — no kind, filename, cache key or thumbnail bytes. Kind filters,
+  previews, “downloaded only” filtering and bulk retry would all be guesses, so
+  Storage & media says what the list is instead of drawing them. Storage totals
+  and the cache-clear action were already complete and did not change.
 
 Clickable `div`s that remain are deliberate: a chat row and a media thumbnail
 are surfaces, not commands, and have no semantic component to compose from.

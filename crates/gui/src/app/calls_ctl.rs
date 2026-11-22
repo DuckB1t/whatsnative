@@ -1315,6 +1315,7 @@ impl WhatsAppApp {
             KeyboardOwner::GlobalSearch => window.focus(&self.global_search_focus, cx),
             KeyboardOwner::SavedMessages => window.focus(&self.saved_messages_focus, cx),
             KeyboardOwner::PinnedMessages => window.focus(&self.pinned_messages_focus, cx),
+            KeyboardOwner::MediaMessages => window.focus(&self.media_messages_focus, cx),
             KeyboardOwner::MessageDelete => window.focus(&self.message_delete_focus, cx),
             KeyboardOwner::ForwardPicker => window.focus(&self.forward_picker_focus, cx),
             KeyboardOwner::MessageEdit => {
@@ -1454,6 +1455,7 @@ fn keyboard_owner_for(
         None if surfaces.global_search => KeyboardOwner::GlobalSearch,
         None if surfaces.saved_messages => KeyboardOwner::SavedMessages,
         None if surfaces.pinned_messages => KeyboardOwner::PinnedMessages,
+        None if surfaces.media_messages => KeyboardOwner::MediaMessages,
         None if surfaces.forward_picker => KeyboardOwner::ForwardPicker,
         None if surfaces.message_delete => KeyboardOwner::MessageDelete,
         None if surfaces.message_edit => KeyboardOwner::MessageEdit,
@@ -1538,6 +1540,7 @@ mod keyboard_owner_tests {
         global_search: false,
         saved_messages: false,
         pinned_messages: false,
+        media_messages: false,
         call_card: false,
     };
 
@@ -1566,6 +1569,7 @@ mod keyboard_owner_tests {
             global_search: false,
             saved_messages: false,
             pinned_messages: false,
+            media_messages: false,
             call_card: true,
         };
         assert_eq!(
@@ -1599,6 +1603,26 @@ mod keyboard_owner_tests {
                 ..NOTHING
             }),
             KeyboardOwner::ChatList
+        );
+    }
+
+    /// The media jump list is another transient panel: opening it takes the
+    /// keyboard, and a frame that does not draw it cannot keep it.
+    #[test]
+    fn the_media_panel_takes_the_keyboard_only_while_drawn() {
+        let surfaces = KeyboardSurfaces {
+            media_messages: true,
+            composer: true,
+            chat_list: true,
+            ..NOTHING
+        };
+        assert_eq!(owner(surfaces), KeyboardOwner::MediaMessages);
+        assert_eq!(
+            owner(KeyboardSurfaces {
+                media_messages: false,
+                ..surfaces
+            }),
+            KeyboardOwner::Composer
         );
     }
 

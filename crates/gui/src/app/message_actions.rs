@@ -305,6 +305,22 @@ impl WhatsAppApp {
         self.saved_messages = results;
         cx.notify();
     }
+
+    /// Keep the media panel's rows after a store-wide listing.
+    ///
+    /// The answer is broadcast without a request id, so the newest listing
+    /// replaces the old rows exactly as a starred listing does.
+    pub(super) fn adopt_media_results(
+        &mut self,
+        results: Vec<oxidezap_ipc::MessageSearchHit>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut results = results;
+        results.sort_unstable_by_key(|hit| std::cmp::Reverse(hit.timestamp_ms));
+        results.truncate(super::saved_messages::LIST_LIMIT);
+        self.media_messages = results;
+        cx.notify();
+    }
 }
 
 /// The native chat picker a forward opens. It lists the conversations this

@@ -1042,6 +1042,41 @@ impl Bridge {
                 });
                 None
             }
+            Action::ListMediaMessages {
+                id,
+                limit,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.list_media_hits(i64::try_from(limit).unwrap_or(50));
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // The rows are an account-wide signal like a search
+                    // answer; the id gets its own ack, or its own error.
+                    let answer = match task.await {
+                        Ok(Ok(results)) => {
+                            hub.signal(&DaemonMessage::MediaResults { results });
+                            Ok(DaemonMessage::Accepted { id: Some(id) })
+                        }
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(error) => Err(ProtocolError::NoSession {
+                            detail: format!(
+                                "the session stopped before the media listing arrived: {error}"
+                            ),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::SearchMessages {
                 id,
                 query,
@@ -2296,6 +2331,7 @@ impl Bridge {
             | Action::MuteChat { .. }
             | Action::ArchiveChat { .. }
             | Action::ListStarredMessages { .. }
+            | Action::ListMediaMessages { .. }
             | Action::SearchMessages { .. }
             | Action::CreateEvent { .. }
             | Action::PreviewCallLink { .. }

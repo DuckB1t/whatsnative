@@ -374,6 +374,9 @@ impl WhatsAppApp {
         if self.close_pinned_messages(cx) {
             return;
         }
+        if self.close_media_messages(cx) {
+            return;
+        }
         if self.cancel_event_dialog(cx) {
             return;
         }

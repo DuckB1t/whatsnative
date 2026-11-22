@@ -315,6 +315,44 @@ impl WhatsAppClient {
         })
     }
 
+    /// Messages carrying media across every chat as search-shaped hits.
+    ///
+    /// The jump list reuses the hit projection and snippet exactly as the
+    /// starred listing does: a row names a chat and a message to open, and
+    /// nothing else. The store chooses which rows carry media and orders them
+    /// newest first; the client clamps the bound again for safety. There is no
+    /// kind, cache state, filename or thumbnail here — those belong to the
+    /// message itself, not to this list.
+    pub fn list_media_hits(&self, limit: i64) -> Task<Result<Vec<MessageSearchHit>, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let bound = limit.clamp(1, 100);
+            let rows = live
+                .chat_store
+                .pending_media_messages(None, bound)
+                .await
+                .map_err(|e| format!("database query failed: {e}"))?;
+            let results = rows
+                .into_iter()
+                .map(|stored| {
+                    let snippet = search_snippet(&stored);
+                    MessageSearchHit {
+                        chat_jid: stored.chat_jid.to_string(),
+                        message_id: stored.id,
+                        snippet,
+                        sender_jid: Some(stored.sender_jid.to_string()),
+                        timestamp_ms: stored.timestamp.timestamp_millis(),
+                        has_media: true,
+                    }
+                })
+                .collect();
+            Ok(results)
+        })
+    }
+
     /// Fetch a single message by ID.
     pub fn get_message(
         &self,

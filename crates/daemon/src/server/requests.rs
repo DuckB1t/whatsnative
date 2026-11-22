@@ -270,6 +270,23 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        ClientRequest::ListMediaMessages { limit } => {
+            let id = match addressed(id, "a media listing needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::ListMediaMessages {
+                    id,
+                    limit,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::SearchMessages {
             query,
             chat_jid,

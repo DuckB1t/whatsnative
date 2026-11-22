@@ -794,6 +794,34 @@ fn storage(
             ),
             metrics,
         ))
+        // A jump list over the store's media rows, opened here rather than
+        // from a gallery: it is bounded rows to click, not a cache view.
+        .child(group(
+            label(crate::tr!(MediaMessages), metrics, cx),
+            div()
+                .flex()
+                .flex_col()
+                .gap(metrics.space_lg())
+                .child(
+                    div()
+                        .text_size(metrics.text_small())
+                        .text_color(cx.theme().muted_foreground)
+                        .child(crate::tr!(MediaListGuidance)),
+                )
+                .child({
+                    let media_entity = entity.clone();
+                    div().flex().child(
+                        Button::new("open-media-messages")
+                            .label(crate::tr!(OpenMediaMessages))
+                            .outline()
+                            .cursor_pointer()
+                            .on_click(move |_, _window, cx| {
+                                media_entity.update(cx, |app, cx| app.open_media_messages(cx));
+                            }),
+                    )
+                }),
+            metrics,
+        ))
         .child(group(
             label(crate::tr!(MediaCache), metrics, cx),
             div()

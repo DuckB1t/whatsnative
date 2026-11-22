@@ -644,6 +644,32 @@ broken handshakes for no reason. EN/PT strings cover every heading and note.
 **Gates.** fmt and GUI clippy (`-D warnings`) green; the shortcut chord test
 passes. Full gates and the commit follow in the central review.
 
+### 22. Stored media messages jump list (protocol 59)
+
+**Problem.** Storage totals and cache clearing already worked, but there was no
+way to get back to a picture, video or document once it had scrolled out of a
+chat. A full media tab is not honest in this stack: upstream exposes no gallery,
+cache accounting or thumbnail API, and the local search hit carries only a
+boolean `has_media`.
+
+**Change.** Protocol **59** adds `ListMediaMessages { limit }`, answered by a
+dedicated `MediaResults` frame so it cannot be mistaken for a query-correlated
+search answer or replace the saved panel's rows. It is a local read on both
+sides: the daemon routes it out of band without needing a connection, and the
+session projects `pending_media_messages(None, bound)` into the existing
+`MessageSearchHit` shape (50 default, clamp 1–100, newest first, `has_media`
+set). Storage & media gains a short guidance note and an **Open media messages**
+button; the resulting overlay reuses the saved/pinned hit rows and jumps to the
+chosen message, closing the other panels. No `Destination::Media`, thumbnails,
+kind filters, cache-state claims or wire/CLI commands were added. Older peers
+cannot attach across the new version.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2686 passed, 44 ignored, 0 failed). Doctests, CLI 1,682,904 B (<2 MiB),
+wasm daemon/session tests 16+35, nightly wasm GUI/session checks, xtask 52,
+plugin-host ignored test and the shared-view ban all pass. All rows and
+addresses in tests are synthetic.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

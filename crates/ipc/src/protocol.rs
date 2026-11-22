@@ -532,6 +532,15 @@ pub enum DaemonMessage {
     /// Like [`DaemonMessage::SearchResults`] it is signalled account-wide and
     /// the request itself gets an ordinary ack.
     StarredResults { results: Vec<MessageSearchHit> },
+    /// Messages carrying media across every chat, answering
+    /// [`ClientRequest::ListMediaMessages`].
+    ///
+    /// Another bounded "here are rows to jump to" answer reusing the search
+    /// hit shape. It names no cache key and carries no thumbnail: the rows are
+    /// for jumping to the message, and its media stays where it always was.
+    /// Like a search answer it is signalled account-wide with no request id;
+    /// the request itself gets an ordinary ack.
+    MediaResults { results: Vec<MessageSearchHit> },
     /// One page of the chat list, answering [`ClientRequest::LoadChats`].
     Chats {
         id: RequestId,
@@ -780,6 +789,7 @@ impl ClientRequest {
                 | Self::PreviewCallLink(_)
                 | Self::SearchMessages { .. }
                 | Self::ListStarredMessages { .. }
+                | Self::ListMediaMessages { .. }
                 | Self::LoadMessages(_)
                 | Self::LoadChats(_)
                 | Self::GroupMembers(_)
@@ -796,7 +806,8 @@ fn owns_a_window() -> bool {
     true
 }
 
-/// The default page size for a message search or starred-message listing.
+/// The default page size for a message search, a starred listing or a media
+/// listing.
 fn default_search_limit() -> usize {
     50
 }
@@ -1277,6 +1288,16 @@ pub enum ClientRequest {
     /// A local read like [`ClientRequest::SearchMessages`]: the store owns the
     /// rows, so the answer is [`DaemonMessage::StarredResults`].
     ListStarredMessages {
+        #[serde(default = "default_search_limit")]
+        limit: usize,
+    },
+    /// List messages carrying media across every chat, newest first.
+    ///
+    /// A local read like the starred listing: the store owns the rows, so the
+    /// answer is [`DaemonMessage::MediaResults`]. This is a jump list only —
+    /// no thumbnails, no media kinds to filter by and no cache state — and the
+    /// rows are bounded by the same default as a search.
+    ListMediaMessages {
         #[serde(default = "default_search_limit")]
         limit: usize,
     },
@@ -3530,6 +3551,41 @@ mod audio_played_tests {
             }
             .is_read(),
             "a pin is a correlated mutation"
+        );
+    }
+
+    /// Protocol 59's media jump list is one more set of bytes the daemon and
+    /// every front end agree on. Literal JSON, so a field renamed or quietly
+    /// made optional is a visible change. The address and id are synthetic.
+    #[test]
+    fn protocol_59_media_jump_list_frames_put_the_same_bytes_on_the_wire() {
+        let request = ClientRequest::ListMediaMessages { limit: 50 };
+        let line = serde_json::to_string(&request).expect("a request serializes");
+        assert_eq!(line, r#"{"request":"list_media_messages","limit":50}"#);
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&line).expect("a request parses"),
+            request
+        );
+        assert!(request.is_read(), "a media listing is a local read");
+
+        let answer = DaemonMessage::MediaResults {
+            results: vec![MessageSearchHit {
+                chat_jid: "155555500001@g.us".into(),
+                message_id: "SYNTHETIC-MEDIA-1".into(),
+                snippet: "[image]".into(),
+                sender_jid: None,
+                timestamp_ms: 1_700_000_000_000,
+                has_media: true,
+            }],
+        };
+        let line = serde_json::to_string(&answer).expect("an answer serializes");
+        assert_eq!(
+            line,
+            r#"{"type":"media_results","results":[{"chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-MEDIA-1","snippet":"[image]","timestamp_ms":1700000000000,"has_media":true}]}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).expect("an answer parses"),
+            answer
         );
     }
 

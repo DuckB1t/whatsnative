@@ -1,11 +1,13 @@
-//! The two account-level message panels: saved (starred) and pinned.
+//! The account-level message panels: saved (starred), pinned and media.
 //!
-//! Both reuse the global search's hit rows, because a hit is the same thing in
-//! all three places: a chat, a message id and a line of text to click. The
-//! saved panel is filled by the daemon's `StarredResults`. There is no listing
-//! request for pins yet, so the pinned panel is derived from the `PinChanged`
-//! events this window has seen and the messages it has loaded: a pin from a
-//! different front end or a message outside the loaded page has no row here.
+//! All three reuse the global search's hit rows, because a hit is the same
+//! thing in every place: a chat, a message id and a line of text to click. The
+//! saved panel is filled by the daemon's `StarredResults`; the media jump list
+//! by `MediaResults`, a bounded store listing of messages carrying media
+//! opened from Storage & media settings. There is no listing request for pins
+//! yet, so the pinned panel is derived from the `PinChanged` events this
+//! window has seen and the messages it has loaded: a pin from a different
+//! front end or a message outside the loaded page has no row here.
 
 use gpui::{App, Context, Entity, FocusHandle, Styled, div, prelude::*};
 use gpui_component::ActiveTheme as _;
@@ -18,14 +20,15 @@ use oxidezap_ipc::MessageSearchHit;
 use super::{KeyboardOwner, WhatsAppApp, search, what_went_wrong};
 use crate::theme::ActiveProductTheme as _;
 
-/// How many rows either panel keeps, and what the store is asked to send.
+/// How many rows each panel keeps, and what the store is asked to send.
 pub(super) const LIST_LIMIT: usize = 50;
 
-/// Which of the two panels a frame is drawing.
+/// Which of the three panels a frame is drawing.
 #[derive(Clone, Copy)]
 pub(super) enum MessagePanel {
     Saved,
     Pinned,
+    Media,
 }
 
 impl MessagePanel {
@@ -33,6 +36,7 @@ impl MessagePanel {
         match self {
             Self::Saved => crate::tr!(SavedMessages),
             Self::Pinned => crate::tr!(PinnedMessages),
+            Self::Media => crate::tr!(MediaMessages),
         }
     }
 
@@ -40,6 +44,7 @@ impl MessagePanel {
         match self {
             Self::Saved => crate::tr!(NoSavedMessages),
             Self::Pinned => crate::tr!(NoPinnedMessages),
+            Self::Media => crate::tr!(NoMediaMessages),
         }
     }
 
@@ -47,6 +52,7 @@ impl MessagePanel {
         match self {
             Self::Saved => "saved-messages-panel",
             Self::Pinned => "pinned-messages-panel",
+            Self::Media => "media-messages-panel",
         }
     }
 
@@ -56,6 +62,7 @@ impl MessagePanel {
         match self {
             Self::Saved => "saved-messages-hit",
             Self::Pinned => "pinned-messages-hit",
+            Self::Media => "media-messages-hit",
         }
     }
 
@@ -67,6 +74,9 @@ impl MessagePanel {
             Self::Pinned => {
                 app.close_pinned_messages(cx);
             }
+            Self::Media => {
+                app.close_media_messages(cx);
+            }
         });
     }
 }
@@ -76,6 +86,7 @@ impl WhatsAppApp {
     pub(super) fn open_saved_messages(&mut self, cx: &mut Context<Self>) {
         self.close_global_search(cx);
         self.close_pinned_messages(cx);
+        self.close_media_messages(cx);
         self.saved_messages_panel = true;
         self.keyboard_owner = Some(KeyboardOwner::SavedMessages);
         cx.notify();
@@ -96,6 +107,7 @@ impl WhatsAppApp {
     pub(super) fn open_pinned_messages(&mut self, cx: &mut Context<Self>) {
         self.close_global_search(cx);
         self.close_saved_messages(cx);
+        self.close_media_messages(cx);
         self.pinned_messages_panel = true;
         self.keyboard_owner = Some(KeyboardOwner::PinnedMessages);
         cx.notify();
@@ -106,6 +118,28 @@ impl WhatsAppApp {
             return false;
         }
         self.pinned_messages_panel = false;
+        self.keyboard_owner = None;
+        cx.notify();
+        true
+    }
+
+    /// Open the media jump list from Storage & media settings and ask the
+    /// store for the current rows.
+    pub(crate) fn open_media_messages(&mut self, cx: &mut Context<Self>) {
+        self.close_global_search(cx);
+        self.close_saved_messages(cx);
+        self.close_pinned_messages(cx);
+        self.media_messages_panel = true;
+        self.keyboard_owner = Some(KeyboardOwner::MediaMessages);
+        cx.notify();
+        self.request_media(cx);
+    }
+
+    pub(super) fn close_media_messages(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.media_messages_panel {
+            return false;
+        }
+        self.media_messages_panel = false;
         self.keyboard_owner = None;
         cx.notify();
         true
@@ -150,6 +184,45 @@ impl WhatsAppApp {
         .detach();
     }
 
+    /// The media listing is a local read too: the rows arrive separately as
+    /// `FromDaemon::MediaResults`, like every other jump list.
+    fn request_media(&mut self, cx: &mut Context<Self>) {
+        let Some(waiting) = self
+            .client
+            .as_ref()
+            .map(|client| client.list_media_messages(LIST_LIMIT))
+        else {
+            self.notify_user(
+                what_went_wrong(
+                    crate::tr!(CouldNotLoadMediaMessages),
+                    &super::Failure::worth_retrying(crate::tr!(DaemonDisconnectedBeforeAnswer)),
+                ),
+                super::notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        cx.spawn(async move |entity, cx| {
+            let failure = match waiting.await {
+                Ok(Ok(())) => None,
+                Ok(Err(failure)) => Some(failure),
+                Err(_) => Some(super::Failure::worth_retrying(crate::tr!(
+                    DaemonDisconnectedBeforeAnswer
+                ))),
+            };
+            let _ = entity.update(cx, |app, cx| {
+                if let Some(failure) = failure {
+                    app.notify_user(
+                        what_went_wrong(crate::tr!(CouldNotLoadMediaMessages), &failure),
+                        super::notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
     fn rows_for_hits<'a>(
         &self,
         hits: impl IntoIterator<Item = &'a MessageSearchHit>,
@@ -173,6 +246,11 @@ impl WhatsAppApp {
     /// Rows for the saved panel, from the latest store-wide listing.
     pub(super) fn saved_rows(&self) -> Vec<search::SearchResultRow> {
         self.rows_for_hits(self.saved_messages.iter())
+    }
+
+    /// Rows for the media jump list, from the latest store-wide listing.
+    pub(super) fn media_rows(&self) -> Vec<search::SearchResultRow> {
+        self.rows_for_hits(self.media_messages.iter())
     }
 
     /// Rows for the pinned panel, newest first. Only chats and messages this
@@ -287,7 +365,8 @@ mod tests {
     use super::*;
     use crate::app::body::tests::connected_app_fixture;
     use chrono::TimeZone as _;
-    use oxidezap_core::ChatMessage;
+    use oxidezap_core::{Chat, ChatMessage};
+    use std::sync::Arc;
 
     const CHAT: &str = "peer@example.invalid";
 
@@ -393,6 +472,70 @@ mod tests {
                     .map(|(jid, id)| (jid.as_str(), id.as_str())),
                 Some((CHAT, "PINNED-1"))
             );
+        });
+    }
+
+    /// The media jump list is another place to click through to a message.
+    /// The row is synthetic, and so is the address.
+    #[gpui::test]
+    fn media_panel_shows_rows_and_opens_the_hit(cx: &mut gpui::TestAppContext) {
+        const MEDIA_CHAT: &str = "155555500001@g.us";
+        let (mut cx, app) = connected_app_fixture(cx);
+        cx.update(|_window, cx| {
+            app.update(cx, |app, cx| {
+                app.chats.push(Arc::new(Chat::new(MEDIA_CHAT.into())));
+                let mut row = ChatMessage::new_incoming(
+                    "SYNTHETIC-MEDIA-1".into(),
+                    MEDIA_CHAT.into(),
+                    "[image]".into(),
+                );
+                row.timestamp = chrono::Utc.timestamp_millis_opt(1_700_000_000_000).unwrap();
+                assert!(app.add_message_to_chat(MEDIA_CHAT, row, cx));
+                app.adopt_media_results(
+                    vec![MessageSearchHit {
+                        chat_jid: MEDIA_CHAT.into(),
+                        message_id: "SYNTHETIC-MEDIA-1".into(),
+                        snippet: "[image]".into(),
+                        sender_jid: None,
+                        timestamp_ms: 1_700_000_000_000,
+                        has_media: true,
+                    }],
+                    cx,
+                );
+                app.open_media_messages(cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        assert!(cx.debug_bounds("media-messages-panel").is_some());
+        let row = cx
+            .debug_bounds("media-messages-hit")
+            .expect("a media row is drawn");
+        cx.read(|cx| {
+            let app = app.read(cx);
+            assert!(app.media_messages_panel);
+            assert!(!app.saved_messages_panel);
+            assert!(!app.pinned_messages_panel);
+            assert_eq!(app.keyboard_owner, Some(KeyboardOwner::MediaMessages));
+            assert_eq!(app.media_rows().len(), 1);
+            assert_eq!(app.media_rows()[0].message_id, "SYNTHETIC-MEDIA-1");
+        });
+
+        cx.simulate_click(row.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.read(|cx| {
+            let app = app.read(cx);
+            assert!(!app.media_messages_panel);
+            assert_ne!(app.keyboard_owner, Some(KeyboardOwner::MediaMessages));
+            assert_eq!(
+                app.focused_message
+                    .as_ref()
+                    .map(|(jid, id)| (jid.as_str(), id.as_str())),
+                Some((MEDIA_CHAT, "SYNTHETIC-MEDIA-1"))
+            );
+            assert_eq!(app.selected_chat.as_deref(), Some(MEDIA_CHAT));
         });
     }
 }

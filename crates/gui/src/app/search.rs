@@ -723,6 +723,7 @@ impl WhatsAppApp {
         self.close_global_search(cx);
         self.close_saved_messages(cx);
         self.close_pinned_messages(cx);
+        self.close_media_messages(cx);
         self.focused_message = Some((chat_jid.to_string(), message_id.to_string()));
         self.select_chat(chat_jid.to_string(), ChatOpen::ToPreview, window, cx);
         // A hit outside the loaded page has no row to outline. The chat is
