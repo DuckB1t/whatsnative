@@ -1313,6 +1313,8 @@ impl WhatsAppApp {
         match &wanted {
             KeyboardOwner::RingingCall(_) => window.focus(&self.call_focus, cx),
             KeyboardOwner::GlobalSearch => window.focus(&self.global_search_focus, cx),
+            KeyboardOwner::SavedMessages => window.focus(&self.saved_messages_focus, cx),
+            KeyboardOwner::PinnedMessages => window.focus(&self.pinned_messages_focus, cx),
             KeyboardOwner::MessageDelete => window.focus(&self.message_delete_focus, cx),
             KeyboardOwner::ForwardPicker => window.focus(&self.forward_picker_focus, cx),
             KeyboardOwner::MessageEdit => {
@@ -1450,6 +1452,8 @@ fn keyboard_owner_for(
     match ringing_call.filter(|_| surfaces.call_card) {
         Some(call_id) => KeyboardOwner::RingingCall(call_id),
         None if surfaces.global_search => KeyboardOwner::GlobalSearch,
+        None if surfaces.saved_messages => KeyboardOwner::SavedMessages,
+        None if surfaces.pinned_messages => KeyboardOwner::PinnedMessages,
         None if surfaces.forward_picker => KeyboardOwner::ForwardPicker,
         None if surfaces.message_delete => KeyboardOwner::MessageDelete,
         None if surfaces.message_edit => KeyboardOwner::MessageEdit,
@@ -1532,6 +1536,8 @@ mod keyboard_owner_tests {
         message_delete: false,
         forward_picker: false,
         global_search: false,
+        saved_messages: false,
+        pinned_messages: false,
         call_card: false,
     };
 
@@ -1558,6 +1564,8 @@ mod keyboard_owner_tests {
             message_delete: false,
             forward_picker: false,
             global_search: false,
+            saved_messages: false,
+            pinned_messages: false,
             call_card: true,
         };
         assert_eq!(

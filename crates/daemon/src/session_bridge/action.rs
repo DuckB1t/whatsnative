@@ -45,12 +45,30 @@ pub enum Action {
         starred: bool,
         answer_to: Outbox,
     },
+    /// Pin or unpin a message, answered by `PinChanged` or a correlated error.
+    /// A network mutation like a star: the event has no id, so the request's
+    /// ack or refusal is the only thing that can reach the window that asked.
+    SetMessagePinned {
+        id: RequestId,
+        chat_jid: String,
+        message_id: String,
+        pinned: bool,
+        answer_to: Outbox,
+    },
     /// Full-text search, answered with `SearchResults` on the asking outbox.
     SearchMessages {
         id: RequestId,
         query: String,
         chat_jid: Option<String>,
         has_media: bool,
+        limit: usize,
+        answer_to: Outbox,
+    },
+    /// Starred messages across every chat, answered with `StarredResults` on
+    /// the asking outbox. A local store read like a search, with the same
+    /// "signal the rows, ack the request" shape.
+    ListStarredMessages {
+        id: RequestId,
         limit: usize,
         answer_to: Outbox,
     },
@@ -380,6 +398,7 @@ impl Action {
                     | Self::LoadMessages { .. }
                     | Self::LoadChats { .. }
                     | Self::SearchMessages { .. }
+                    | Self::ListStarredMessages { .. }
                     | Self::RefreshAvatars
                     | Self::Download { .. }
                     | Self::GroupMembers { .. }
@@ -491,6 +510,7 @@ fn wire_needs_network(request: &oxidezap_wire::request::ClientRequest) -> bool {
         | R::RevokeMessage { .. }
         | R::ForwardMessage { .. }
         | R::SetStarred { .. }
+        | R::SetMessagePinned { .. }
         | R::SendText { .. }
         | R::SendMedia { .. }
         | R::SendAudio { .. }

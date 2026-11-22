@@ -279,6 +279,42 @@ impl WhatsAppClient {
         })
     }
 
+    /// Starred messages across every chat as search-shaped hits.
+    ///
+    /// The starred listing and a search answer are the same kind of "here are
+    /// rows to jump to" result, so this reuses the hit projection and snippet
+    /// rather than growing a second shape. The store bounds and orders the
+    /// rows; the client only clamps again for safety.
+    pub fn list_starred_hits(&self, limit: i64) -> Task<Result<Vec<MessageSearchHit>, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let bound = limit.clamp(1, 100);
+            let rows = live
+                .chat_store
+                .starred_messages(bound)
+                .await
+                .map_err(|e| format!("database query failed: {e}"))?;
+            let results = rows
+                .into_iter()
+                .map(|stored| {
+                    let snippet = search_snippet(&stored);
+                    MessageSearchHit {
+                        chat_jid: stored.chat_jid.to_string(),
+                        message_id: stored.id,
+                        snippet,
+                        sender_jid: Some(stored.sender_jid.to_string()),
+                        timestamp_ms: stored.timestamp.timestamp_millis(),
+                        has_media: stored.kind.has_media(),
+                    }
+                })
+                .collect();
+            Ok(results)
+        })
+    }
+
     /// Fetch a single message by ID.
     pub fn get_message(
         &self,

@@ -878,6 +878,28 @@ fn execute_command(
                 });
                 Ok(())
             }
+            Some(args::MessagesSubcommand::Pin(s)) => {
+                client.request(ClientRequest::SetMessagePinned {
+                    chat_jid: s.chat,
+                    message_id: s.id,
+                    pinned: true,
+                })?;
+                print_action(output_mode, "message_pinned", || {
+                    println!("Message pinned for the longest available duration.");
+                });
+                Ok(())
+            }
+            Some(args::MessagesSubcommand::Unpin(s)) => {
+                client.request(ClientRequest::SetMessagePinned {
+                    chat_jid: s.chat,
+                    message_id: s.id,
+                    pinned: false,
+                })?;
+                print_action(output_mode, "message_unpinned", || {
+                    println!("Message unpinned.");
+                });
+                Ok(())
+            }
             Some(args::MessagesSubcommand::Edit(e)) => {
                 client.request(ClientRequest::EditMessage {
                     chat_jid: e.chat,

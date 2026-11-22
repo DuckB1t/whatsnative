@@ -557,6 +557,25 @@ impl<'a> Frames<'a> {
                     starred,
                 })?;
             }
+            // The pin counterpart of `StarChanged`: a mutation this account
+            // made, with its own correlated ack and this account-wide event.
+            DaemonMessage::PinChanged {
+                chat_jid,
+                message_id,
+                pinned,
+            } => {
+                self.publish(FromDaemon::PinChanged {
+                    chat_jid,
+                    message_id,
+                    pinned,
+                })?;
+            }
+            // A starred listing answers a local read, broadcast without a
+            // request id just like a search answer. The window keeps the rows
+            // while its saved panel is open.
+            DaemonMessage::StarredResults { results } => {
+                self.publish(FromDaemon::StarredResults { results })?;
+            }
             // Chat summaries, which this front end derives from the session
             // stream instead. The version still advances: it describes how far
             // the *state* has been carried, not how much of it this client
@@ -1287,6 +1306,43 @@ mod tests {
         frames.finish();
         assert!(lost_rx.try_recv().unwrap().is_err());
         assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn pin_changes_and_starred_listings_are_published_not_dropped() {
+        let (sink, mut events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+
+        let _ = frames.apply(DaemonMessage::PinChanged {
+            chat_jid: "peer@s.whatsapp.net".into(),
+            message_id: "PIN-1".into(),
+            pinned: true,
+        });
+        let _ = frames.apply(DaemonMessage::StarredResults {
+            results: vec![oxidezap_ipc::MessageSearchHit {
+                chat_jid: "peer@s.whatsapp.net".into(),
+                message_id: "STAR-1".into(),
+                snippet: "a synthetic saved message".into(),
+                sender_jid: None,
+                timestamp_ms: 1_700_000_000_000,
+                has_media: false,
+            }],
+        });
+
+        assert!(matches!(
+            events.try_recv(),
+            Ok(FromDaemon::PinChanged {
+                chat_jid,
+                message_id,
+                pinned: true,
+            }) if chat_jid == "peer@s.whatsapp.net" && message_id == "PIN-1"
+        ));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(FromDaemon::StarredResults { results }) if results.len() == 1 && results[0].message_id == "STAR-1"
+        ));
     }
 
     #[cfg(not(target_family = "wasm"))]

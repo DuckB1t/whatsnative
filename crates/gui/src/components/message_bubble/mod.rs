@@ -38,7 +38,8 @@ use reactions::{render_hover_actions, render_reaction_picker, render_reactions};
 
 use crate::app::{
     BubbleIds, CopyMessage, DeleteSentMessage, EditMessage, ForwardMessage, OpenMessageLink,
-    ReactToMessage, ReplyToMessage, RetryMessage, ToggleStarred, WhatsAppApp, can_delete_sent,
+    PinMessage, ReactToMessage, ReplyToMessage, RetryMessage, ToggleStarred, WhatsAppApp,
+    can_delete_sent,
 };
 use crate::components::parts;
 use crate::components::{BubbleText, bubble_status_ticks, render_rich_text};
@@ -101,6 +102,9 @@ pub struct BubbleProps {
     /// Whether this message is starred in this front end. `ChatMessage` has no
     /// such field, so the account-wide flag travels in beside the row.
     pub starred: bool,
+    /// Whether this message is pinned in this front end. Like the star, the
+    /// account-wide flag travels in beside the row rather than in `ChatMessage`.
+    pub pinned: bool,
     /// Whether this row is the one a global-search hit asked to see.
     pub focused: bool,
     /// Whether its downloaded audio is being decoded or retimed for playback.
@@ -194,6 +198,7 @@ pub fn render_message_bubble(
     let menu_delete_for_me = can_delete_sent(&message, false, now_ms);
     let menu_delete_for_everyone = can_delete_sent(&message, true, now_ms);
     let menu_starred = props.starred;
+    let menu_pinned = props.pinned;
     // A refcount, not a rescan: the row's text already parsed these when the
     // timeline was built, and the targets were shared then.
     let menu_links = content.link_targets().clone();
@@ -407,6 +412,11 @@ pub fn render_message_bubble(
                                         .with_size(metrics.icon_small())
                                         .text_color(cx.theme().warning)
                                 }))
+                                .children(props.pinned.then(|| {
+                                    Icon::new(gpui_kit_assets::IconName::Pin)
+                                        .with_size(metrics.icon_small())
+                                        .text_color(cx.theme().primary)
+                                }))
                                 .children(message.business.as_ref().map(|business| {
                                     business::render_footer(
                                         business,
@@ -552,6 +562,18 @@ pub fn render_message_bubble(
                     chat_jid: menu_jid.clone(),
                     id: menu_id.clone().into(),
                     starred: !menu_starred,
+                }),
+            );
+            menu = menu.menu(
+                if menu_pinned {
+                    crate::tr!(UnpinMessage)
+                } else {
+                    crate::tr!(PinMessage)
+                },
+                Box::new(PinMessage {
+                    chat_jid: menu_jid.clone(),
+                    id: menu_id.clone().into(),
+                    pinned: !menu_pinned,
                 }),
             );
             let menu = if menu_text.is_empty() {

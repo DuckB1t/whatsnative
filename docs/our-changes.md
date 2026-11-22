@@ -425,6 +425,43 @@ browser tests (16 and 35 passed), and the nightly wasm type-check. Synthetic
 fixtures only; no message, mention, star, forward or search ran against the
 paired account.
 
+### 15. Native saved messages and message pins (protocol 53)
+
+**Problem.** A starred message could only be listed from a terminal, and a pin
+did not exist in this tree at all. The library offers no "pin forever", so the
+Web feature of that name cannot be reproduced exactly; the longest duration it
+exposes is 30 days.
+
+**Change.**
+- IPC moves to version **53** with `SetMessagePinned` (a correlated mutation),
+  `ListStarredMessages` (a local read) and the account-wide `PinChanged` /
+  `StarredResults` events. `StarredResults` reuses the search-hit shape: a
+  starred list and a search answer are the same "rows to jump to" result.
+- A chat-store migration adds `messages.pinned` with a false default, plus
+  bounded `pinned_messages` / `set_pinned` queries. The session mutation mirrors
+  `set_starred`'s group addressing, calls the library's `pin_message` /
+  `unpin_message` with `PinDuration::Days30`, and commits the local flag only
+  after the network accepts it — a refused pin leaves no stale mark.
+- The daemon routes both frames out of band, signals `PinChanged` only on a
+  successful mutation, and answers the listing with `StarredResults` plus the
+  request's own ack. `oxidezap-wire` gains `SetMessagePinned` without depending
+  on `core`; CLI gains `messages pin|unpin`. Protocol-53 parity, IPC serde and
+  CLI-surface tests are synthetic.
+- The GUI adds a saved panel on `secondary-shift-s`, a pinned panel on
+  `secondary-shift-p`, and Pin/Unpin plus a pinned marker on the bubble. Both
+  panels reuse the global search's hit rows and close when a hit is opened.
+  The saved panel is filled by a store-wide listing with no request id, so the
+  newest answer replaces its rows. There is no `ListPinnedMessages` IPC: the
+  pinned panel is derived from `PinChanged` events this window has seen and
+  the messages it has loaded, so older pins or unloaded rows are absent.
+  EN/PT catalog entries carry the 30-day wording — nothing promises "forever".
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2641 passed, 44 ignored, 0 failed). Web gates green: shared-view ban, wasm
+daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
+session type-checks. CLI release 1,682,904 B (<2 MiB). Synthetic fixtures only;
+no pin, star or listing ran against the paired account.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

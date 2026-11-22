@@ -721,6 +721,8 @@ impl WhatsAppApp {
         cx: &mut Context<Self>,
     ) {
         self.close_global_search(cx);
+        self.close_saved_messages(cx);
+        self.close_pinned_messages(cx);
         self.focused_message = Some((chat_jid.to_string(), message_id.to_string()));
         self.select_chat(chat_jid.to_string(), ChatOpen::ToPreview, window, cx);
         // A hit outside the loaded page has no row to outline. The chat is
@@ -731,29 +733,19 @@ impl WhatsAppApp {
     }
 }
 
-/// The floating, account-wide search. Kept out of the sidebar and the
-/// conversation header: both of those search a horizon this one does not.
-pub(super) fn render_global_search(
-    input: &Entity<InputState>,
-    focus: &FocusHandle,
-    global: &GlobalSearch,
+/// The rows a hit lists in the global search and in the saved/pinned panels.
+///
+/// Identical because the underlying rows are identical: a `MessageSearchHit`
+/// is a place to jump to, whatever question produced it. The prefix keeps the
+/// element ids and debug selectors of simultaneous surfaces apart.
+pub(super) fn render_hit_rows(
     rows: &[SearchResultRow],
     app: &Entity<WhatsAppApp>,
+    id_prefix: &'static str,
     cx: &App,
-) -> impl IntoElement + use<> {
+) -> Vec<gpui::AnyElement> {
     let metrics = cx.product().metrics;
-    let status = if global.query.is_empty() {
-        crate::tr!(GlobalSearchPlaceholder).to_string()
-    } else if global.pending {
-        crate::tr!(GlobalSearchSearching).to_string()
-    } else if rows.is_empty() {
-        crate::tr!(GlobalSearchNoResults).to_string()
-    } else {
-        format!("{} · {}", crate::tr!(GlobalSearchResults), rows.len())
-    };
-    let close_app = app.clone();
-    let result_rows: Vec<_> = rows
-        .iter()
+    rows.iter()
         .map(|row| {
             let hit_app = app.clone();
             let chat_jid = row.chat_jid.clone();
@@ -766,8 +758,8 @@ pub(super) fn render_global_search(
                 .unwrap_or_default();
             let has_media = row.has_media;
             div()
-                .id(format!("global-search-hit-{}-{message_id}", row.chat_jid))
-                .debug_selector(|| "global-search-hit".into())
+                .id(format!("{id_prefix}-{}-{message_id}", row.chat_jid))
+                .debug_selector(|| id_prefix.into())
                 .w_full()
                 .cursor_pointer()
                 .rounded(metrics.radius_md())
@@ -826,8 +818,33 @@ pub(super) fn render_global_search(
                                 }),
                         ),
                 )
+                .into_any_element()
         })
-        .collect();
+        .collect()
+}
+
+/// The floating, account-wide search. Kept out of the sidebar and the
+/// conversation header: both of those search a horizon this one does not.
+pub(super) fn render_global_search(
+    input: &Entity<InputState>,
+    focus: &FocusHandle,
+    global: &GlobalSearch,
+    rows: &[SearchResultRow],
+    app: &Entity<WhatsAppApp>,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let metrics = cx.product().metrics;
+    let status = if global.query.is_empty() {
+        crate::tr!(GlobalSearchPlaceholder).to_string()
+    } else if global.pending {
+        crate::tr!(GlobalSearchSearching).to_string()
+    } else if rows.is_empty() {
+        crate::tr!(GlobalSearchNoResults).to_string()
+    } else {
+        format!("{} · {}", crate::tr!(GlobalSearchResults), rows.len())
+    };
+    let close_app = app.clone();
+    let result_rows = render_hit_rows(rows, app, "global-search-hit", cx);
     div()
         .id("global-search-overlay")
         .debug_selector(|| "global-search-overlay".into())

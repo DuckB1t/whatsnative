@@ -337,6 +337,19 @@
   than to anything here; the alternative — not dropping — is the one thing
   this path exists to do.
 
+- **Saved messages and pins now have a native home, with two honest horizons.**
+  Protocol 53 carries `SetMessagePinned`, a bounded account-wide
+  `StarredResults` answer, and the `PinChanged` event: the window has a saved
+  panel on `secondary-shift-s`, a pinned panel on `secondary-shift-p`, and
+  Pin/Unpin in the bubble menu. The library exposes pin durations of 24 hours,
+  7 days and 30 days only — the mutation always uses the 30-day maximum — so
+  the Web "pin forever" feature cannot be claimed. The saved panel is filled
+  by a store-wide listing with no request id, so the newest answer replaces
+  the rows. There is no `ListPinnedMessages` request: the pinned panel is
+  derived from `PinChanged` events this window has seen plus messages it has
+  loaded, so pins made before the window attached, or rows outside the loaded
+  page, do not appear there. Both panels reuse the global search's hit rows,
+  and neither has been live-validated.
 - **Four everyday message actions are now in the native window, with a few
   honest horizons.** Protocol 52 carries forward, star/unstar, `@mention` JIDs
   on `SendText`, and account-wide FTS5 search. The forward picker lists only

@@ -1787,6 +1787,7 @@ mod channel_tests {
             newsletter_server_id: None,
             status: oxidezap_chat_store::MessageStatus::Delivered,
             starred: false,
+            pinned: false,
             edited_at: None,
             revoked: false,
             local_revoke_placeholder: false,

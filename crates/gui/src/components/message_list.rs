@@ -324,6 +324,7 @@ fn render_row(
                 saved_document_path: app.saved_document_path(message_id),
                 reaction_picker_open: app.reaction_picker_for() == Some(message_id.as_str()),
                 starred: app.is_starred(chat_jid, message_id),
+                pinned: app.is_pinned(chat_jid, message_id),
                 focused: app.is_focused_message(chat_jid, message_id),
                 is_preparing: app.is_audio_preparing(message_id),
             };

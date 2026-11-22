@@ -287,6 +287,8 @@ pub(crate) struct MessageRow {
     // Appended by the migration, so it last in the table's column order.
     // Signed storage of a u64; cast back rather than narrowing on read.
     newsletter_server_id: Option<i64>,
+    // Appended by a later migration, so after the server id in column order.
+    pinned: bool,
 }
 
 /// Fold an author-equivalent legacy copy for a read without hiding a
@@ -540,6 +542,7 @@ impl From<MessageRow> for StoredMessage {
             newsletter_server_id: row.newsletter_server_id.map(|id| id as u64),
             status: MessageStatus::from_raw(row.status),
             starred: row.starred,
+            pinned: row.pinned,
             edited_at: row.edited_at_ms.and_then(ms_to_utc),
             revoked: row.revoked,
             local_revoke_placeholder: row.local_revoke_placeholder,
@@ -2449,6 +2452,28 @@ impl ChatStore {
         Ok(rows)
     }
 
+    /// Pinned messages across every chat, newest first.
+    ///
+    /// Mirrors [`Self::starred_messages`]: the local flag is the same kind of
+    /// durable row state, bounded and ordered the same way.
+    pub async fn pinned_messages(&self, limit: i64) -> Result<Vec<StoredMessage>> {
+        use schema::messages::dsl;
+        let device_id = self.device_id();
+        let rows: Vec<StoredMessage> = self
+            .db()
+            .read(move |conn| {
+                let rows: Vec<MessageRow> = dsl::messages
+                    .filter(dsl::device_id.eq(device_id).and(dsl::pinned.eq(true)))
+                    .order((dsl::timestamp_ms.desc(), dsl::id.desc()))
+                    .limit(limit.max(0))
+                    .load(conn)
+                    .map_err(db_err)?;
+                finalize_messages(conn, device_id, rows)
+            })
+            .await?;
+        Ok(rows)
+    }
+
     /// Poll creation messages, optionally scoped to one chat, newest first.
     ///
     /// The rows carry the creation proto votes were cast against; tallies
@@ -2565,6 +2590,37 @@ impl ChatStore {
                     ),
                 )
                 .set(dsl::starred.eq(starred))
+                .execute(conn)
+                .map_err(db_err)?;
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Set or clear the durable pinned flag on one stored message.
+    ///
+    /// The network mutation belongs to the session; this is the local half
+    /// that records it after the server accepts it. A message the store does
+    /// not hold is a no-op, as it is for [`Self::set_starred`].
+    pub async fn set_pinned(&self, chat: &Jid, msg_id: &str, pinned: bool) -> Result<()> {
+        use schema::messages::dsl;
+        let device_id = self.device_id();
+        let chat = chat.to_string();
+        let msg_id = msg_id.to_string();
+        self.db()
+            .run(move |conn| {
+                let keys =
+                    crate::lid::chat_key_candidates(conn, device_id, &chat).map_err(db_err)?;
+                diesel::update(
+                    dsl::messages.filter(
+                        dsl::device_id
+                            .eq(device_id)
+                            .and(dsl::chat_jid.eq_any(keys))
+                            .and(dsl::msg_id.eq(&msg_id)),
+                    ),
+                )
+                .set(dsl::pinned.eq(pinned))
                 .execute(conn)
                 .map_err(db_err)?;
                 Ok(())

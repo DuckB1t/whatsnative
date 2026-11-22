@@ -405,6 +405,59 @@ impl WhatsAppClient {
         })
     }
 
+    /// Pin or unpin a stored message.
+    ///
+    /// Addressing is identical to [`Self::set_starred`]: a group message by
+    /// somebody else must name its author or the server refuses the key. The
+    /// library offers 24 hours, 7 days and 30 days and no "forever", so a pin
+    /// uses the longest duration it has. The local flag is committed only after
+    /// the network mutation has been accepted, just as for a star.
+    pub fn set_message_pinned(
+        &self,
+        chat_jid: String,
+        message_id: String,
+        pinned: bool,
+    ) -> Task<Result<(), String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let chat: Jid = chat_jid
+                .parse()
+                .map_err(|_| "not a chat address".to_string())?;
+            let id = whatsapp_rust::MessageId::new(&message_id).map_err(|e| e.to_string())?;
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let stored = live
+                .chat_store
+                .message(&chat, &message_id)
+                .await
+                .map_err(|e| format!("could not read the message: {e}"))?
+                .ok_or_else(|| "message not found".to_string())?;
+            let sender = if super::paging::participant_keyed_chat(&chat) && !stored.from_me {
+                Some(&stored.sender_jid)
+            } else {
+                None
+            };
+            let target = whatsapp_rust::MessageRef::new(&chat, id, sender, stored.from_me)
+                .map_err(|e| e.to_string())?;
+            // Unlike a star, a pin is a send-like operation on the client, not
+            // an app-state write on `ChatActions`.
+            if pinned {
+                live.client
+                    .pin_message(&target, whatsapp_rust::PinDuration::Days30)
+                    .await
+            } else {
+                live.client.unpin_message(&target).await
+            }
+            .map_err(|e| e.to_string())?;
+            live.chat_store
+                .set_pinned(&chat, &message_id, pinned)
+                .await
+                .map_err(|e| format!("the pin was sent but could not be saved: {e}"))?;
+            Ok(())
+        })
+    }
+
     /// Forward a stored message to another chat.
     ///
     /// The stored proto is forwarded, not rebuilt: media already on the CDN

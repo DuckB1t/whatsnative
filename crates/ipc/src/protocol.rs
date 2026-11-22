@@ -514,6 +514,23 @@ pub enum DaemonMessage {
         message_id: String,
         starred: bool,
     },
+    /// A message's pinned flag changed, whether the window that asked is still
+    /// attached or not. Like [`DaemonMessage::StarChanged`] this is account
+    /// state published to every front end with no id to own: the mutation's own
+    /// ack or refusal is correlated to the request that made it.
+    PinChanged {
+        chat_jid: String,
+        message_id: String,
+        pinned: bool,
+    },
+    /// Starred messages across every chat, answering
+    /// [`ClientRequest::ListStarredMessages`].
+    ///
+    /// Reuses the search-hit shape and serde spelling: a starred list and a
+    /// search answer are the same kind of "here are rows to jump to" result.
+    /// Like [`DaemonMessage::SearchResults`] it is signalled account-wide and
+    /// the request itself gets an ordinary ack.
+    StarredResults { results: Vec<MessageSearchHit> },
     /// One page of the chat list, answering [`ClientRequest::LoadChats`].
     Chats {
         id: RequestId,
@@ -759,6 +776,7 @@ impl ClientRequest {
                 | Self::Snapshot
                 | Self::PreviewCallLink(_)
                 | Self::SearchMessages { .. }
+                | Self::ListStarredMessages { .. }
                 | Self::LoadMessages(_)
                 | Self::LoadChats(_)
                 | Self::GroupMembers(_)
@@ -775,7 +793,7 @@ fn owns_a_window() -> bool {
     true
 }
 
-/// The default page size for a protocol-52 message search.
+/// The default page size for a message search or starred-message listing.
 fn default_search_limit() -> usize {
     50
 }
@@ -1238,6 +1256,26 @@ pub enum ClientRequest {
         chat_jid: String,
         message_id: String,
         starred: bool,
+    },
+    /// Pin or unpin a stored message.
+    ///
+    /// A network mutation like [`ClientRequest::SetStarred`]: it gets an ack
+    /// or a correlated error, and success also signals
+    /// [`DaemonMessage::PinChanged`] to every front end. The library's longest
+    /// pin duration is 30 days — there is no "forever" duration — so a pin is
+    /// never claimed to be permanent.
+    SetMessagePinned {
+        chat_jid: String,
+        message_id: String,
+        pinned: bool,
+    },
+    /// List starred messages across every chat, newest first.
+    ///
+    /// A local read like [`ClientRequest::SearchMessages`]: the store owns the
+    /// rows, so the answer is [`DaemonMessage::StarredResults`].
+    ListStarredMessages {
+        #[serde(default = "default_search_limit")]
+        limit: usize,
     },
     /// Full-text search over stored messages.
     ///
@@ -3345,6 +3383,82 @@ mod audio_played_tests {
                 starred: true,
             }
             .is_read()
+        );
+    }
+
+    /// Protocol 53's pin and starred-list frames are one more set of bytes the
+    /// daemon and every front end agree on. Literal JSON, so a field renamed or
+    /// quietly made optional is a visible change. Every address and id is
+    /// synthetic. `ListStarredMessages` shares the search limit's default.
+    #[test]
+    fn protocol_53_pin_and_starred_frames_put_the_same_bytes_on_the_wire() {
+        let requests = [
+            (
+                ClientRequest::SetMessagePinned {
+                    chat_jid: "155555500001@g.us".into(),
+                    message_id: "SYNTHETIC-1".into(),
+                    pinned: true,
+                },
+                r#"{"request":"set_message_pinned","chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-1","pinned":true}"#,
+            ),
+            (
+                ClientRequest::ListStarredMessages { limit: 50 },
+                r#"{"request":"list_starred_messages","limit":50}"#,
+            ),
+        ];
+        for (frame, expected) in requests {
+            let line = serde_json::to_string(&frame).expect("a request serializes");
+            assert_eq!(line, expected);
+            assert_eq!(
+                serde_json::from_str::<ClientRequest>(&line).expect("a request parses"),
+                frame
+            );
+        }
+
+        let answers = [
+            (
+                DaemonMessage::PinChanged {
+                    chat_jid: "155555500001@g.us".into(),
+                    message_id: "SYNTHETIC-1".into(),
+                    pinned: true,
+                },
+                r#"{"type":"pin_changed","chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-1","pinned":true}"#,
+            ),
+            (
+                DaemonMessage::StarredResults {
+                    results: vec![MessageSearchHit {
+                        chat_jid: "155555500001@g.us".into(),
+                        message_id: "SYNTHETIC-2".into(),
+                        snippet: "a starred line".into(),
+                        sender_jid: None,
+                        timestamp_ms: 1_700_000_000_000,
+                        has_media: false,
+                    }],
+                },
+                r#"{"type":"starred_results","results":[{"chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-2","snippet":"a starred line","timestamp_ms":1700000000000,"has_media":false}]}"#,
+            ),
+        ];
+        for (frame, expected) in answers {
+            let line = serde_json::to_string(&frame).expect("an answer serializes");
+            assert_eq!(line, expected);
+            assert_eq!(
+                serde_json::from_str::<DaemonMessage>(&line).expect("an answer parses"),
+                frame
+            );
+        }
+
+        assert!(
+            ClientRequest::ListStarredMessages { limit: 50 }.is_read(),
+            "a starred listing is a local read"
+        );
+        assert!(
+            !ClientRequest::SetMessagePinned {
+                chat_jid: "155555500001@g.us".into(),
+                message_id: "SYNTHETIC-1".into(),
+                pinned: true,
+            }
+            .is_read(),
+            "a pin is a correlated mutation"
         );
     }
 }

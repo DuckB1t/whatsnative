@@ -336,7 +336,15 @@ use std::path::PathBuf;
 /// so a window that offers any of them must not attach to one. Starring also
 /// publishes `DaemonMessage::StarChanged`, which a client must tolerate even
 /// when it never asks for the mutation itself.
-pub const PROTOCOL_VERSION: u32 = 52;
+///
+/// 53 adds message pinning and a starred-message listing. Pinning is a
+/// correlated mutation answered under its request id and published to every
+/// front end as `DaemonMessage::PinChanged`; the library's longest pin duration
+/// is 30 days, so this is not a "forever" pin. Listing starred messages is a
+/// local read answered with `DaemonMessage::StarredResults`, reusing the
+/// search-hit shape. An older daemon knows neither frame, so a window that
+/// offers either must not attach to one.
+pub const PROTOCOL_VERSION: u32 = 53;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

@@ -325,6 +325,9 @@ pub struct StoredMessage {
     pub newsletter_server_id: Option<u64>,
     pub status: MessageStatus,
     pub starred: bool,
+    /// Whether this message is pinned locally. The session commits this only
+    /// after the upstream pin/unpin mutation has been accepted.
+    pub pinned: bool,
     pub edited_at: Option<DateTime<Utc>>,
     pub revoked: bool,
     /// A locally created tombstone that never contributed to unread counts.

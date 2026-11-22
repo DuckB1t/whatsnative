@@ -152,6 +152,46 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        ClientRequest::SetMessagePinned {
+            chat_jid,
+            message_id,
+            pinned,
+        } => {
+            let id = match addressed(id, "a pin needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::SetMessagePinned {
+                    id,
+                    chat_jid,
+                    message_id,
+                    pinned,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::ListStarredMessages { limit } => {
+            let id = match addressed(id, "a starred listing needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::ListStarredMessages {
+                    id,
+                    limit,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::SearchMessages {
             query,
             chat_jid,
@@ -1253,6 +1293,7 @@ pub(super) async fn handle_wire_request(
         | WireRequest::RevokeMessage { .. }
         | WireRequest::ForwardMessage { .. }
         | WireRequest::SetStarred { .. }
+        | WireRequest::SetMessagePinned { .. }
         | WireRequest::SendPoll { .. }
         | WireRequest::VotePoll { .. }
         | WireRequest::ListPolls { .. }

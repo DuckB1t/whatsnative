@@ -853,6 +853,72 @@ impl Bridge {
                 });
                 None
             }
+            Action::SetMessagePinned {
+                id,
+                chat_jid,
+                message_id,
+                pinned,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.set_message_pinned(chat_jid.clone(), message_id.clone(), pinned);
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // Like a star: the mutation's answer is the correlated ack
+                    // or error, and `PinChanged` is the account-wide event that
+                    // repaints the row in every front end.
+                    let answer = mutation_answer(id, task.await);
+                    if answer.is_ok() {
+                        hub.signal(&DaemonMessage::PinChanged {
+                            chat_jid,
+                            message_id,
+                            pinned,
+                        });
+                    }
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::ListStarredMessages {
+                id,
+                limit,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.list_starred_hits(i64::try_from(limit).unwrap_or(50));
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // Rows name no request id, so they are an account-wide
+                    // signal like a search answer; the id gets its own ack.
+                    let answer = match task.await {
+                        Ok(Ok(results)) => {
+                            hub.signal(&DaemonMessage::StarredResults { results });
+                            Ok(DaemonMessage::Accepted { id: Some(id) })
+                        }
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(error) => Err(ProtocolError::NoSession {
+                            detail: format!(
+                                "the session stopped before the starred listing arrived: {error}"
+                            ),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::SearchMessages {
                 id,
                 query,
@@ -1397,6 +1463,24 @@ impl Bridge {
                         chat_jid: event_chat,
                         message_id: event_id,
                         starred,
+                    });
+                    DaemonResponse::Ack
+                });
+            }
+            WireRequest::SetMessagePinned {
+                chat_jid,
+                message_id,
+                pinned,
+            } => {
+                let event_chat = chat_jid.clone();
+                let event_id = message_id.clone();
+                let hub = Arc::clone(&self.hub);
+                let task = client.set_message_pinned(chat_jid, message_id, pinned);
+                run_wire(answer_to.clone(), id, reply, permit, task, move |()| {
+                    hub.signal(&DaemonMessage::PinChanged {
+                        chat_jid: event_chat,
+                        message_id: event_id,
+                        pinned,
                     });
                     DaemonResponse::Ack
                 });
@@ -2081,6 +2165,8 @@ impl Bridge {
             Action::Wire { .. }
             | Action::ForwardMessage { .. }
             | Action::SetStarred { .. }
+            | Action::SetMessagePinned { .. }
+            | Action::ListStarredMessages { .. }
             | Action::SearchMessages { .. }
             | Action::CreateEvent { .. }
             | Action::PreviewCallLink { .. }

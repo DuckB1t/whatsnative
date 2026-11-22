@@ -101,6 +101,17 @@ pub enum ClientRequest {
         message_id: String,
         starred: bool,
     },
+    /// Pin or unpin a stored message.
+    ///
+    /// Mirrors the legacy `ClientRequest::SetMessagePinned`; the daemon answers
+    /// with an ack on success and a correlated error when the mutation or its
+    /// local persistence fails. The library has no "forever" pin, so the
+    /// longest available duration is used.
+    SetMessagePinned {
+        chat_jid: String,
+        message_id: String,
+        pinned: bool,
+    },
 
     // --- Sends ---
     SendText {
@@ -487,6 +498,7 @@ impl ClientRequest {
             | Self::RevokeMessage { .. }
             | Self::ForwardMessage { .. }
             | Self::SetStarred { .. }
+            | Self::SetMessagePinned { .. }
             | Self::SendText { .. }
             | Self::SendMedia { .. }
             | Self::SendAudio { .. }
@@ -615,6 +627,11 @@ mod tests {
                 chat_jid: "x@s.whatsapp.net".into(),
                 message_id: "SYNTHETIC-1".into(),
                 starred: true,
+            },
+            R::SetMessagePinned {
+                chat_jid: "x@s.whatsapp.net".into(),
+                message_id: "SYNTHETIC-2".into(),
+                pinned: true,
             },
         ] {
             assert_eq!(request.access(), Access::Write, "{request:?}");

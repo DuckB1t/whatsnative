@@ -68,7 +68,10 @@ fn new_subcommands_exist() {
                 "show", "refresh", "alias", "tag", "untag", "blocked", "block", "unblock", "lookup",
             ],
         ),
-        ("messages", &["export", "purge", "star", "unstar"]),
+        (
+            "messages",
+            &["export", "purge", "star", "unstar", "pin", "unpin"],
+        ),
         ("poll", &["list", "show"]),
         ("media", &["backfill"]),
         ("chats", &["cleanup"]),
@@ -680,6 +683,27 @@ fn an_old_daemon_cannot_silently_ignore_local_account_selection() {
 #[test]
 fn message_star_commands_advertise_their_flags() {
     for command in ["star", "unstar"] {
+        let out = cli()
+            .args(["messages", command, "--help"])
+            .output()
+            .expect("run the cli");
+        assert!(out.status.success(), "no help for messages {command}");
+        let help = String::from_utf8_lossy(&out.stdout);
+        for flag in ["--chat", "--id"] {
+            assert!(
+                help.contains(flag),
+                "messages {command} is missing {flag}: {help}"
+            );
+        }
+    }
+}
+
+/// Protocol 53's pin mutations take the same addressing as a star: a chat and
+/// a message id, no duration flag, because the library only has one longest
+/// duration and the command promises to use it.
+#[test]
+fn message_pin_commands_advertise_their_flags() {
+    for command in ["pin", "unpin"] {
         let out = cli()
             .args(["messages", command, "--help"])
             .output()

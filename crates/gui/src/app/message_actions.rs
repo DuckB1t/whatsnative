@@ -109,6 +109,8 @@ impl WhatsAppApp {
             self.starred_messages.insert(key.clone());
         } else {
             self.starred_messages.remove(&key);
+            self.saved_messages
+                .retain(|hit| hit.chat_jid != chat_jid || hit.message_id != message_id);
         }
         self.invalidate_message_cache(&chat_jid, cx);
         cx.notify();
@@ -165,23 +167,143 @@ impl WhatsAppApp {
         cx: &mut Context<Self>,
     ) {
         let key = (chat_jid.to_string(), message_id.to_string());
-        let before = self.starred_messages.contains(&key);
-        if before == starred {
-            return;
-        }
+        let changed = self.starred_messages.contains(&key) != starred;
+        let rows_before = self.saved_messages.len();
         if starred {
             self.starred_messages.insert(key);
         } else {
             self.starred_messages.remove(&key);
+            // The listing can still hold a row even when this window never
+            // drew the star — a front end that opened after the star was set
+            // has the rows but no overlay bit to flip.
+            self.saved_messages
+                .retain(|hit| hit.chat_jid != chat_jid || hit.message_id != message_id);
         }
-        self.invalidate_message_cache(chat_jid, cx);
-        cx.notify();
+        if changed {
+            self.invalidate_message_cache(chat_jid, cx);
+        }
+        if changed || self.saved_messages.len() != rows_before {
+            cx.notify();
+        }
     }
 
     /// Whether a row should draw its star, asked while the timeline is built.
     pub(crate) fn is_starred(&self, chat_jid: &str, message_id: &str) -> bool {
         self.starred_messages
             .contains(&(chat_jid.to_string(), message_id.to_string()))
+    }
+
+    /// Mark a message optimistically and ask the account to pin it.
+    ///
+    /// The library's longest pin is 30 days, so the label and the request both
+    /// say "pin" rather than promising a permanent place. Like a star, the
+    /// flag is this window's overlay: a refusal takes it back, while the
+    /// account-wide `PinChanged` leaves the authoritative mark in place.
+    pub(super) fn toggle_pinned(
+        &mut self,
+        chat_jid: &str,
+        message_id: &str,
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let chat_jid = chat_jid.to_string();
+        let key = (chat_jid.clone(), message_id.to_string());
+        if pinned {
+            self.pinned_messages.insert(key.clone());
+        } else {
+            self.pinned_messages.remove(&key);
+        }
+        self.invalidate_message_cache(&chat_jid, cx);
+        cx.notify();
+        let Some(waiting) = self
+            .client
+            .as_ref()
+            .map(|client| client.set_message_pinned(&chat_jid, message_id, pinned))
+        else {
+            if pinned {
+                self.pinned_messages.remove(&key);
+            } else {
+                self.pinned_messages.insert(key);
+            }
+            self.invalidate_message_cache(&chat_jid, cx);
+            self.notify_user(
+                what_went_wrong(
+                    crate::tr!(CouldNotPinMessage),
+                    &Failure::worth_retrying(crate::tr!(DaemonDisconnectedBeforeAnswer)),
+                ),
+                notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        cx.spawn(async move |entity, cx| {
+            let failure = match waiting.await {
+                Ok(Ok(())) => None,
+                Ok(Err(failure)) => Some(failure),
+                Err(_) => Some(Failure::worth_retrying(crate::tr!(
+                    DaemonDisconnectedBeforeAnswer
+                ))),
+            };
+            let _ = entity.update(cx, |app, cx| {
+                if let Some(failure) = failure {
+                    if pinned {
+                        app.pinned_messages.remove(&key);
+                    } else {
+                        app.pinned_messages.insert(key);
+                    }
+                    app.invalidate_message_cache(&chat_jid, cx);
+                    app.notify_user(
+                        what_went_wrong(crate::tr!(CouldNotPinMessage), &failure),
+                        notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Apply a pin change this window did not necessarily ask for.
+    pub(super) fn adopt_pin_changed(
+        &mut self,
+        chat_jid: &str,
+        message_id: &str,
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (chat_jid.to_string(), message_id.to_string());
+        if self.pinned_messages.contains(&key) == pinned {
+            return;
+        }
+        if pinned {
+            self.pinned_messages.insert(key);
+        } else {
+            self.pinned_messages.remove(&key);
+        }
+        self.invalidate_message_cache(chat_jid, cx);
+        cx.notify();
+    }
+
+    /// Whether a row should draw its pin, asked while the timeline is built.
+    pub(crate) fn is_pinned(&self, chat_jid: &str, message_id: &str) -> bool {
+        self.pinned_messages
+            .contains(&(chat_jid.to_string(), message_id.to_string()))
+    }
+
+    /// Keep the saved panel's rows after a store-wide listing.
+    ///
+    /// The daemon broadcasts this answer without a request id, so there is no
+    /// query to compare against: the newest listing replaces the old rows.
+    pub(super) fn adopt_starred_results(
+        &mut self,
+        results: Vec<oxidezap_ipc::MessageSearchHit>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut results = results;
+        results.sort_unstable_by_key(|hit| std::cmp::Reverse(hit.timestamp_ms));
+        results.truncate(super::saved_messages::LIST_LIMIT);
+        self.saved_messages = results;
+        cx.notify();
     }
 }
 
@@ -832,6 +954,101 @@ mod tests {
                     app.find_chat("peer@example.invalid").unwrap().messages[0].content,
                     "second message"
                 );
+            });
+        });
+    }
+
+    /// Pins are account state: an event about an unselected chat still marks
+    /// its row, and an unpin from the account clears only that one message.
+    #[gpui::test]
+    fn pin_flags_follow_both_this_window_and_the_account(cx: &mut gpui::TestAppContext) {
+        let (mut cx, app) = delete_fixture(cx);
+        cx.update(|_window, cx| {
+            app.update(cx, |app, cx| {
+                app.adopt_pin_changed("peer@example.invalid", "SENT-1", true, cx);
+                assert!(app.is_pinned("peer@example.invalid", "SENT-1"));
+                assert_eq!(app.pinned_messages.len(), 1);
+
+                // A repeated broadcast cannot turn one pin into two.
+                app.adopt_pin_changed("peer@example.invalid", "SENT-1", true, cx);
+                assert_eq!(app.pinned_messages.len(), 1);
+
+                app.adopt_pin_changed("other@example.invalid", "SENT-2", true, cx);
+                assert!(app.is_pinned("other@example.invalid", "SENT-2"));
+
+                app.adopt_pin_changed("peer@example.invalid", "SENT-1", false, cx);
+                assert!(!app.is_pinned("peer@example.invalid", "SENT-1"));
+                assert!(app.is_pinned("other@example.invalid", "SENT-2"));
+            });
+        });
+    }
+
+    /// Without a daemon there is nobody to confirm the request, so the mark
+    /// must not linger and the window must say why. The same rollback is used
+    /// by a correlated refusal; both start from an optimistic mark.
+    #[gpui::test]
+    fn pin_without_a_daemon_rolls_back_and_explains(cx: &mut gpui::TestAppContext) {
+        let (mut cx, app) = delete_fixture(cx);
+        cx.update(|_window, cx| {
+            app.update(cx, |app, cx| {
+                app.toggle_pinned("peer@example.invalid", "SENT-1", true, cx);
+                assert!(!app.is_pinned("peer@example.invalid", "SENT-1"));
+                assert!(
+                    app.notices()
+                        .read(cx)
+                        .has_problem("Could not update the pin")
+                );
+
+                app.adopt_pin_changed("peer@example.invalid", "SENT-2", true, cx);
+                app.toggle_pinned("peer@example.invalid", "SENT-2", false, cx);
+                assert!(app.is_pinned("peer@example.invalid", "SENT-2"));
+            });
+        });
+    }
+
+    /// The listing is account-wide and has no query to correlate against, so
+    /// the newest answer replaces the old one; a later unstar drops its row.
+    #[gpui::test]
+    fn starred_results_are_newest_first_bounded_and_removed_with_a_star(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (mut cx, app) = delete_fixture(cx);
+        let limit = super::super::saved_messages::LIST_LIMIT;
+        let hits: Vec<_> = (0..limit + 3)
+            .map(|n| oxidezap_ipc::MessageSearchHit {
+                chat_jid: "peer@example.invalid".into(),
+                message_id: format!("STAR-{n}"),
+                snippet: "a synthetic saved message".into(),
+                sender_jid: None,
+                timestamp_ms: n as i64,
+                has_media: false,
+            })
+            .collect();
+        cx.update(|_window, cx| {
+            app.update(cx, |app, cx| {
+                app.adopt_starred_results(hits, cx);
+                assert_eq!(app.saved_messages.len(), limit);
+                assert_eq!(
+                    app.saved_messages[0].message_id,
+                    format!("STAR-{}", limit + 2)
+                );
+                assert_eq!(app.saved_messages.last().unwrap().message_id, "STAR-3");
+
+                app.adopt_starred_results(
+                    vec![oxidezap_ipc::MessageSearchHit {
+                        chat_jid: "peer@example.invalid".into(),
+                        message_id: "STAR-9".into(),
+                        snippet: "a newer listing".into(),
+                        sender_jid: None,
+                        timestamp_ms: i64::MAX,
+                        has_media: false,
+                    }],
+                    cx,
+                );
+                assert_eq!(app.saved_messages.len(), 1);
+
+                app.adopt_star_changed("peer@example.invalid", "STAR-9", false, cx);
+                assert!(app.saved_messages.is_empty());
             });
         });
     }

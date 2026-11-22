@@ -178,6 +178,10 @@ pub enum MessagesSubcommand {
     Star(MessageStarArgs),
     /// Remove a message's star
     Unstar(MessageStarArgs),
+    /// Pin a message (for the longest duration the library offers)
+    Pin(MessageStarArgs),
+    /// Unpin a message
+    Unpin(MessageStarArgs),
     /// Edit a sent text message
     Edit(MessageEditArgs),
     /// Revoke/delete a sent message

@@ -539,4 +539,15 @@ catalog! {
     UnstarMessage => ("Remove star", "Remover favorito");
     StarredMessage => ("Starred", "Favoritado");
     CouldNotStarMessage => ("Could not update the star", "Não foi possível atualizar o favorito");
+
+    // Protocol 53's message pins and saved/pinned panels. A pin lasts as long
+    // as the library allows, so none of these words promise "forever".
+    PinMessage => ("Pin message", "Fixar mensagem");
+    UnpinMessage => ("Unpin message", "Desafixar mensagem");
+    CouldNotPinMessage => ("Could not update the pin", "Não foi possível atualizar a fixação");
+    SavedMessages => ("Saved messages", "Mensagens salvas");
+    NoSavedMessages => ("No saved messages yet", "Nenhuma mensagem salva ainda");
+    CouldNotLoadSavedMessages => ("Could not load saved messages", "Não foi possível carregar as mensagens salvas");
+    PinnedMessages => ("Pinned messages", "Mensagens fixadas");
+    NoPinnedMessages => ("No pinned messages in loaded chats", "Nenhuma mensagem fixada nas conversas carregadas");
 }

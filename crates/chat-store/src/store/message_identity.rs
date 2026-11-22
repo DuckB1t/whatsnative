@@ -128,6 +128,8 @@ struct StoredMessage {
     status: i32,
     #[diesel(sql_type = Bool)]
     starred: bool,
+    #[diesel(sql_type = Bool)]
+    pinned: bool,
     #[diesel(sql_type = Nullable<BigInt>)]
     edited_at_ms: Option<i64>,
     #[diesel(sql_type = Bool)]
@@ -168,6 +170,7 @@ pub(crate) fn merge_rows(
             dsl::proto_codec,
             dsl::status,
             dsl::starred,
+            dsl::pinned,
             dsl::edited_at_ms,
             dsl::revoked,
             dsl::local_revoke_placeholder,
@@ -206,6 +209,8 @@ pub(crate) fn merge_rows(
         .max_by_key(|row| MessageStatus::from_raw(row.status).precedence())
         .map_or(survivor.status, |row| row.status);
     let starred = rows.iter().any(|row| row.starred);
+    // A pin on any copy survives the merge, the same way a star does.
+    let pinned = rows.iter().any(|row| row.pinned);
     // Activity and page order follow the newest copy's timestamp while the
     // stable row id remains the oldest persisted id.
     let timestamp_ms = rows
@@ -260,6 +265,7 @@ pub(crate) fn merge_rows(
             }),
             dsl::status.eq(status),
             dsl::starred.eq(starred),
+            dsl::pinned.eq(pinned),
             dsl::edited_at_ms.eq(edited_at_ms),
             dsl::revoked.eq(tombstone),
             dsl::local_revoke_placeholder.eq(rows.iter().any(|row| row.local_revoke_placeholder)),

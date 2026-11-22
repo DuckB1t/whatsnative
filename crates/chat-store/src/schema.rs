@@ -54,6 +54,10 @@ diesel::table! {
         // signed INTEGER: `u64 as i64` and back recovers every value, including
         // zero and values above i64::MAX.
         newsletter_server_id -> Nullable<BigInt>,
+        // Appended by the migration, so last in the table's column order. A
+        // local flag: pinning is a network mutation the session confirms before
+        // this is written, and this column is its durable record.
+        pinned -> Bool,
     }
 }
 

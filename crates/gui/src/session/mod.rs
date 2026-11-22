@@ -261,6 +261,20 @@ pub enum FromDaemon {
         message_id: String,
         starred: bool,
     },
+    /// A pinned flag that changed on the account, whether or not this window
+    /// asked for it. Like a star, the mark is kept by every front end, so each
+    /// one repaints from the authoritative answer.
+    PinChanged {
+        chat_jid: String,
+        message_id: String,
+        pinned: bool,
+    },
+    /// Starred messages across every chat. The daemon answers the listing for
+    /// every front end, so this frame has no request id: the window asks on
+    /// opening its saved panel and keeps the newest answer it has seen.
+    StarredResults {
+        results: Vec<oxidezap_ipc::MessageSearchHit>,
+    },
 }
 
 /// Why something a front end asked for did not happen.
@@ -1273,6 +1287,43 @@ impl SessionHandle {
                 message_id: message_id.to_string(),
                 starred,
             },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Pin or unpin a stored message for the library's longest duration.
+    ///
+    /// The library caps pins at 30 days, so this never asks for a permanent
+    /// one. The ack belongs to this request; the account-wide
+    /// [`FromDaemon::PinChanged`] is what other front ends see.
+    pub fn set_message_pinned(
+        &self,
+        chat_jid: &str,
+        message_id: &str,
+        pinned: bool,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::SetMessagePinned {
+                chat_jid: chat_jid.to_string(),
+                message_id: message_id.to_string(),
+                pinned,
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// List the account's starred messages, newest first.
+    ///
+    /// The ack says the read ran; the rows arrive separately as
+    /// [`FromDaemon::StarredResults`], without a request id, because the daemon
+    /// answers every front end that can use them.
+    pub fn list_starred_messages(&self, limit: usize) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::ListStarredMessages { limit },
             Awaiting::Mutation(tx),
         );
         rx

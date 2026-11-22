@@ -2737,6 +2737,7 @@ fn a_message_cursor_survives_the_round_trip() {
         received_as_shared_history: false,
         edited_at: None,
         starred: false,
+        pinned: false,
         seq: 4242,
     };
     let token = message_cursor(&row);
@@ -2780,6 +2781,7 @@ fn stored_edit_state_reaches_own_and_peer_bubbles_in_direct_and_group_chats() {
                 newsletter_server_id: None,
                 status: oxidezap_chat_store::MessageStatus::Delivered,
                 starred: false,
+                pinned: false,
                 edited_at: Some(timestamp),
                 revoked: false,
                 local_revoke_placeholder: false,

@@ -355,6 +355,12 @@ impl WhatsAppApp {
         if self.close_global_search(cx) {
             return;
         }
+        if self.close_saved_messages(cx) {
+            return;
+        }
+        if self.close_pinned_messages(cx) {
+            return;
+        }
         if self.cancel_event_dialog(cx) {
             return;
         }

@@ -372,6 +372,7 @@ mod tests {
             newsletter_server_id: Some(7),
             status: oxidezap_chat_store::MessageStatus::Delivered,
             starred: false,
+            pinned: false,
             edited_at: None,
             revoked: false,
             local_revoke_placeholder: false,
