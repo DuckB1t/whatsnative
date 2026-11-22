@@ -40,10 +40,10 @@ jobs:
 
       - name: Desktop entry and AppStream metadata
         run: |
-          desktop-file-validate packaging/linux/org.oxidezap.client.local.desktop
-          metainfo="$RUNNER_TEMP/io.github.oxidezap.client.metainfo.xml"
+          desktop-file-validate packaging/linux/org.whatsnative.client.local.desktop
+          metainfo="$RUNNER_TEMP/io.github.duckb1t.whatsnative.metainfo.xml"
           sed -e 's/@VERSION@/0.0.0/' -e "s/@DATE@/$(date -u +%Y-%m-%d)/" \
-            packaging/linux/org.oxidezap.client.local.metainfo.xml.in >"$metainfo"
+            packaging/linux/org.whatsnative.client.local.metainfo.xml.in >"$metainfo"
           appstreamcli validate --no-net --explain "$metainfo"
 
       - name: AppRun desktop integration

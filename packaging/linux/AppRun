@@ -1,8 +1,8 @@
 #!/bin/sh
-# OxideZap AppImage entry point (packaging/linux/AppRun; installed by package.sh).
+# WhatsNative AppImage entry point (packaging/linux/AppRun; installed by package.sh).
 #
 # On Wayland the compositor resolves a window's dock icon by taking the window's
-# app_id (org.oxidezap.client.local) and looking up an installed .desktop file. An
+# app_id (org.whatsnative.client.local) and looking up an installed .desktop file. An
 # AppImage installs nothing, so every AppImage run would otherwise show the generic
 # "Wayland" icon. Best-effort desktop integration: on first run (and whenever the
 # AppImage's path changes) install the .desktop entry and the hicolor icons into
@@ -10,17 +10,17 @@
 # Opt out with OXIDEZAP_NO_DESKTOP_INTEGRATION=1.
 #
 # The release archive's install-desktop.sh writes the same
-# org.oxidezap.client.local.desktop; an entry whose Exec is not this AppImage counts
+# org.whatsnative.client.local.desktop; an entry whose Exec is not this AppImage counts
 # as a user customization below and keeps its Exec.
 #
-# `OxideZap.AppImage --cli <args>`, or a symlink to the AppImage named oxidezap-cli,
+# `WhatsNative.AppImage --cli <args>`, or a symlink to the AppImage named oxidezap-cli,
 # runs the bundled oxidezap-cli instead of the window. The window, the CLI and the
 # daemon they start all run from this AppImage's mount, beside each other.
 
 set -u
 
 APPDIR="$(dirname "$(readlink -f "$0")")"
-DESK_ID=org.oxidezap.client.local
+DESK_ID=org.whatsnative.client.local
 
 launch() {
   binary="$1"

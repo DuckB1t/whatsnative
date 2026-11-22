@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Repackage OxideZap's FHS tarball from package.sh as a single-file Flatpak bundle:
+# Repackage WhatsNative's FHS tarball from package.sh as a single-file Flatpak bundle:
 #
 #   $DIST/oxidezap-<label>-linux-<arch>.flatpak
 #
@@ -17,7 +17,7 @@ umask 022
 # shellcheck source=../env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
 HERE="$ROOT/packaging/linux"
-APP_ID=io.github.oxidezap.client
+APP_ID=io.github.duckb1t.whatsnative
 FLATHUB=https://dl.flathub.org/repo/flathub.flatpakrepo
 
 TEST=1
@@ -44,7 +44,7 @@ for tool in flatpak flatpak-builder; do
   command -v "$tool" >/dev/null || { echo "error: $tool not found (apt install flatpak flatpak-builder)" >&2; exit 1; }
 done
 
-echo "==> OxideZap $VERSION Flatpak bundle for $ARCH from $(basename "$TARBALL")"
+echo "==> WhatsNative $VERSION Flatpak bundle for $ARCH from $(basename "$TARBALL")"
 
 WORK="$CARGO_TARGET_DIR/flatpak-bundle"
 rm -rf "$WORK"

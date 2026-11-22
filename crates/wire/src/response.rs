@@ -1,4 +1,4 @@
-//! Daemon responses for the OxideZap wire protocol.
+//! Daemon responses for the WhatsNative wire protocol.
 
 use serde::{Deserialize, Serialize};
 

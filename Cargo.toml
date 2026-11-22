@@ -34,7 +34,7 @@ edition = "2024"
 rust-version = "1.100.0"
 license = "MIT"
 authors = ["João Lucas <jlucaso@hotmail.com>"]
-repository = "https://github.com/oxidezap/client"
+repository = "https://github.com/duckb1t/whatsnative"
 
 # Mirror the library's safeguards (see /clippy.toml): wacore::time instead of
 # std clocks, portable-atomic for 64-bit atomics.

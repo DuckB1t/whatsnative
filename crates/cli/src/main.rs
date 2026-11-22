@@ -1,4 +1,4 @@
-//! OxideZap CLI: A lightweight, scriptable command-line interface for WhatsApp.
+//! WhatsNative CLI: A lightweight, scriptable command-line interface for WhatsApp.
 //!
 //! One contract for every command: a result crosses [`output`], a failure
 //! exits nonzero, and `--json` never carries a human sentence. The daemon

@@ -12,7 +12,7 @@ use oxidezap_wire::response::DaemonResponse;
 
 use crate::endpoint::{Endpoint, Hangup, Reader, Writer};
 
-/// A synchronous IPC client for the OxideZap daemon.
+/// A synchronous IPC client for the WhatsNative daemon.
 pub struct IpcClient {
     reader: BufReader<Reader>,
     writer: Writer,

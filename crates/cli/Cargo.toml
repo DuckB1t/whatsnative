@@ -1,6 +1,6 @@
 [package]
 name = "oxidezap-cli"
-description = "Lightweight, scriptable WhatsApp CLI for OxideZap powered by usage-rs"
+description = "Lightweight, scriptable WhatsApp CLI for WhatsNative powered by usage-rs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

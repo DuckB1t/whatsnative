@@ -59,9 +59,9 @@ def check(path, version, platform):
     assert 'Copyright 2022 Google Inc.' in license_text, 'missing emoji copyright notice'
     assert 'SIL OPEN FONT LICENSE Version 1.1' in license_text, 'missing emoji license text'
     if platform.startswith('linux-'):
-        expected.update(f'{root}/{name}' for name in ('install-desktop.sh', 'org.oxidezap.client.local.png'))
+        expected.update(f'{root}/{name}' for name in ('install-desktop.sh', 'org.whatsnative.client.local.png'))
         assert files[f'{root}/install-desktop.sh'][1] & 0o111, 'installer not executable'
-        assert files[f'{root}/org.oxidezap.client.local.png'][0].startswith(b'\x89PNG\r\n\x1a\n'), 'invalid desktop icon'
+        assert files[f'{root}/org.whatsnative.client.local.png'][0].startswith(b'\x89PNG\r\n\x1a\n'), 'invalid desktop icon'
     assert set(files) == expected, f'unexpected archive contents: {set(files) ^ expected}'
     for name in binaries:
         data, mode = files[name]

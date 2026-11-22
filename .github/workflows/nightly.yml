@@ -65,7 +65,7 @@ jobs:
           On Linux there are also packages holding all three: a `.deb`
           (Debian, Ubuntu), an `.rpm` (Fedora, openSUSE) and an `.AppImage`
           that runs in place, adds its own menu entry and updates through
-          its `.zsync`. `OxideZap.AppImage --cli ...` runs the CLI.
+          its `.zsync`. `WhatsNative.AppImage --cli ...` runs the CLI.
 
           `oxidezap-nightly-plugins.zip` contains optional `.wasm` plugins.
           Unpack it and install the modules you want under Settings → Plugins.

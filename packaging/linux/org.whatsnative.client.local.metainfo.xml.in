@@ -2,17 +2,17 @@
 <!-- AppStream metadata (software centres). Template: package.sh substitutes @VERSION@ and
      @DATE@ from Cargo.toml (or the release's version) and the build date. -->
 <component type="desktop-application">
-  <id>io.github.oxidezap.client</id>
+  <id>io.github.duckb1t.whatsnative</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <name>OxideZap</name>
+  <name>WhatsNative</name>
   <summary>Unofficial WhatsApp client</summary>
-  <developer id="io.github.oxidezap">
-    <name>João Lucas</name>
+  <developer id="io.github.duckb1t">
+    <name>DuckB1t</name>
   </developer>
   <description>
     <p>
-      OxideZap is an unofficial WhatsApp client written in Rust, built on whatsapp-rust.
+      WhatsNative is an unofficial WhatsApp client written in Rust, built on whatsapp-rust.
       It is not affiliated with, endorsed by, or connected to WhatsApp or Meta.
     </p>
     <p>
@@ -26,11 +26,11 @@
     </ul>
   </description>
   <!-- The desktop id is the window's app id, so docks pair the window with it. -->
-  <launchable type="desktop-id">org.oxidezap.client.local.desktop</launchable>
-  <icon type="stock">org.oxidezap.client.local</icon>
+  <launchable type="desktop-id">org.whatsnative.client.local.desktop</launchable>
+  <icon type="stock">org.whatsnative.client.local</icon>
   <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser. -->
-  <url type="homepage">https://github.com/oxidezap/client</url>
-  <url type="bugtracker">https://github.com/oxidezap/client/issues</url>
+  <url type="homepage">https://github.com/duckb1t/whatsnative</url>
+  <url type="bugtracker">https://github.com/duckb1t/whatsnative/issues</url>
   <categories>
     <category>Network</category>
     <category>InstantMessaging</category>

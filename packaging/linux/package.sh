@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and package OxideZap for Linux (<arch> is x86_64 or aarch64, <label> the version as the
+# Build and package WhatsNative for Linux (<arch> is x86_64 or aarch64, <label> the version as the
 # release names it: `nightly`, a tag such as v0.2.0, or the Cargo.toml version locally):
 #
 #   $DIST/oxidezap-<label>-linux-<arch>.AppImage        any distro with glibc >= the build host's
@@ -29,9 +29,9 @@ HERE="$ROOT/packaging/linux"
 . "$HERE/verified-download.sh"
 # The window's app id, the .desktop file and the icon name (APP_ID in
 # crates/gui/src/platform/window_identity.rs).
-DESKTOP_ID=org.oxidezap.client.local
-# The AppStream component id (packaging/linux/org.oxidezap.client.local.metainfo.xml.in).
-COMPONENT_ID=io.github.oxidezap.client
+DESKTOP_ID=org.whatsnative.client.local
+# The AppStream component id (packaging/linux/org.whatsnative.client.local.metainfo.xml.in).
+COMPONENT_ID=io.github.duckb1t.whatsnative
 # All three ship together: the window and the CLI start the daemon beside themselves.
 BINARIES=(oxidezap oxidezapd oxidezap-cli)
 
@@ -53,10 +53,10 @@ case "$ARCH" in
   *) echo "unsupported architecture $ARCH" >&2; exit 2 ;;
 esac
 # The project's creator, as the first commit records him.
-export OXIDEZAP_MAINTAINER="${OXIDEZAP_MAINTAINER:-João Lucas <jlucaso@hotmail.com>}"
+export OXIDEZAP_MAINTAINER="${OXIDEZAP_MAINTAINER:-DuckB1t <DuckB1t@users.noreply.github.com>}"
 BASENAME="oxidezap-$LABEL-linux-$ARCH"
 
-echo "==> OxideZap $VERSION ($LABEL) for Linux $ARCH ($FORMATS)"
+echo "==> WhatsNative $VERSION ($LABEL) for Linux $ARCH ($FORMATS)"
 
 if [[ "$SKIP_BUILD" = 0 ]]; then
   (cd "$ROOT" && cargo build --release --locked --bin oxidezap --bin oxidezapd --bin oxidezap-cli)
@@ -133,7 +133,7 @@ fi
 
 # ---- AppImage -----------------------------------------------------------------------------------
 if has appimage; then
-  APPDIR="$WORK/OxideZap.AppDir"
+  APPDIR="$WORK/WhatsNative.AppDir"
   cp -R "$STAGE" "$APPDIR"
   mkdir -p "$APPDIR/usr/lib"
   # Wayland is loaded dynamically. GPU loaders and drivers come from the host.

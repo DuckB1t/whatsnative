@@ -1,4 +1,4 @@
-//! Data Transfer Objects (DTOs) for the OxideZap wire protocol.
+//! Data Transfer Objects (DTOs) for the WhatsNative wire protocol.
 
 use serde::{Deserialize, Serialize};
 

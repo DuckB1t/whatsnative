@@ -1,6 +1,6 @@
 [package]
 name = "oxidezap-wire"
-description = "Lightweight, decoupled wire protocol DTOs for OxideZap IPC and CLI"
+description = "Lightweight, decoupled wire protocol DTOs for WhatsNative IPC and CLI"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

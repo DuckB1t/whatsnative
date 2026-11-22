@@ -1,4 +1,4 @@
-//! Client requests for the OxideZap wire protocol.
+//! Client requests for the WhatsNative wire protocol.
 
 use serde::{Deserialize, Serialize};
 

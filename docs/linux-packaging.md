@@ -29,11 +29,11 @@ constant; re-read it with `objdump -T` before relying on it.
 
 ## Decisions
 
-- **Desktop id `org.oxidezap.client.local`**, the window's app id, so Wayland
+- **Desktop id `org.whatsnative.client.local`**, the window's app id, so Wayland
   pairs the window with the launcher. `install-desktop.sh` writes the same file;
   when the AppImage finds such an entry it keeps its `Exec` as a user
   customization rather than taking the launcher over.
-- **AppStream and Flatpak id `io.github.oxidezap.client`**: reverse-DNS on a
+- **AppStream and Flatpak id `io.github.duckb1t.whatsnative`**: reverse-DNS on a
   name the project owns (the GitHub organization).
 - **Package version.** A tag's version is the package version. A name that is
   not a version (`nightly`, `pr-<n>`) becomes a pre-release of the
@@ -48,7 +48,8 @@ constant; re-read it with `objdump -T` before relying on it.
 - **AppImage libraries.** The AppImage bundles the linked application libraries
   and their dependencies, plus Wayland. It uses the host's glibc, C++ runtime,
   and graphics loaders and drivers.
-- **Maintainer** is the project's creator as the first commit records him.
+- **Maintainer** is the fork owner (override `OXIDEZAP_MAINTAINER`); upstream's
+  authorship and copyright are preserved in `LICENSE` and `Cargo.toml`.
 - **The AppImage runs the CLI too**: `--cli <args>`, or a symlink to it named
   `oxidezap-cli`, without desktop integration. A daemon started from the
   AppImage inherits the runtime's keep-alive pipe, so the mount stays until the
@@ -80,7 +81,7 @@ structural check, not a substitute for `desktop-file-validate` or
 ## Experimental Flatpak
 
 `packaging/linux/flatpak-bundle.sh` repackages the binaries as a Flatpak
-bundle with `packaging/linux/flatpak/io.github.oxidezap.client.yml`. The bundle
+bundle with `packaging/linux/flatpak/io.github.duckb1t.whatsnative.yml`. The bundle
 is built separately from releases. The daemon registers the status notifier
 using its unique bus name inside the sandbox, where the bus proxy does not
 allow it to own a generated KDE name. The window uses the Flatpak ID so

@@ -15,7 +15,7 @@ release: 1
 section: net
 priority: optional
 maintainer: ${OXIDEZAP_MAINTAINER}
-homepage: https://github.com/oxidezap/client
+homepage: https://github.com/duckb1t/whatsnative
 license: MIT
 description: |-
   Unofficial WhatsApp client.

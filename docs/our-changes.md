@@ -4,7 +4,7 @@ Base: `oxidezap/client` @ `ea67a2aa41279232029b5872528ec394fb491e98` (2026-11-20
 tagged `base-upstream-ea67a2aa`.
 
 Upstream remote: `https://github.com/oxidezap/client.git`
-Our remote: `https://github.com/duckb1t/whatsapp-native.git`
+Our remote: `https://github.com/duckb1t/whatsnative.git`
 
 This file exists so a monthly `git fetch upstream && git rebase upstream/main` stays
 reviewable. Record every local change here with its commit and reason. Small diffs only:
@@ -19,7 +19,8 @@ SQLite store, plugins and Linux packaging.
 - `cargo build --release --bin oxidezap --bin oxidezapd --bin oxidezap-cli` — passed (24m30s).
 - Binaries: `oxidezap` 46M, `oxidezapd` 31M, `oxidezap-cli` 1.5M (stripped).
 - `oxidezap-cli doctor`: daemon running, DB healthy, pairing QR issued.
-- GUI verified as native Wayland window (`org.oxidezap.client.local`, `xwayland: 0`).
+- GUI verified as native Wayland window (`org.oxidezap.client.local` at baseline —
+  renamed to `org.whatsnative.client.local` in section 23 — `xwayland: 0`).
 
 ## Local changes
 
@@ -670,6 +671,64 @@ wasm daemon/session tests 16+35, nightly wasm GUI/session checks, xtask 52,
 plugin-host ignored test and the shared-view ban all pass. All rows and
 addresses in tests are synthetic.
 
+### 23. WhatsNative branding and fork identity
+
+**Problem.** The tree still carried upstream's product name, desktop/app ids,
+repository URLs and package maintainer. A public fork under `duckb1t` must not
+present itself as `oxidezap/client`, and a second installed app must not fight
+over the same Wayland app id or icon.
+
+**Change.** The display name is now **WhatsNative** in the window, menus, macOS
+tray, CLI, Settings → About, package metadata and EN/PT strings. The repo URL is
+`https://github.com/duckb1t/whatsnative` in `Cargo.toml`, AppStream, nfpm and
+the README. Desktop id is `org.whatsnative.client.local` (the `.local` suffix is
+kept deliberately: the project owns no DNS domain); AppStream/Flatpak id is
+`io.github.duckb1t.whatsnative`, reverse-DNS on the GitHub owner. The master
+icon, seven hicolor PNGs, desktop file, metainfo template and Flatpak manifest
+were renamed to match, and every packaging script, smoke test, release checker
+and workflow was updated with them. The deb/rpm maintainer defaults to
+`DuckB1t <DuckB1t@users.noreply.github.com>`.
+
+Crate names and binary names stay `oxidezap-*` / `oxidezap*` — this is a fork of
+upstream's code, and renaming 400+ dependency references would buy nothing.
+Upstream authorship is preserved in `LICENSE`, `Cargo.toml` authors, the
+README's credits, and `packaging/ICONS.md` (the icon artwork is inherited).
+`AGENTS.md` still says "oxidezap" at the top for the same reason: it describes
+the inherited architecture, not the product name.
+
+**Gates.** Shell syntax, `apprun-test.sh`, `apprun-cli-test.sh`,
+`verified-download-test.sh`, `desktop-file-validate`, `appstreamcli validate`,
+workflow YAML and `git diff --check` all pass, alongside the full workspace
+suite below.
+
+### 24. Account-level DM read receipts (protocol 60)
+
+**Problem.** Privacy and security had no honest control: one upstream setting
+is both readable and settable through public APIs, but nothing exposed it, and
+drawing the other categories would be a dead surface.
+
+**Change.** Protocol **60** adds `FetchPrivacySettings`, `SetReadReceipts`,
+`PrivacySettings` (account-wide, no id) and `PrivacyResult` (correlated). The
+core DTO has `All`, `None` and `Unknown`: an absent or unrecognised wire value is
+never drawn as "off". The session calls upstream's public
+`fetch_privacy_settings` / `set_privacy_setting` with
+`PrivacyCategory::ReadReceipts`. Because a SET IQ answers with only a `dhash`
+and no push event follows, the session applies `SetReadReceiptsDisabled` to the
+device snapshot, flushes, then re-reads the server and refuses to claim success
+unless the fresh value matches what was sent. The daemon publishes that fresh
+value before the correlated result; the window does not flip the switch on
+click. Settings → Privacy gains a "DM read receipts" group with a real switch
+only for a known value, explicit loading/unavailable states, EN/PT strings and
+failure notices; the value resets on account forget/switch. No wire or CLI
+parity, no other privacy category, no live-account exercise. Older peers cannot
+attach across the new version.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2698 passed, 44 ignored, 0 failed). Doctests, CLI 1,682,904 B (<2 MiB), wasm
+daemon/session tests 16+35, nightly wasm GUI/session checks, xtask 52,
+plugin-host ignored tests and the shared-view ban all pass. All ids, values and
+addresses in tests are synthetic.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).
@@ -680,5 +739,6 @@ addresses in tests are synthetic.
    all design sizes already use `metrics.*()`. The remaining ones are decoded
    media geometry, scale-invariant zero/hairline thresholds, or test fixtures —
    no changes needed. GUI tests: 680 passed, 14 ignored.
-5. Branding / app id / desktop file rename — keep crate names to minimize diff.
+5. ~~Branding / app id / desktop file rename~~ ✅ (section 23); crate names kept
+   to minimize diff.
 6. ~~Packaging smoke tests~~ ✅ (above); audit and benchmarks still open.

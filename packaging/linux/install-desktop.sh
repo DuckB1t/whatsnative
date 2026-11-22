@@ -31,7 +31,7 @@ for binary in oxidezap oxidezapd oxidezap-cli; do
         exit 1
     fi
 done
-app_id=org.oxidezap.client.local
+app_id=org.whatsnative.client.local
 data_dir=${XDG_DATA_HOME:-"$HOME/.local/share"}
 case "$data_dir" in
     /*) ;;
@@ -46,11 +46,11 @@ mkdir -p "$data_dir/applications" "$data_dir/icons"
 # Install the organization PNG in the unthemed icon search directory.
 cp "$archive_dir/$app_id.png" "$data_dir/icons/$app_id.png"
 {
-    printf '[Desktop Entry]\nType=Application\nName=OxideZap\nComment=WhatsApp client\n'
+    printf '[Desktop Entry]\nType=Application\nName=WhatsNative\nComment=WhatsApp client\n'
     printf 'Exec="%s"\nIcon=%s\nStartupWMClass=%s\n' "$exec_path" "$app_id" "$app_id"
     printf 'Terminal=false\nCategories=Network;InstantMessaging;\nStartupNotify=true\n'
 } > "$data_dir/applications/$app_id.desktop"
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$data_dir/applications" || true
 fi
-printf 'Installed the OxideZap launcher. Keep this archive at %s\n' "$archive_dir"
+printf 'Installed the WhatsNative launcher. Keep this archive at %s\n' "$archive_dir"

@@ -7,11 +7,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 test_dir="$(mktemp -d)"
 trap 'rm -rf "$test_dir"' EXIT
-app_dir="$test_dir/OxideZap test.AppDir"
+app_dir="$test_dir/WhatsNative test.AppDir"
 mkdir -p "$app_dir/usr/bin" "$app_dir/usr/share/applications"
 cp "$HERE/AppRun" "$app_dir/AppRun"
-printf '[Desktop Entry]\nType=Application\nName=OxideZap\nExec=oxidezap\n' \
-  >"$app_dir/usr/share/applications/org.oxidezap.client.local.desktop"
+printf '[Desktop Entry]\nType=Application\nName=WhatsNative\nExec=oxidezap\n' \
+  >"$app_dir/usr/share/applications/org.whatsnative.client.local.desktop"
 cat >"$app_dir/usr/bin/oxidezap" <<'EOF'
 #!/bin/sh
 printf 'gui\n'
@@ -33,7 +33,7 @@ case "${1:-}" in
 esac
 EOF
 chmod +x "$app_dir/AppRun" "$app_dir/usr/bin/oxidezap" "$app_dir/usr/bin/oxidezap-cli"
-export APPIMAGE="$test_dir/OxideZap test.AppImage"
+export APPIMAGE="$test_dir/WhatsNative test.AppImage"
 : >"$APPIMAGE"
 export ARGV0="$APPIMAGE"
 export XDG_DATA_HOME="$test_dir/data"
@@ -65,7 +65,7 @@ status=0
 # GUI invocations still forward all arguments; only a leading --cli is a selector.
 out="$("$app_dir/AppRun" 'some arg' --cli)"
 [[ "$out" = $'gui\n<some arg>\n<--cli>' ]] || fail "GUI arguments changed: $out"
-[[ -f "$XDG_DATA_HOME/applications/org.oxidezap.client.local.desktop" ]] || fail "GUI integration lost"
+[[ -f "$XDG_DATA_HOME/applications/org.whatsnative.client.local.desktop" ]] || fail "GUI integration lost"
 out="$(ARGV0=another-oxidezap-cli "$app_dir/AppRun" status)"
 [[ "$out" = $'gui\n<status>' ]] || fail "an unrelated filename selected CLI"
 

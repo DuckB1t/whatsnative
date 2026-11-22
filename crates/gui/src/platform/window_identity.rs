@@ -1,7 +1,7 @@
 //! Linux desktops match a window to its launcher by this ID. X11 also accepts
 //! icon pixels directly; Wayland obtains the icon from the installed launcher.
 
-pub const APP_ID: &str = "org.oxidezap.client.local";
+pub const APP_ID: &str = "org.whatsnative.client.local";
 
 pub fn apply(options: &mut gpui::WindowOptions, cx: &gpui::App) {
     options.app_id = Some(APP_ID.to_owned());
@@ -22,7 +22,7 @@ mod imp {
 
     fn icon(_: &gpui::App) -> anyhow::Result<image::RgbaImage> {
         Ok(image::load_from_memory(include_bytes!(
-            "../../../../packaging/linux/org.oxidezap.client.local.png"
+            "../../../../packaging/linux/org.whatsnative.client.local.png"
         ))?
         .to_rgba8())
     }

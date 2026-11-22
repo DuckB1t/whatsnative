@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerate the Linux hicolor theme icons in packaging/linux/hicolor from the organization
-# icon (packaging/linux/org.oxidezap.client.local.png, see packaging/ICONS.md), the one the
+# icon (packaging/linux/org.whatsnative.client.local.png, see packaging/ICONS.md), the one the
 # window embeds and install-desktop.sh installs.
 #
 # Needs ImageMagick (magick or convert). The outputs are committed, so packaging never
@@ -9,7 +9,7 @@
 #   packaging/linux/icons.sh
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NAME=org.oxidezap.client.local
+NAME=org.whatsnative.client.local
 SRC="$HERE/$NAME.png"
 OUT="$HERE/hicolor"
 

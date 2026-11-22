@@ -105,9 +105,9 @@ fn build(initial: &TrayState) -> Result<(TrayIcon, MenuItem), String> {
     // the tooltip uses, so the menu answers "is it working" before anything
     // is clicked.
     let status = MenuItem::new(initial.single_line(), false, None);
-    let open = MenuItem::with_id(OPEN_ID, "Open OxideZap", true, None);
+    let open = MenuItem::with_id(OPEN_ID, "Open WhatsNative", true, None);
     let hide = MenuItem::with_id(HIDE_ID, "Hide Window", true, None);
-    let quit = MenuItem::with_id(QUIT_ID, "Quit OxideZap", true, None);
+    let quit = MenuItem::with_id(QUIT_ID, "Quit WhatsNative", true, None);
     menu.append(&status)
         .and_then(|_| menu.append(&PredefinedMenuItem::separator()))
         .and_then(|_| menu.append(&open))

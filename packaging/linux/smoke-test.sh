@@ -40,24 +40,24 @@ for binary in oxidezap oxidezapd oxidezap-cli; do
     [ -x "$path" ] || fail "binary is not executable: usr/bin/$binary"
 done
 
-desktop="$stage/usr/share/applications/org.oxidezap.client.local.desktop"
+desktop="$stage/usr/share/applications/org.whatsnative.client.local.desktop"
 [ -s "$desktop" ] || fail "missing or empty desktop entry"
 contains "$desktop" 'Exec=oxidezap' || fail "desktop entry has no Exec=oxidezap"
-contains "$desktop" 'Icon=org.oxidezap.client.local' || fail "desktop entry has the wrong Icon"
-contains "$desktop" 'StartupWMClass=org.oxidezap.client.local' || fail "desktop entry has the wrong StartupWMClass"
+contains "$desktop" 'Icon=org.whatsnative.client.local' || fail "desktop entry has the wrong Icon"
+contains "$desktop" 'StartupWMClass=org.whatsnative.client.local' || fail "desktop entry has the wrong StartupWMClass"
 
-metainfo="$stage/usr/share/metainfo/io.github.oxidezap.client.metainfo.xml"
+metainfo="$stage/usr/share/metainfo/io.github.duckb1t.whatsnative.metainfo.xml"
 [ -s "$metainfo" ] || fail "missing or empty AppStream metadata"
-contains "$metainfo" '<id>io.github.oxidezap.client</id>' || fail "AppStream component id is wrong"
-contains "$metainfo" '<launchable type="desktop-id">org.oxidezap.client.local.desktop</launchable>' || fail "AppStream launchable does not name the desktop entry"
-contains "$metainfo" '<icon type="stock">org.oxidezap.client.local</icon>' || fail "AppStream icon does not name the desktop icon"
+contains "$metainfo" '<id>io.github.duckb1t.whatsnative</id>' || fail "AppStream component id is wrong"
+contains "$metainfo" '<launchable type="desktop-id">org.whatsnative.client.local.desktop</launchable>' || fail "AppStream launchable does not name the desktop entry"
+contains "$metainfo" '<icon type="stock">org.whatsnative.client.local</icon>' || fail "AppStream icon does not name the desktop icon"
 if contains "$metainfo" '@VERSION@' || contains "$metainfo" '@DATE@'; then
     fail "AppStream metadata still has unsubstituted placeholders"
 fi
 
 for size in 16 24 32 48 64 128 256; do
-    icon="$stage/usr/share/icons/hicolor/${size}x${size}/apps/org.oxidezap.client.local.png"
-    [ -s "$icon" ] || fail "missing or empty icon: usr/share/icons/hicolor/${size}x${size}/apps/org.oxidezap.client.local.png"
+    icon="$stage/usr/share/icons/hicolor/${size}x${size}/apps/org.whatsnative.client.local.png"
+    [ -s "$icon" ] || fail "missing or empty icon: usr/share/icons/hicolor/${size}x${size}/apps/org.whatsnative.client.local.png"
 done
 
 printf 'smoke-test: %s is OK\n' "$stage"

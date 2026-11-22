@@ -34,7 +34,7 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// The footer draws the two lines below as links rather than as URLs, because
 /// a footer is three short lines and an address is longer than any of them.
-const REPOSITORY: &str = "https://github.com/oxidezap/client";
+const REPOSITORY: &str = "https://github.com/duckb1t/whatsnative";
 
 pub fn render_settings_view(
     app: &mut WhatsAppApp,
@@ -373,7 +373,7 @@ fn render_versions(metrics: Metrics, cx: &App) -> impl IntoElement + use<> {
                 .flex_row()
                 .items_center()
                 .gap(metrics.space_xs())
-                .child(format!("oxidezap {APP_VERSION}"))
+                .child(format!("WhatsNative {APP_VERSION}"))
                 .children(build_revision().map(|rev| {
                     Link::new("settings-revision")
                         .href(format!("{REPOSITORY}/commit/{rev}"))
@@ -386,7 +386,7 @@ fn render_versions(metrics: Metrics, cx: &App) -> impl IntoElement + use<> {
             Link::new("settings-repository")
                 .href(REPOSITORY)
                 .text_size(metrics.text_micro())
-                .child("github.com/oxidezap/client"),
+                .child("github.com/duckb1t/whatsnative"),
         )
 }
 

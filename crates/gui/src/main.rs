@@ -62,7 +62,7 @@ fn open_the_window() {
         // Before anything asks for one: a page's text system starts empty and
         // resolving a font it has not been given is a panic, not a fallback.
         crate::platform::fonts(cx);
-        cx.set_app_identity(crate::platform::window_identity::APP_ID, "OxideZap");
+        cx.set_app_identity(crate::platform::window_identity::APP_ID, "WhatsNative");
         gpui_component::init(cx);
         // Reads ~/.config/oxidezap/theme.json over a preset. Cannot fail: a
         // missing or malformed file resolves to the product default and
@@ -184,10 +184,10 @@ fn install_menus(cx: &mut App) {
     )
     .expect("valid application shortcut")]);
     cx.set_menus(vec![
-        Menu::new("OxideZap").items([
+        Menu::new("WhatsNative").items([
             MenuItem::action("Settings…", crate::app::OpenSettings),
             MenuItem::separator(),
-            MenuItem::action("Quit OxideZap", crate::app::Quit),
+            MenuItem::action("Quit WhatsNative", crate::app::Quit),
         ]),
         Menu::new("Edit").items([
             MenuItem::os_action("Cut", Cut, OsAction::Cut),

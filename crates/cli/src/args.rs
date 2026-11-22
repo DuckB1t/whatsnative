@@ -2,7 +2,7 @@
 
 use usage_rs::{Args, Cli, Subcommands};
 
-/// Lightweight, scriptable WhatsApp CLI for OxideZap
+/// Lightweight, scriptable WhatsApp CLI for WhatsNative
 #[derive(Cli)]
 #[usage(bin = "oxidezap-cli", version = "0.1.0", completion)]
 pub struct OxidezapCli {

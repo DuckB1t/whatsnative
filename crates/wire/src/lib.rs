@@ -1,4 +1,4 @@
-//! Lightweight, decoupled wire protocol DTOs for OxideZap IPC and CLI.
+//! Lightweight, decoupled wire protocol DTOs for WhatsNative IPC and CLI.
 //!
 //! Deliberately free from heavy dependencies like `wacore`, `whatsapp-rust`,
 //! SQLite, GPUI, or media codecs, allowing thin client binaries (`oxidezap-cli`)

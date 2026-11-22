@@ -334,7 +334,7 @@ catalog! {
     Diagnostics => ("DIAGNOSTICS", "DIAGNÓSTICO");
     Background => ("BACKGROUND", "SEGUNDO PLANO");
     KeepRunningInBackground => ("Keep running in the background after closing the window", "Continuar em segundo plano ao fechar a janela");
-    KeepRunningNote => ("Off: closing the window also stops OxideZap, so it uses no memory. On: it stays in the menu bar or tray and notifications keep arriving; quit it from the tray icon.", "Desligado: fechar a janela também encerra o OxideZap e libera a memória. Ligado: ele continua na barra de menus ou na bandeja e as notificações continuam chegando; encerre pelo ícone da bandeja.");
+    KeepRunningNote => ("Off: closing the window also stops WhatsNative, so it uses no memory. On: it stays in the menu bar or tray and notifications keep arriving; quit it from the tray icon.", "Desligado: fechar a janela também encerra o WhatsNative e libera a memória. Ligado: ele continua na barra de menus ou na bandeja e as notificações continuam chegando; encerre pelo ícone da bandeja.");
     LogLevel => ("Log level", "Nível de log");
     KeptIn => ("Kept in", "Salvo em");
     NowhereItLastsForThisRun => ("nowhere — it lasts for this run", "nenhum local, vale apenas nesta execução");

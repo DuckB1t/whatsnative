@@ -7,13 +7,13 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_ID=org.oxidezap.client.local
+APP_ID=org.whatsnative.client.local
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # Fake AppDir with the real AppRun, .desktop template, icons, and a stub binary.
-APPDIR="$TMP/OxideZap.AppDir"
+APPDIR="$TMP/WhatsNative.AppDir"
 mkdir -p "$APPDIR/usr/bin"
 install -Dm755 "$HERE/AppRun" "$APPDIR/AppRun"
 install -Dm644 "$HERE/$APP_ID.desktop" "$APPDIR/usr/share/applications/$APP_ID.desktop"
@@ -74,7 +74,7 @@ grep -Fxq "Exec=\"$(readlink -f "$APPIMAGE")\"" "$DESKTOP" || fail "Exec not ref
 
 # Customized launch options and metadata survive launches and relocation .
 old_path="$(readlink -f "$APPIMAGE")"
-sed -i "s|^Exec=.*|Exec=env WAYLAND_DISPLAY= \"$old_path\" --custom|; s|^Name=.*|Name=My OxideZap|" "$DESKTOP"
+sed -i "s|^Exec=.*|Exec=env WAYLAND_DISPLAY= \"$old_path\" --custom|; s|^Name=.*|Name=My WhatsNative|" "$DESKTOP"
 printf '\nX-User-Setting=keep me\n' >>"$DESKTOP"
 cp "$DESKTOP" "$TMP/custom.desktop"
 before="$(stat -c %i "$DESKTOP")"
@@ -85,7 +85,7 @@ mv "$APPIMAGE" "$TMP/new version.AppImage"
 export APPIMAGE="$TMP/new version.AppImage"
 "$APPDIR/AppRun" >/dev/null
 grep -Fxq "Exec=env WAYLAND_DISPLAY= \"$APPIMAGE\" --custom" "$DESKTOP" || fail "custom Exec not relocated"
-grep -Fxq 'Name=My OxideZap' "$DESKTOP" || fail "custom Name lost"
+grep -Fxq 'Name=My WhatsNative' "$DESKTOP" || fail "custom Name lost"
 grep -Fxq 'X-User-Setting=keep me' "$DESKTOP" || fail "custom key lost"
 
 # Packaged updates apply only to untouched keys; user deletions stay deleted.
@@ -93,7 +93,7 @@ sed -i '/^Comment=/d' "$DESKTOP"
 sed -i 's/^Name=.*/Name=Packaged update/; s/^Categories=.*/Categories=Graphics;/; s/^Comment=.*/Comment=Updated description/' "$APPDIR/usr/share/applications/$APP_ID.desktop"
 printf '\nX-New-Packaged-Key=added\n' >>"$APPDIR/usr/share/applications/$APP_ID.desktop"
 "$APPDIR/AppRun" >/dev/null
-grep -Fxq 'Name=My OxideZap' "$DESKTOP" || fail "packaged update erased custom Name"
+grep -Fxq 'Name=My WhatsNative' "$DESKTOP" || fail "packaged update erased custom Name"
 grep -Fxq 'Categories=Graphics;' "$DESKTOP" || fail "untouched metadata not updated"
 grep -q '^Comment=' "$DESKTOP" && fail "user deletion undone"
 grep -Fxq 'X-New-Packaged-Key=added' "$DESKTOP" || fail "new packaged key missing"
@@ -126,7 +126,7 @@ for invalid in empty garbage missing-exec; do
   case "$invalid" in
     empty) : >"$baseline" ;;
     garbage) printf 'not a desktop entry\n' >"$baseline" ;;
-    missing-exec) printf '[Desktop Entry]\nType=Application\nName=OxideZap\n' >"$baseline" ;;
+    missing-exec) printf '[Desktop Entry]\nType=Application\nName=WhatsNative\n' >"$baseline" ;;
   esac
   sed -i '/^Comment=/d; /^StartupNotify=/d' "$DESKTOP"
   cp "$DESKTOP" "$TMP/before-invalid.desktop"
@@ -201,7 +201,7 @@ unreadable="$XDG_DATA_HOME/applications/00-unreadable.desktop"
 printf '[Desktop Entry]\nExec=/bin/false\n' >"$unreadable"
 chmod a-r "$unreadable"
 ext_desktop="$XDG_DATA_HOME/applications/appimagekit-oxidezap.desktop"
-printf '[Desktop Entry]\nType=Application\nName=OxideZap\nExec="%s"\nIcon=%s\n' "$(readlink -f "$APPIMAGE")" "$APP_ID" >"$ext_desktop"
+printf '[Desktop Entry]\nType=Application\nName=WhatsNative\nExec="%s"\nIcon=%s\n' "$(readlink -f "$APPIMAGE")" "$APP_ID" >"$ext_desktop"
 "$APPDIR/AppRun" >/dev/null || fail "launch with external integrator desktop entry exited non-zero"
 [[ ! -e "$DESKTOP" ]] || fail "duplicate desktop entry kept alongside external integrator entry"
 [[ -f "$ext_desktop" ]] || fail "external integrator desktop entry removed"
@@ -223,7 +223,7 @@ DESKTOPINTEGRATION=AppImageLauncher "$APPDIR/AppRun" >/dev/null || fail "second 
 [[ "$before" = "$(stat -c %i "$DESKTOP")" ]] || fail "desktop entry rewritten under DESKTOPINTEGRATION although unchanged"
 # A real integrator entry still wins, including when DESKTOPINTEGRATION is also set.
 ext_desktop="$XDG_DATA_HOME/applications/appimagekit-oxidezap.desktop"
-printf '[Desktop Entry]\nType=Application\nName=OxideZap\nExec="%s"\nIcon=%s\n' "$(readlink -f "$APPIMAGE")" "$APP_ID" >"$ext_desktop"
+printf '[Desktop Entry]\nType=Application\nName=WhatsNative\nExec="%s"\nIcon=%s\n' "$(readlink -f "$APPIMAGE")" "$APP_ID" >"$ext_desktop"
 DESKTOPINTEGRATION=AppImageLauncher "$APPDIR/AppRun" >/dev/null || fail "launch with integrator entry and DESKTOPINTEGRATION exited non-zero"
 [[ ! -e "$DESKTOP" ]] || fail "duplicate desktop entry kept when an integrator entry exists"
 [[ -f "$ext_desktop" ]] || fail "external integrator desktop entry removed"
@@ -263,7 +263,7 @@ rm -rf "$XDG_DATA_HOME"
 am_desktop="$XDG_DATA_HOME/applications/oxidezap-AM.desktop"
 printf '[Desktop Entry]
 Type=Application
-Name=OxideZap
+Name=WhatsNative
 Exec=oxidezap
 Icon=%s
 ' "$APP_ID" >"$am_desktop"

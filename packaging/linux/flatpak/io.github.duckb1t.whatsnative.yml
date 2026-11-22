@@ -1,4 +1,4 @@
-# Experimental Flatpak manifest for OxideZap. Not attached to releases.
+# Experimental Flatpak manifest for WhatsNative. Not attached to releases.
 #
 # It repackages the prebuilt binaries from package.sh's -fhs.tar.gz (packaging/linux/flatpak-bundle.sh)
 # instead of compiling inside flatpak-builder, whose build has no network: the workspace pulls
@@ -8,13 +8,13 @@
 #
 # The app id must be reverse-DNS and owned by the project, so it is the AppStream id; the desktop
 # file and icon are renamed to it.
-id: io.github.oxidezap.client
+id: io.github.duckb1t.whatsnative
 runtime: org.freedesktop.Platform
 runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 command: oxidezap
-rename-desktop-file: org.oxidezap.client.local.desktop
-rename-icon: org.oxidezap.client.local
+rename-desktop-file: org.whatsnative.client.local.desktop
+rename-icon: org.whatsnative.client.local
 finish-args:
   # Display: Wayland first; X11 only when no Wayland compositor is running.
   - --socket=wayland
@@ -43,13 +43,13 @@ modules:
       # themselves. All run in one sandbox per app id, which shares $XDG_RUNTIME_DIR (the
       # daemon's socket and lock) between `flatpak run` instances.
       - install -Dm755 -t /app/bin bin/oxidezap bin/oxidezapd bin/oxidezap-cli
-      - install -Dm644 share/applications/org.oxidezap.client.local.desktop /app/share/applications/org.oxidezap.client.local.desktop
+      - install -Dm644 share/applications/org.whatsnative.client.local.desktop /app/share/applications/org.whatsnative.client.local.desktop
       # rename-desktop-file and rename-icon do not touch the metainfo: point it at the new names.
       - >-
-        sed -e 's|<launchable type="desktop-id">org.oxidezap.client.local.desktop<|<launchable type="desktop-id">io.github.oxidezap.client.desktop<|'
-        -e 's|<icon type="stock">org.oxidezap.client.local<|<icon type="stock">io.github.oxidezap.client<|'
-        share/metainfo/io.github.oxidezap.client.metainfo.xml
-        | install -Dm644 /dev/stdin /app/share/metainfo/io.github.oxidezap.client.metainfo.xml
+        sed -e 's|<launchable type="desktop-id">org.whatsnative.client.local.desktop<|<launchable type="desktop-id">io.github.duckb1t.whatsnative.desktop<|'
+        -e 's|<icon type="stock">org.whatsnative.client.local<|<icon type="stock">io.github.duckb1t.whatsnative<|'
+        share/metainfo/io.github.duckb1t.whatsnative.metainfo.xml
+        | install -Dm644 /dev/stdin /app/share/metainfo/io.github.duckb1t.whatsnative.metainfo.xml
       - mkdir -p /app/share/icons /app/share/doc && cp -R share/icons/hicolor /app/share/icons/ && cp -R share/doc/oxidezap /app/share/doc/
     sources:
       - type: dir
