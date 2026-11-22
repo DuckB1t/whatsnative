@@ -57,11 +57,11 @@ cargo build --release --bin oxidezap --bin oxidezapd && ./target/release/oxideza
 # runs its handlers against the SDK's test host, with no daemon and no wasm.
 # Through the task rather than a bare `cargo build --target wasm32-unknown-unknown`,
 # because the root's `.cargo/config.toml` sets `+atomics` and `--shared-memory`
-# for this target — that target is the *web front end* — and cargo joins those
+# for this target, that target is the *web front end*, and cargo joins those
 # into any build under the tree. A plugin built with them has a shared memory,
 # which the host refuses, saying so on the Settings screen. The task is the one
 # place that knows to clear `RUSTFLAGS`; it prints where the `.wasm` landed,
-# which is the only thing it prints, so the path can be taken from it — and
+# which is the only thing it prints, so the path can be taken from it, and
 # should be, since `CARGO_TARGET_DIR` moves it.
 rustup target add wasm32-unknown-unknown
 module="$(cargo xtask plugin build examples/autoreply)"
@@ -75,7 +75,7 @@ The same window as a page:
 
 ```bash
 # Needs pinned nightly for build-std and wasm_thread: the standard library has
-# to be rebuilt with the atomics target feature on — gpui_web runs its
+# to be rebuilt with the atomics target feature on, gpui_web runs its
 # background executor on real workers, and the prebuilt std is not compiled
 # for that. The link flags are in /.cargo/config.toml.
 rustup toolchain install nightly-2026-10-29 --component rust-src --target wasm32-unknown-unknown
@@ -86,13 +86,13 @@ cargo install trunk
 # no way to.
 # Through the task: trunk cannot forward arguments to cargo, so it is what
 # sets the toolchain and `CARGO_UNSTABLE_BUILD_STD`.
-# Run it from the root —
+# Run it from the root,
 # the alias in /.cargo/config.toml names a manifest path.
 TRUNK_ACTION=serve cargo xtask web build
 
 # And the daemon it attaches to. `--web` alone is loopback on the port the
 # page looks for; localhost is served without being named. It logs where the
-# token file is, not the token — that is a bearer credential and a log is
+# token file is, not the token, that is a bearer credential and a log is
 # what people paste into issues. The token goes after a `#`, never a `?`: a
 # query reaches whoever served the page, a fragment never leaves the browser.
 cargo run --bin oxidezapd -- --web
@@ -100,19 +100,19 @@ cargo run --bin oxidezapd -- --web
 # The same bundle with its symbols, for when a profile or a panic trace has
 # to name something. `[profile.web-debug]` inherits `[profile.web]` and turns
 # `strip` off, so it is the build that misbehaved rather than a different one
-# — and `-g` in `data-wasm-opt-params` is what stops wasm-opt throwing the
+#, and `-g` in `data-wasm-opt-params` is what stops wasm-opt throwing the
 # name section away again.
 WEB_PROFILE=debug cargo xtask web build
 
 # And the same again with its source *lines*, which is what a browser needs to
 # say `crates/gui/src/app.rs:412` rather than a function name. Three things
 # make that work and the task does all three: `[profile.web-dwarf]` keeps the
-# DWARF, the build skips wasm-opt — which moves the code the line table
+# DWARF, the build skips wasm-opt, which moves the code the line table
 # describes, and rewrites the table only for the transformations it knows how
-# to follow — and `cargo xtask web map` projects `.debug_line` into a source
+# to follow, and `cargo xtask web map` projects `.debug_line` into a source
 # map beside the module, pointing the module at it with a `sourceMappingURL`
 # section. DWARF is what an extension reads; the map is what DevTools reads on
-# its own, in every engine. It is not the build to *profile*, though — a flame
+# its own, in every engine. It is not the build to *profile*, though, a flame
 # chart reads the name section, which `debug` above already keeps, and this one
 # skips wasm-opt and so is a different code layout. See docs/gotchas.md, on
 # names and lines being different sections.
@@ -122,11 +122,11 @@ cargo xtask web map            # the map again, over a module already built
 
 `TRUNK_ACTION=serve` is refused for that profile rather than served unmapped:
 the map is written after the build, a serve never finishes, and a serve that
-rebuilt would leave the map describing a module that is gone — silently, since
+rebuilt would leave the map describing a module that is gone, silently, since
 a stale map still parses. Build it and serve `web/dist` with any static
 server.
 
-The web half of the daemon — the OPFS folder a page installs plugins into —
+The web half of the daemon, the OPFS folder a page installs plugins into,
 is `cfg`-gated to wasm, so `cargo test --workspace` compiles none of it. It
 has tests that run in a real browser instead, and CI runs them:
 
@@ -144,7 +144,7 @@ cargo install wasm-bindgen-cli --version 0.2.129  # must match Cargo.lock
 ```bash
 # The driver must match the browser's major version. `CHROMEWEBDRIVER`, when
 # the environment sets it, is the *directory* holding the driver, so join the
-# binary onto it and fall back to the path — `which chromedriver` alone comes
+# binary onto it and fall back to the path, `which chromedriver` alone comes
 # back empty whenever that directory is not itself on `PATH`. This is what CI
 # does.
 export CHROMEDRIVER="${CHROMEWEBDRIVER:-}/chromedriver"
@@ -172,7 +172,7 @@ cargo +nightly-2026-10-29 check -p oxidezap-gui --target wasm32-unknown-unknown 
 ```
 
 The session builds for that target too, and is checked separately because
-nothing in the page depends on it yet — a break there would otherwise go
+nothing in the page depends on it yet, a break there would otherwise go
 unnoticed until something does:
 
 ```bash

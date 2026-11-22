@@ -1,7 +1,7 @@
 # oxidezap-cli
 
 Scriptable WhatsApp CLI. One session per user lives in the daemon; the CLI
-holds none — every command is a line-protocol request over the daemon
+holds none, every command is a line-protocol request over the daemon
 socket. When no daemon is listening the CLI starts one beside itself, the
 same way the window does, so a first `oxidezap-cli status` on a fresh
 machine works without a separate launch.
@@ -68,7 +68,7 @@ without a conditional picture ID, independently of the GUI's avatar-byte cache.
 client-side *and* daemon-side: the daemon answers mutations with
 `permission_denied` before touching the session. What counts as a mutation
 is declared per request in `oxidezap-wire`'s `ClientRequest::access`, which
-is an exhaustive `match` — a new request does not compile until it says
+is an exhaustive `match`, a new request does not compile until it says
 whether it reads or writes, so a variant cannot be born permissive by
 accident. Mutations need a connected account; reads work offline against
 the local store.
@@ -99,7 +99,7 @@ changes are needed for this capability negotiation.
 
 An id is validated, never sanitized: `[A-Za-z0-9][A-Za-z0-9_-]*`, and
 anything else is refused with `invalid_account_id` (exit 2). Sanitizing
-would map `wo/rk` onto `work` — two profiles converging on one store — and
+would map `wo/rk` onto `work`, two profiles converging on one store, and
 the same value is echoed by `accounts use` into a shell, so it must not
 carry a quote, a space or a `$` either.
 
@@ -134,7 +134,7 @@ forward page.
 
 `sync` prints the current status and exits. `sync --follow` asks the daemon
 for session events in its handshake and follows the stream as NDJSON.
-Receipts, reactions and call stages have no event spelling — poll or re-list
+Receipts, reactions and call stages have no event spelling, poll or re-list
 for those. The follower skips lines it cannot parse; EOF ends it cleanly and
 a transport error is reported with a nonzero exit.
 

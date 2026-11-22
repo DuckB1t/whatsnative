@@ -34,7 +34,7 @@ Re-enabling our video into a call where the peer's direction is still active
 cannot complete as an upgrade: the reducer ignores an upgrade request against
 an already-active direction, so no accept ever comes, the send-gated plane
 admits nothing (the relay counters freeze), and the library's five-second
-timeout cancels with `UpgradeCancelByTimeout` — which the peer applies by
+timeout cancels with `UpgradeCancelByTimeout`, which the peer applies by
 tearing its own direction down too, collapsing the whole call. The registry
 therefore watches each upgrade it initiates and withdraws it at four seconds
 when unanswered: a `Stopped` the peer applies without touching its direction,
@@ -116,7 +116,7 @@ shared-memory WebCodecs tests exercise the real browser codecs.
 Stanza injection bypasses inbound Noise framing. No media relay or Android
 decoder runs in this fixture. Upstream still permits an unrung first winner
 and lets a later sibling reject end the call unless it is per-device
-(`busy`, or `enc` for a device that could not decrypt the offer) — and our
+(`busy`, or `enc` for a device that could not decrypt the offer), and our
 own event arm matches that rule rather than hanging up on one stale
 device. Matching application metadata does not repair those policies. Neither a standalone post-accept
 video announcement nor a caller-side upgrade re-request goes out on a video-from-start accept:

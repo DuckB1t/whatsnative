@@ -1,5 +1,10 @@
 # oxidezap
 
+> This is the rulebook for people touching the code. It is terse on purpose.
+> Do not rewrite it into a pile of vibes. Every rule here exists because
+> ignoring it broke something. Product name is WhatsNative; crate and binary
+> names stay `oxidezap*` because renaming them buys us nothing.
+
 Unofficial WhatsApp client on top of [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust).
 GPUI front end. The same tree builds a desktop app and a web front end for
 `wasm32-unknown-unknown`. **Native builds and ordinary WASM tests use Rust 1.100.0.**
@@ -8,9 +13,9 @@ The shared-memory web build and browser tests use `nightly-2026-10-29`, because
 rebuilt with atomics. See
 [docs/building.md](docs/building.md) before provisioning a toolchain.
 
-**This file holds decisions, not inventories.** Anything countable — which
+**This file holds decisions, not inventories.** Anything countable, which
 crates exist, which dependency does a job, what a command's flags are, what the
-module weighs — is derived from the tree and goes stale here faster than it goes
+module weighs, is derived from the tree and goes stale here faster than it goes
 stale there. Where this file names a source of truth, read it rather than
 trusting the sentence next to it.
 
@@ -19,7 +24,7 @@ trusting the sentence next to it.
 There is exactly **one WhatsApp session per user, and it lives in the daemon.**
 A front end holds no session, no store and no media; it speaks a line protocol
 to the daemon over whatever transport the platform has. On the web the page
-starts a daemon in its own address space — same protocol, no process — so the
+starts a daemon in its own address space, same protocol, no process, so the
 rule holds there too, and a second tab is a front end onto the first.
 
 The layering, which is what a crate's placement has to respect:
@@ -31,7 +36,7 @@ The layering, which is what a crate's placement has to respect:
   platform except inside the modules that exist to be split.
 - **ipc** is the protocol and the client end of the transport; **daemon** is the
   state every front end observes, plus the process around it.
-- **gui** is a front end, and **never depends on session** — that is the rule,
+- **gui** is a front end, and **never depends on session**, that is the rule,
   and its manifest is where a violation would show. On wasm it does depend on
   daemon, which is the same rule rather than an exception: a page has no process
   to reach one in. The manifest comments the gating.
@@ -48,7 +53,7 @@ so a host build fails at every `oxi_*` symbol) and `xtask/` (it takes no
 dependencies at all, so the Pages job can compile it from a sparse checkout).
 Only the first is in `exclude`; the second is simply not a member. The reasoning
 is commented at both. `xtask/` has its own CI job; `examples/` is checked at
-the end of the Linux `Check` job — linted and tested on the host, built for
+the end of the Linux `Check` job, linted and tested on the host, built for
 wasm32 through `cargo xtask plugin build`, and the module loaded by the host's
 `#[ignore]`d test. **Build a plugin through that task, never with a bare
 `cargo build --target wasm32-unknown-unknown`:** the root `.cargo/config.toml`
@@ -60,7 +65,7 @@ carrying their own `RUSTFLAGS=`.
 
 ## Build & verify
 
-`.github/workflows/ci.yml` is what actually gates a pull request — **check the
+`.github/workflows/ci.yml` is what actually gates a pull request, **check the
 flags there rather than copying them from here**, since the two drift and the
 workflow is the one that is right. As of writing it runs, per job:
 
@@ -86,7 +91,7 @@ done
 cargo test -p oxidezap-plugin-host --all-features -- --ignored
 ```
 
-`cargo xtask help` lists the repository's own tooling — prefer asking it to
+`cargo xtask help` lists the repository's own tooling, prefer asking it to
 assuming, since tasks are added there. Running the client is the window and the
 daemon, and the window looks for the daemon beside itself; `cargo build
 --release` then run the front-end binary. `oxidezap-cli` is a third binary, a
@@ -105,44 +110,44 @@ which is why they are here and the inventories are not.
   bug. `Cargo.toml` has the source and the current set.
 - **Colours come from `cx.theme()`.** A literal is invisible to theme switching
   and drifts. There are a couple of deliberate exceptions, and
-  `crates/gui/src/theme/` is where one has to argue for itself — the palette
+  `crates/gui/src/theme/` is where one has to argue for itself, the palette
   and its override table are there, so a colour with no token is visible.
-- **Sizes come from the rem**, never from `px` literals — the window's size
+- **Sizes come from the rem**, never from `px` literals, the window's size
   reaches the interface as one factor on the base font, applied once from the
   root's render pass. A component never learns that small screens exist. Follow
   the callers of the fit helper in `crates/gui/src/theme/metrics.rs`.
-- **Render helpers take `&App` and return `impl IntoElement + use<>`** — without
+- **Render helpers take `&App` and return `impl IntoElement + use<>`**, without
   `use<>` the 2024 capture rules make them inherit a lifetime the virtual list's
   closure rejects.
-- **The trimmed SQLite build is deliberate, and FTS5 must stay** — the search
+- **The trimmed SQLite build is deliberate, and FTS5 must stay**, the search
   index is built on it. The feature list is in `.cargo/config.toml`.
 - **The store is one file.** Device identity, Signal state and chat history
   share a database keyed by device id, so a partial wipe orphans everything
   behind the new device; the wipe deletes the file and its `-wal`/`-shm`.
-- **A *transport's* platform split lives in exactly two places** — the endpoint
+- **A *transport's* platform split lives in exactly two places**, the endpoint
   side under `crates/ipc/src/endpoint/` and the listener side under
   `crates/daemon/src/listener/`. A new transport is added *there*; everything
-  above them — framing, requests, the protocol — is written once, and the module
+  above them, framing, requests, the protocol, is written once, and the module
   headers in both say so. This is the rule for transports only: a capability
   crate owns its own split, which is why `audio/src/web/`, `video/src/web/` and
   `session/src/exec/` are where they are and not under ipc or daemon. There are
-  about sixteen such split modules now, not the three named here — `find crates
+  about sixteen such split modules now, not the three named here, `find crates
   -name web.rs` is the list, and the point of naming any is the rule, not the
   inventory.
 - **A platform split is a module, not a `#[cfg]` per item.** One function the
   caller names, two implementations behind it, and no `cfg` at the call. The
-  inner module is called `imp` — one word that compiles on both targets, where
+  inner module is called `imp`, one word that compiles on both targets, where
   `native::save(..)` would need a `#[cfg]` at every call site and so put back
   exactly what the module removes. Small answers stay an inline `mod imp` pair
   in the one file; a half earns its own file once it grows submodules or
   outgrows the file. **`#[cfg_attr(path)] mod platform;` does not work when a
-  half has submodules** — rustfmt resolves a `#[path]` module's children against
+  half has submodules**, rustfmt resolves a `#[path]` module's children against
   the wrong directory and `cargo fmt --check` fails with "failed to resolve
   mod". Use the `#[cfg] mod native; #[cfg] mod web;` pair there and say why;
   `daemon/src/plugins/mod.rs` is the worked example.
 - **A page has no threads, and several std/tokio APIs compile for it and fail at
-  run time** — `std::thread::spawn`, `tokio::time`, `spawn_blocking`. The
-  `oxidezap-platform` crate is the seam that answers them — it sits below
+  run time**, `std::thread::spawn`, `tokio::time`, `spawn_blocking`. The
+  `oxidezap-platform` crate is the seam that answers them, it sits below
   everything precisely so `plugin-host`, which must not depend on `session`, can
   reach it too; that rule used to name the session's `exec/` and the tree had
   quietly forked three copies of one browser timer because `plugin-host` could
@@ -155,7 +160,7 @@ which is why they are here and the inventories are not.
 - **A browser API never gets a view into wasm memory.** The module is built with
   `--shared-memory`, so the specs refuse a shared `ArrayBufferView`: copy before
   crossing out. This cost three outages, so the spelling is now banned rather
-  than remembered — `clippy.toml` lists the offending bindings under
+  than remembered, `clippy.toml` lists the offending bindings under
   `disallowed-methods` with the copying replacement in the reason, and CI's
   `Test (web)` job is what runs that rule against the wasm target. There is one
   declared exception; the gotchas entry names it and the reason.
@@ -166,24 +171,24 @@ which is why they are here and the inventories are not.
 
 ## Where the reasoning lives
 
-Read the relevant document before changing the code it describes — most entries
+Read the relevant document before changing the code it describes, most entries
 exist because the obvious alternative was tried and failed silently. They carry
 the detail and the measurements this file deliberately does not.
 
-- **[docs/architecture.md](docs/architecture.md)** — the crate map in prose, the
+- **[docs/architecture.md](docs/architecture.md)**, the crate map in prose, the
   theme, and how responsiveness derives from one number.
-- **[docs/gotchas.md](docs/gotchas.md)** — non-obvious behaviour and why: the
+- **[docs/gotchas.md](docs/gotchas.md)**, non-obvious behaviour and why: the
   session/front-end split, calls, video, plugins, the store, the wire format.
-- **[docs/web.md](docs/web.md)** — the page: its own daemon, the tab claim, the
+- **[docs/web.md](docs/web.md)**, the page: its own daemon, the tab claim, the
   relay, media, service-worker caching, and what a page cannot do.
-- **[docs/building.md](docs/building.md)** — every build beyond the ones above.
-- **[docs/ci.md](docs/ci.md)** — the library dependency, and why the Actions
+- **[docs/building.md](docs/building.md)**, every build beyond the ones above.
+- **[docs/ci.md](docs/ci.md)**, the library dependency, and why the Actions
   cache budget decides how long a pull request waits.
-- **[docs/linux-packaging.md](docs/linux-packaging.md)** — the AppImage, deb
+- **[docs/linux-packaging.md](docs/linux-packaging.md)**, the AppImage, deb
   and rpm, their ids and dependencies, and why the Flatpak is not released.
-- **[docs/plugin-abi.md](docs/plugin-abi.md)** — the contract for anyone not
+- **[docs/plugin-abi.md](docs/plugin-abi.md)**, the contract for anyone not
   using the SDK. Load-bearing: a test loads the module it prints.
-- **[docs/roadmap.md](docs/roadmap.md)** — known gaps and their reasoning.
+- **[docs/roadmap.md](docs/roadmap.md)**, known gaps and their reasoning.
 
 Numbers in those documents are measurements, each true of the commit that took
 it. Re-measure before relying on one; **a number is about the difference that

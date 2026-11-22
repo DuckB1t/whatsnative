@@ -1,32 +1,43 @@
-# Organization icon
+# The WhatsNative icon
 
-The client identity inherits the [OxideZap organization avatar](https://github.com/oxidezap.png)
-from upstream; WhatsNative keeps the artwork and credits it in the README.
-The upstream maintainer supplied the source PNG in `icon.zip` for issue #214. Its original
-SHA-256 is `b9b24312829978aa7922e3d2ecf7228f5e96beab863595bf191ff0be9e319699`.
+The old mark came from upstream's OxideZap organization avatar. It looked like
+a WhatsApp bubble with the corners filed off, which is exactly the kind of
+lazy identity this fork is not here for. We threw it out.
 
-`linux/org.whatsnative.client.local.png` is the canonical image. Lossless compression
-preserves all RGBA pixels and its 460 × 460 canvas. The Linux window embeds it,
-and the desktop installer copies it into the user's icon search directory.
+The new mark is ours: an angular W cut from cyan and violet shards on an
+indigo tile. No speech bubble, no phone handset, no WhatsApp green. The source
+of truth is [`whatsnative-logo.svg`](whatsnative-logo.svg), hand-written vector
+code, committed here so it can be reviewed and changed like any other file.
 
-The web uses a transparent ICO with separate 16, 32 and 48 pixel frames, a
-32 pixel PNG, and an opaque 180 pixel Apple touch icon. These are generated from
-the same mark, with its empty margins reduced for legibility. The Apple icon
-uses the page's initial background color. There is no traced or recolored logo.
+`linux/org.whatsnative.client.local.png` is the raster master. It is 460 by 460
+pixels with a transparent corner outside the rounded tile. The Linux window
+embeds it, the desktop installer puts it in the user's icon search path, and
+AppImage uses the 256 pixel hicolor copy as its `.DirIcon`.
 
-To regenerate, use Python 3.11 or newer and install the pinned tools:
+Web assets come from the same mark, with the transparent margins cropped so
+16 pixel favicons stay readable:
+
+- `web/icons/favicon.ico` with 16, 32 and 48 pixel frames
+- `web/icons/favicon-32.png`
+- `web/icons/apple-touch-icon.png`, opaque on the page background so the OS
+  mask does not show black corners
+
+To regenerate, use Python 3.11 or newer, ImageMagick, `rsvg-convert`, and the
+pinned tools:
 
 ```sh
 python3 -m venv .venv-icons
 . .venv-icons/bin/activate
 python -m pip install -r packaging/requirements.txt
-cargo install --locked --version 10.2.1 oxipng
-python packaging/generate-icons.py
-# Replace the source when the organization chooses a new identity:
-python packaging/generate-icons.py path/to/organization.png
+cargo install --locked --version 9.1.5 oxipng
+rsvg-convert -w 460 -h 460 packaging/whatsnative-logo.svg -o /tmp/wn-icon.png
+python packaging/generate-icons.py /tmp/wn-icon.png
+packaging/linux/icons.sh
 ```
 
-The checked-in assets were generated with Pillow 12.3.0 and oxipng 9.1.5.
-The generator checks decoded pixel equality after every PNG optimization.
-Trunk hashes the favicon ICO and copies the PNGs beside `index.html`; their
-relative links also work in Pages previews and relocatable web archives.
+The generated PNGs are checked for decoded pixel equality after optimization.
+Trunk hashes the favicon ICO and copies the PNGs beside `index.html`, so the
+relative links work in Pages previews and relocated web archives.
+
+Credit where it is due: the icon artwork before this change came from upstream
+and is still credited in `docs/our-changes.md`. This one is ours.

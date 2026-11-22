@@ -45,7 +45,8 @@
   <g transform="translate(72 118)">
     <text x="0" y="58" font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif" font-size="68" font-weight="800" letter-spacing="-2" fill="#f4fbf9">Whats<tspan fill="#06cf9c">Native</tspan></text>
     <rect x="2" y="82" width="86" height="5" rx="2.5" fill="url(#accent)"/>
-    <text x="0" y="126" font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif" font-size="21" font-weight="500" letter-spacing="0.3" fill="#a9c4bf">Rust + GPUI. No Electron. No WebView.</text>
+    <text x="0" y="126" font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif" font-size="21" font-weight="600" letter-spacing="0.3" fill="#a9c4bf">FUCK ELECTRON. FUCK WEBVIEW.</text>
+    <text x="0" y="156" font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif" font-size="15" font-weight="400" letter-spacing="0.3" fill="#6f9690">Rust + GPUI. A real native client.</text>
   </g>
 
   <text x="72" y="292" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" letter-spacing="1.6" fill="#6f9690">A NATIVE WHATSAPP CLIENT FOR LINUX, macOS &amp; WINDOWS</text>

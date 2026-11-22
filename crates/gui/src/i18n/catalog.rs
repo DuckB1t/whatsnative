@@ -151,7 +151,7 @@ catalog! {
     CameraOff => ("camera off", "câmera desligada");
     NoCamera => ("no camera", "sem câmera");
     TurnTheCameraOff => ("Turn the camera off", "Desligar câmera");
-    TheyAskedForVideoTurnTheCameraOn => ("They asked for video — turn the camera on", "Solicitaram vídeo, ligue a câmera");
+    TheyAskedForVideoTurnTheCameraOn => ("They asked for video, turn the camera on", "Solicitaram vídeo, ligue a câmera");
     TurnTheCameraOn => ("Turn the camera on", "Ligar câmera");
     Unmute => ("Unmute", "Ativar microfone");
     Mute => ("Mute", "Silenciar microfone");
@@ -337,7 +337,7 @@ catalog! {
     KeepRunningNote => ("Off: closing the window also stops WhatsNative, so it uses no memory. On: it stays in the menu bar or tray and notifications keep arriving; quit it from the tray icon.", "Desligado: fechar a janela também encerra o WhatsNative e libera a memória. Ligado: ele continua na barra de menus ou na bandeja e as notificações continuam chegando; encerre pelo ícone da bandeja.");
     LogLevel => ("Log level", "Nível de log");
     KeptIn => ("Kept in", "Salvo em");
-    NowhereItLastsForThisRun => ("nowhere — it lasts for this run", "nenhum local, vale apenas nesta execução");
+    NowhereItLastsForThisRun => ("nowhere, it lasts for this run", "nenhum local, vale apenas nesta execução");
     Renderer => ("Renderer", "Renderizador");
     CloseSettings => ("Close settings", "Fechar configurações");
     PresetsWriteToTheSameThemeJsonYouCanEditByHand => ("Presets write to the same theme.json you can edit by hand.", "Os temas são salvos no mesmo theme.json que você pode editar manualmente.");
@@ -482,7 +482,7 @@ catalog! {
     SearchChats => ("Search chats...", "Buscar conversas...");
     NotificationsGuidance => ("When system permissions allow, eligible incoming messages may raise desktop notifications while this window is running. Muted, archived, policy-blocked, self-sent, and currently visible messages are suppressed; an explicit group mention may still alert. Clicking a notification opens that conversation.", "Se o sistema permitir, mensagens recebidas podem gerar notificações enquanto esta janela estiver aberta. Mensagens silenciadas, arquivadas, bloqueadas por políticas, enviadas por você ou visíveis na conversa não geram notificações. Uma menção explícita em grupo ainda pode notificar. Clicar na notificação abre a conversa.");
     PrivacyGuidance => ("Messages are end-to-end encrypted. Keys live in this device's store and never leave it.", "As mensagens são protegidas com criptografia de ponta a ponta. As chaves ficam armazenadas neste dispositivo e nunca saem dele.");
-    UnlinkGuidance => ("Unlinking clears this device's local data — messages, contacts, keys and downloaded media — and starts a new link from the QR code.", "Desvincular apaga os dados locais deste dispositivo, incluindo mensagens, contatos, chaves e mídias baixadas, e inicia uma nova vinculação por código QR.");
+    UnlinkGuidance => ("Unlinking clears this device's local data, messages, contacts, keys and downloaded media, and starts a new link from the QR code.", "Desvincular apaga os dados locais deste dispositivo, incluindo mensagens, contatos, chaves e mídias baixadas, e inicia uma nova vinculação por código QR.");
     CacheGuidance => ("Clearing the cache keeps every message. Anything you open again is downloaded again.", "Limpar o cache mantém todas as mensagens. O que você abrir novamente será baixado de novo.");
     ThemeWarning => ("Some of the file could not be applied. The rest of the theme is unchanged.", "Não foi possível aplicar parte do arquivo. O restante do tema não foi alterado.");
     OfflineHistoryGuidance => ("Read retained messages and cached media locally. WhatsApp requests are blocked offline. Pairing again uses a separate local account and keeps this history.", "Leia as mensagens salvas e as mídias em cache neste dispositivo. As solicitações ao WhatsApp ficam bloqueadas sem conexão. Vincular novamente usa outra conta local e mantém este histórico.");
@@ -619,7 +619,7 @@ catalog! {
     OpenMediaMessages => ("Open media messages", "Abrir mensagens com mídia");
     NoMediaMessages => ("No messages with media yet", "Nenhuma mensagem com mídia ainda");
     CouldNotLoadMediaMessages => ("Could not load media messages", "Não foi possível carregar as mensagens com mídia");
-    MediaListGuidance => ("Browse messages with media from your stored history, newest first. No thumbnails or filters — open a row to see the message.", "Navegue pelas mensagens com mídia do histórico armazenado, mais recentes primeiro. Sem miniaturas ou filtros — abra uma linha para ver a mensagem.");
+    MediaListGuidance => ("Browse messages with media from your stored history, newest first. No thumbnails or filters, open a row to see the message.", "Navegue pelas mensagens com mídia do histórico armazenado, mais recentes primeiro. Sem miniaturas ou filtros, abra uma linha para ver a mensagem.");
 
     // Protocol 54's chat-list management. "Mute" alone names the call's
     // microphone in this catalog, so these say which mute they mean.

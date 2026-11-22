@@ -6956,6 +6956,9 @@ mod screenshot_preview {
             crate::platform::fonts::fonts(cx);
             gpui_component::init(cx);
             crate::theme::init(cx);
+            // Ignore any theme.json on this machine: previews must show the
+            // shipped Tokyo Night preset, not the reader's local overrides.
+            crate::theme::install(crate::theme::config::ThemeSettings::default(), cx);
         });
         let mut app_entity = None;
         let window = cx

@@ -37,6 +37,9 @@ mod imp {
 mod tests {
     #[gpui::test]
     fn linux_window_has_the_launcher_id_and_straight_rgba_icon(cx: &mut gpui::TestAppContext) {
+        // The centre of the WhatsNative mark is a cyan shard. The old
+        // upstream avatar had an orange centre, so this also catches an
+        // accidental swap back to the inherited artwork.
         cx.update(|cx| {
             let mut options = gpui::WindowOptions::default();
             super::apply(&mut options, cx);
@@ -48,12 +51,10 @@ mod tests {
                         .unwrap_or(super::APP_ID)
                 )
             );
-            let icon = options
-                .icon
-                .expect("organization PNG produces a window icon");
+            let icon = options.icon.expect("master PNG produces a window icon");
             assert_eq!(icon.dimensions(), (460, 460));
             assert_eq!(icon.get_pixel(0, 0).0, [0, 0, 0, 0]);
-            assert_eq!(icon.get_pixel(230, 230).0, [234, 55, 9, 255]);
+            assert_eq!(icon.get_pixel(230, 230).0, [59, 193, 247, 255]);
         });
     }
 }

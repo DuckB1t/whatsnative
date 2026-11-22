@@ -24,7 +24,7 @@ FHS tree, nfpm builds the deb and rpm, appimagetool and the type2 runtime are
 downloaded at pinned SHA-256 digests. It builds on the same Ubuntu 22.04
 runners the archives do, and `package.sh` reads the glibc floor from the
 binaries into the deb's and rpm's dependency on libc. Measured on the nightly
-of 2026-11-16 that floor was glibc 2.35 — a measurement of that build, not a
+of 2026-11-16 that floor was glibc 2.35, a measurement of that build, not a
 constant; re-read it with `objdump -T` before relying on it.
 
 ## Decisions
@@ -37,9 +37,9 @@ constant; re-read it with `objdump -T` before relying on it.
   name the project owns (the GitHub organization).
 - **Package version.** A tag's version is the package version. A name that is
   not a version (`nightly`, `pr-<n>`) becomes a pre-release of the
-  `Cargo.toml` version with a UTC timestamp — for example
+  `Cargo.toml` version with a UTC timestamp, for example
   `0.1.0~nightly.202611171200` in a deb (an example from a 2026-11-17 build,
-  not a fixed value) — so nightlies upgrade each other and sort below the
+  not a fixed value), so nightlies upgrade each other and sort below the
   release they lead up to.
 - **Dependencies** are the libraries the binaries link (`objdump -p`) plus the
   ones they `dlopen` (Wayland, Vulkan or EGL); `packaging/linux/nfpm.yaml` lists
@@ -61,7 +61,7 @@ constant; re-read it with `objdump -T` before relying on it.
 
 ## Smoke test
 
-`packaging/linux/smoke-test.sh` checks the staged FHS tree — the one
+`packaging/linux/smoke-test.sh` checks the staged FHS tree, the one
 `package.sh` builds under `$CARGO_TARGET_DIR/linux-package/root` and then hands
 to nfpm and appimagetool. It needs only a shell: three executable binaries
 co-located in `usr/bin`, a desktop entry and AppStream metadata whose ids agree

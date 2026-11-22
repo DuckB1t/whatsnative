@@ -1,5 +1,9 @@
 # Our changes on top of upstream
 
+> This is the receipt pile. Every local change is recorded here with its commit
+> and the gates it passed. No mystery diffs, no "we rewrote the whole thing"
+> bullshit. If a change is not in this file, ask why.
+
 Base: `oxidezap/client` @ `ea67a2aa41279232029b5872528ec394fb491e98` (2026-11-20),
 tagged `base-upstream-ea67a2aa`.
 
@@ -15,12 +19,12 @@ SQLite store, plugins and Linux packaging.
 
 - Rust 1.100.0 via rustup (system 1.99.1 too old; project pins 1.100.0).
 - Native deps present: ALSA, X11, Wayland, xkbcommon, fontconfig, freetype, FFmpeg.
-- `cargo check -p oxidezap-core` — passed.
-- `cargo build --release --bin oxidezap --bin oxidezapd --bin oxidezap-cli` — passed (24m30s).
+- `cargo check -p oxidezap-core`, passed.
+- `cargo build --release --bin oxidezap --bin oxidezapd --bin oxidezap-cli`, passed (24m30s).
 - Binaries: `oxidezap` 46M, `oxidezapd` 31M, `oxidezap-cli` 1.5M (stripped).
 - `oxidezap-cli doctor`: daemon running, DB healthy, pairing QR issued.
-- GUI verified as native Wayland window (`org.oxidezap.client.local` at baseline —
-  renamed to `org.whatsnative.client.local` in section 23 — `xwayland: 0`).
+- GUI verified as native Wayland window (`org.oxidezap.client.local` at baseline,
+  renamed to `org.whatsnative.client.local` in section 23, `xwayland: 0`).
 
 ## Local changes
 
@@ -29,8 +33,8 @@ SQLite store, plugins and Linux packaging.
 **Problem.** `wacore::types::call::CallAction::Offer` carries `group_jid`, but
 `crates/session/src/whatsapp/mod.rs` matched it with `..` and the resulting
 `oxidezap_core::IncomingCall` had nowhere to put it. Downstream,
-`daemon/session_bridge/call_log.rs` derived `is_group` from `caller_jid` — which
-for a group offer is the *person* who started it — so a group call was logged
+`daemon/session_bridge/call_log.rs` derived `is_group` from `caller_jid`, which
+for a group offer is the *person* who started it, so a group call was logged
 as a 1:1 call in that person's chat.
 
 **Change.**
@@ -47,7 +51,7 @@ as a 1:1 call in that person's chat.
 **Not changed:** the library's generic `voip.accept()` already handles group
 roster, relay and key epochs (`AcceptCall::start` checks `incoming.group`), so
 answering a group call needs no client-side work. The participant grid this
-flag was needed for is now reachable — see change 3.
+flag was needed for is now reachable, see change 3.
 
 ### 2. Linux package staging smoke test
 
@@ -85,7 +89,7 @@ but never started from a group chat.
 - `core::is_group_jid` is the one predicate for "this address is a group". The
   chat header gate, the optimistic outgoing card and `SessionHandle::start_call`
   all use it, including the camera-preview confirmation that re-enters with
-  only the JID — no group flag to lose on that path.
+  only the JID, no group flag to lose on that path.
 - Group JIDs now show the call buttons; both toolbar and overflow menu route
   to one entry point. `SessionHandle::start_group_call` sends `StartGroup`.
 - `CallState::group_roster()` feeds the existing `active_group` grid. A
@@ -93,7 +97,7 @@ but never started from a group chat.
   add-participant stay visibly disabled with honest tooltips.
 
 **Gates.** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
---all-features -- -D warnings`, `cargo test --workspace --all-features` — all
+--all-features -- -D warnings`, `cargo test --workspace --all-features`, all
 green; GUI 680 passed, 14 ignored.
 
 **Not done:** real group calls cannot be validated without explicit consent to
@@ -117,7 +121,7 @@ one from chats or contacts would be wrong.
   the right address and namespace.
 - IPC adds `ClientRequest::{Blocklist, Block, Unblock}` and a correlated
   `DaemonMessage::Blocklist { id, entries }`; **protocol version 46**.
-  Block/unblock are correlated `ask`s, not `tell`s — they mutate the real
+  Block/unblock are correlated `ask`s, not `tell`s, they mutate the real
   account and must report a refusal. Mutations answer after the server IQ;
   the fetch is single-flight so a second click cannot strand a waiter.
 - Settings → Privacy lists blocked JIDs with Unblock buttons, an Add-by-JID
@@ -137,7 +141,7 @@ one.
 
 **Change.**
 - `core::UsernameLookupResult` is a typed answer: `Found(ResolvedUsername)`,
-  `KeyRequired`, `NotFound` or locally-invalid handle. These stay separate —
+  `KeyRequired`, `NotFound` or locally-invalid handle. These stay separate,
   "give me the key" is not "nobody has this handle". `normalize_username()`
   strips the display-only `@` and enforces the server's 3..=35 length locally.
 - `session/whatsapp/username_lookup.rs` calls upstream, converts the answer to
@@ -145,7 +149,7 @@ one.
   the protocol's own field; a handle never becomes a fake business name.
 - IPC adds `ClientRequest::LookupUsername { username, username_key }` and a
   correlated `DaemonMessage::UsernameLookup { id, result }`; protocol version
-  **47**. The key is runtime input only — never logged or hardcoded. Failures
+  **47**. The key is runtime input only, never logged or hardcoded. Failures
   use the existing `ProtocolError::Failed` path.
 - A new Settings → Contacts pane holds the handle/key fields and the result
   card, keeps one lookup in flight, and lets a `KeyRequired` answer be retried
@@ -177,7 +181,7 @@ were deliberately excluded.
 
 **Gates.** fmt, clippy (`-D warnings`) and the full workspace test suite all
 green. Synthetic tests only; no real reaction or vote was sent. Session
-errors are plain strings, so they read as permanent in `what_went_wrong` —
+errors are plain strings, so they read as permanent in `what_went_wrong`,
 a retryable `CommandOutcome::Failed` is a separate, later change.
 
 ### 7. Core vocabulary for events, communities and channels
@@ -339,7 +343,7 @@ to block an address, answer an event, create a community or post in a channel.
 - `channels post|poll|react|vote` reaches the channel-specific session paths.
   A CLI post passes `local_id: None` because it draws no optimistic bubble;
   reaction removal is an empty `--emoji`. Polls need at least two options, and
-  an event location needs both coordinates — both are refused before a socket
+  an event location needs both coordinates, both are refused before a socket
   is opened.
 - The help-surface tests name every command and flag, so a rename cannot leave
   the documented CLI and the binary disagreeing.
@@ -367,7 +371,7 @@ through the JID parser or a chat lookup would make it a recipient it is not.
   pasted text and the front end's placeholder id. Session wrappers map the
   upstream preview metadata and join through the library's `CallLinkCall`
   builder; the token reaches only that builder, never `Jid`, `hub.chat()` or
-  `is_group_jid`. A video link requires camera endpoints — no voice downgrade.
+  `is_group_jid`. A video link requires camera endpoints, no voice downgrade.
 - The daemon mirrors a link join as an ordinary outgoing call under the fixed
   recipient with no group identity, and reuses the same busy/offline/device
   cleanup as `Start` and `StartGroup`. Group-call routing is unchanged.
@@ -404,7 +408,7 @@ than seven partial ones.
   `SearchMessages` is a local read; the other two are correlated mutations.
 - The daemon relays forwards through the existing session mutation, routes
   mentions through the extended-text context used by the wire send, and
-  persists the starred flag in the existing `messages.starred` column — no
+  persists the starred flag in the existing `messages.starred` column, no
   migration. A successful star is broadcast as `StarChanged`; its own ack or
   refusal is still correlated to the press. Search hits are bounded, sorted
   newest-first and carry their query so a front end can discard late answers.
@@ -442,7 +446,7 @@ exposes is 30 days.
   bounded `pinned_messages` / `set_pinned` queries. The session mutation mirrors
   `set_starred`'s group addressing, calls the library's `pin_message` /
   `unpin_message` with `PinDuration::Days30`, and commits the local flag only
-  after the network accepts it — a refused pin leaves no stale mark.
+  after the network accepts it, a refused pin leaves no stale mark.
 - The daemon routes both frames out of band, signals `PinChanged` only on a
   successful mutation, and answers the listing with `StarredResults` plus the
   request's own ack. `oxidezap-wire` gains `SetMessagePinned` without depending
@@ -455,7 +459,7 @@ exposes is 30 days.
   newest answer replaces its rows. There is no `ListPinnedMessages` IPC: the
   pinned panel is derived from `PinChanged` events this window has seen and
   the messages it has loaded, so older pins or unloaded rows are absent.
-  EN/PT catalog entries carry the 30-day wording — nothing promises "forever".
+  EN/PT catalog entries carry the 30-day wording, nothing promises "forever".
 
 **Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
 (2641 passed, 44 ignored, 0 failed). Web gates green: shared-view ban, wasm
@@ -471,8 +475,8 @@ terminal. Favorites has no public setter upstream, and labels/custom lists are
 a larger data-model slice, so neither is faked with a dead control.
 
 **Change.**
-- IPC moves to version **54** with four correlated mutations — `MarkUnread`,
-  `PinChat`, `MuteChat`, `ArchiveChat` — whose JSON shapes mirror the terminal's
+- IPC moves to version **54** with four correlated mutations, `MarkUnread`,
+  `PinChat`, `MuteChat`, `ArchiveChat`, whose JSON shapes mirror the terminal's
   wire requests exactly. No new events: the store already applies the library's
   `PinUpdate`, `MuteUpdate`, `ArchiveUpdate` and `MarkChatAsReadUpdate`.
 - The daemon routes each mutation out of band to a focused `Action` and calls
@@ -483,7 +487,7 @@ a larger data-model slice, so neither is faked with a dead control.
   a right-click menu on chat rows for all four operations. A small per-chat
   overlay holds only those four flags while a request is in flight; it is
   rolled back per field on a refusal and retired when a store-backed row
-  agrees. Bounded mute durations are in the protocol but not exposed — the menu
+  agrees. Bounded mute durations are in the protocol but not exposed, the menu
   offers indefinite mute and unmute, which is what the row can name honestly.
 - No store migration: `Chat` already carries `pinned_at`, `muted_until`,
   `archived` and the unread flags. All new tests use synthetic JIDs.
@@ -504,7 +508,7 @@ the legacy wire DTO called it a call.
 
 **Change.**
 - IPC moves to version **55**. `SystemNotice::History` carries the notice's own
-  message count and receiver count inside the existing session event — no new
+  message count and receiver count inside the existing session event, no new
   IPC frame. Hydration reads them from the stored notice proto; rows written
   before metadata was projected keep their sentence in a `text` field and show
   it verbatim. The store's text projection is unchanged for previews and FTS.
@@ -566,7 +570,7 @@ status path has no style field and keeps its original look.
 
 **Change.**
 - IPC moves to version **57** with an optional `style` on `PublishStatus`.
-  `StatusFont` is a written enum (eight protocol values, not integers —
+  `StatusFont` is a written enum (eight protocol values, not integers,
   upstream silently drops unknown numbers at encode time) and `StatusStyle`
   carries the `0xAARRGGBB` background. Absence still means the legacy
   green/system post; the GUI always sends an explicit style.
@@ -628,8 +632,8 @@ changed; all fixtures are synthetic `@g.us` addresses.
 
 ### 21. Keyboard shortcut map (client only, no protocol bump)
 
-**Problem.** The client installs a real keyboard map — `Ctrl/⌘ K`, `Shift F`,
-`Enter`, page keys and the rest — but nothing in the UI listed it. Users had to
+**Problem.** The client installs a real keyboard map, `Ctrl/⌘ K`, `Shift F`,
+`Enter`, page keys and the rest, but nothing in the UI listed it. Users had to
 discover every binding by trying it, and actions with no binding were
 indistinguishable from missing features.
 
@@ -689,7 +693,7 @@ were renamed to match, and every packaging script, smoke test, release checker
 and workflow was updated with them. The deb/rpm maintainer defaults to
 `DuckB1t <DuckB1t@users.noreply.github.com>`.
 
-Crate names and binary names stay `oxidezap-*` / `oxidezap*` — this is a fork of
+Crate names and binary names stay `oxidezap-*` / `oxidezap*`, this is a fork of
 upstream's code, and renaming 400+ dependency references would buy nothing.
 Upstream authorship is preserved in `LICENSE`, `Cargo.toml` authors, the
 README's credits, and `packaging/ICONS.md` (the icon artwork is inherited).
@@ -729,26 +733,39 @@ daemon/session tests 16+35, nightly wasm GUI/session checks, xtask 52,
 plugin-host ignored tests and the shared-view ban all pass. All ids, values and
 addresses in tests are synthetic.
 
-### 25. Public README, screenshots and repository metadata
+### 25. Own logo, loud README, honest renders and release artifacts
 
-**Problem.** A public fork needs a front page that says what it is in one
-glance, shows the actual interface, and points at the rest of the docs. The
-GitHub repo description and homepage still named upstream.
+**Problem.** The inherited icon was basically a WhatsApp bubble with the corners
+filed off. The README was polite to the point of useless, the screenshots were
+a washed-out light theme, and the repo description still pointed at upstream's
+homepage. Nobody is fooled by that stuff.
 
-**Change.** Rewrote `README.md` around a vector hero, status badges, a feature
-table, a front-end/daemon diagram, a screenshot gallery, quick-start steps and
-a documentation map. Added `docs/screenshots/banner.svg` plus three PNGs of the
-real GPUI window (conversations, privacy, shortcuts). The PNGs come from an
-`#[ignore]`d headless test in `crates/gui/src/app/mod.rs` that fabricates every
-name, JID and message; `AccountSelection::load()` returns its default under
-`cfg!(test)`, so no logged-in account is read. The test body is the provenance
-of the images and can regenerate them. Repository description, homepage and
-topics were set on `DuckB1t/whatsnative`, along with the first `v0.1.0` release.
+**Change.** Replaced the artwork with `packaging/whatsnative-logo.svg`, a
+hand-written vector mark: an angular W cut from cyan and violet shards on an
+indigo tile, no bubble, no handset, no WhatsApp green. `packaging/ICONS.md`
+records the provenance, and `packaging/generate-icons.py` plus
+`packaging/linux/icons.sh` regenerated the master PNG, the web favicons, the
+Apple touch icon and all seven hicolor sizes from the same source. The window
+embeds the new master, so the GUI binary had to be rebuilt.
 
-**Gates.** SVG parses and renders (1200×320), every local README link resolves,
-each PNG was checked with image statistics and OCR for real rendered content,
-and the screenshot generator passes with the GUI test suite. No account data
-appears in any image.
+The README now leads with "FUCK ELECTRON. FUCK WEBVIEW.", says plainly what
+works and what does not, and carries a vector hero rendered to PNG for reliable
+GitHub display. The three screenshots are real headless GPUI renders in the
+shipped Tokyo Night theme, with invented names, JIDs and messages. The
+`#[ignore]`d generator in `crates/gui/src/app/mod.rs` installs the default theme
+instead of reading anyone's local `theme.json`, and `AccountSelection::load()`
+is defaulted under `cfg!(test)`, so no logged-in account is read. Every markdown
+file and the EN/PT catalog strings were scrubbed of em dashes.
+
+Repository description, homepage, topics and Issues were set on
+`DuckB1t/whatsnative`. The `v0.1.0` release carries source, an x86_64 AppImage
+and a Linux tarball, updated when the icon changed.
+
+**Gates.** SVG parses and renders, every local README link resolves, the PNGs
+were checked with image statistics and OCR for real rendered content, and no
+sensitive pattern appears in any image. fmt, clippy `-D warnings` and the GUI
+suite stay green. The AppImage is built with `packaging/linux/package.sh` at the
+pinned tool versions, and the tarball follows `.github/workflows/build.yml`.
 
 ## Planned (see plan file)
 
@@ -758,7 +775,7 @@ appears in any image.
 3. Keyring/secret-service option for identity keys (keep one-file store default).
 4. ~~rem-scale audit~~ ✅ Audited 116 bare `px()` calls in GUI components/views:
    all design sizes already use `metrics.*()`. The remaining ones are decoded
-   media geometry, scale-invariant zero/hairline thresholds, or test fixtures —
+   media geometry, scale-invariant zero/hairline thresholds, or test fixtures,
    no changes needed. GUI tests: 680 passed, 14 ignored.
 5. ~~Branding / app id / desktop file rename~~ ✅ (section 23); crate names kept
    to minimize diff.

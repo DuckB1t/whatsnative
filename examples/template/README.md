@@ -1,7 +1,7 @@
 # template
 
 A starting point for an oxidezap plugin. Copy the directory, change the name
-in `Cargo.toml` — that name is the plugin's id — and delete what you do not
+in `Cargo.toml`, that name is the plugin's id, and delete what you do not
 need.
 
 ```bash
@@ -24,7 +24,7 @@ which is what you want while writing one.
 
 Counts the messages it is given, draws the count on the Settings screen, and
 gives you a button to reset it. It asks for nothing that touches the account,
-so it runs the moment it is dropped in the folder — adding `Caps::SEND` is
+so it runs the moment it is dropped in the folder, adding `Caps::SEND` is
 what puts a question in front of the user, and nothing that acts on the
 account works until they answer it.
 
@@ -33,7 +33,7 @@ account works until they answer it.
 * **`plugin!`** generates the three exports the host looks for *and* the
   `#[panic_handler]` a `no_std` wasm module cannot link without. Pass
   `panic = own` to write your own.
-* **`setup` declares once.** A name, a subscription, a list of capabilities —
+* **`setup` declares once.** A name, a subscription, a list of capabilities,
   each may be said only once, and the type says so: `name` is not a method on
   what `name` returns.
 * **`which()` narrows an event** to the fields its kind carries, so reading
@@ -46,6 +46,6 @@ account works until they answer it.
 
 ## Where the rules are
 
-`docs/plugin-abi.md` is the wire contract — what you need if you are writing a
+`docs/plugin-abi.md` is the wire contract, what you need if you are writing a
 plugin in something other than Rust. `examples/autoreply` is the same shape
 with something actually in it.
