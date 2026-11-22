@@ -45,6 +45,11 @@ pub fn render_chat_item(
     // four flags are copied out before the builder takes ownership: building a
     // menu must not borrow the row the virtual list is about to drop.
     let menu_jid = row.jid.clone();
+    let menu_info_title: SharedString = if row.is_group {
+        crate::tr!(GroupInfo).into()
+    } else {
+        crate::tr!(ContactInfo).into()
+    };
     let menu_pinned = row.pinned;
     let menu_muted = row
         .muted_until
@@ -148,7 +153,18 @@ pub fn render_chat_item(
         // the way into the account-wide actions that have no room on a row.
         // Each item carries its own copy of the entity and address so a menu
         // opened on one chat never acts on whichever row was built last.
-        .context_menu(move |menu, _, _| {
+        .context_menu(move |menu, _window, _| {
+            let menu = menu.item(
+                PopupMenuItem::new(menu_info_title.clone())
+                    .icon(IconName::Info)
+                    .on_click({
+                        let app = entity.clone();
+                        let jid = menu_jid.clone();
+                        move |_, window, cx| {
+                            app.update(cx, |app, cx| app.open_chat_info(jid.clone(), window, cx));
+                        }
+                    }),
+            );
             menu.item(PopupMenuItem::new(crate::tr!(MarkChatUnread)).on_click({
                 let app = entity.clone();
                 let jid = menu_jid.clone();

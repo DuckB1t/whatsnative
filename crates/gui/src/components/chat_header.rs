@@ -59,7 +59,7 @@ const NAMES_IN_A_GROUP_LINE: usize = 6;
 /// `Chat::participants` never could: that map fills as senders are *seen*,
 /// and counting it told a fifty-person group it had one member. This is the
 /// membership list the connection holds.
-fn members_line(roster: &GroupRoster) -> Option<String> {
+pub(crate) fn members_line(roster: &GroupRoster) -> Option<String> {
     let total = roster.size();
     if total == 0 {
         return None;
@@ -92,7 +92,7 @@ fn members_line(roster: &GroupRoster) -> Option<String> {
 }
 
 /// `n` of something, pluralised.
-fn count_of(thing: &str, n: usize) -> String {
+pub(crate) fn count_of(thing: &str, n: usize) -> String {
     if crate::i18n::Language::current() == crate::i18n::Language::Portuguese {
         let noun = match (thing, n == 1) {
             ("member", true) => "membro",
@@ -181,7 +181,14 @@ pub fn render_chat_header(
     // one did not — and a user-visible label with two implementations drifts
     // again.
     let name: SharedString = crate::app::chat_row::display_name(&chat.name, is_own_number).into();
+    let info_title: SharedString = if chat.is_group {
+        crate::tr!(GroupInfo).into()
+    } else {
+        crate::tr!(ContactInfo).into()
+    };
     let subtitle = subtitle(chat, typing, availability, members);
+    // Compute this once: the identity control, the toolbar button and the
+    // menu must all name the same surface for a screen reader.
     // No badge until presence actually arrives. A contact who has told us
     // nothing is not "away": most contacts are in that state before the first
     // presence event, and a dot claiming otherwise is a made-up fact.
@@ -211,10 +218,20 @@ pub fn render_chat_header(
         .border_b_1()
         .border_color(cx.theme().border)
         .child(render_identity(
-            chat, name, subtitle, presence, &entity, layout, metrics, media, cx,
+            chat,
+            name,
+            subtitle,
+            presence,
+            info_title.clone(),
+            &entity,
+            layout,
+            metrics,
+            media,
+            cx,
         ))
         .child(render_actions(
             chat,
+            info_title,
             can_send,
             plugin_actions,
             entity,
@@ -230,6 +247,7 @@ fn render_identity(
     name: SharedString,
     subtitle: Option<(String, bool)>,
     presence: Option<Presence>,
+    info_title: SharedString,
     entity: &Entity<WhatsAppApp>,
     layout: ResponsiveLayout,
     metrics: Metrics,
@@ -237,6 +255,8 @@ fn render_identity(
     cx: &App,
 ) -> impl IntoElement + use<> {
     let back_entity = entity.clone();
+    let info_entity = entity.clone();
+    let info_jid = chat.jid.clone();
 
     div()
         .flex()
@@ -261,38 +281,59 @@ fn render_identity(
             )
         })
         .child(
-            Avatar::new(chat.jid.clone(), &chat.name, metrics.avatar_header())
-                .group(chat.is_group)
-                .picture(chat.avatar_cache_key.clone(), media)
-                .presence(presence)
-                .on(cx.theme().sidebar),
-        )
-        .child(
-            parts::detail_stack()
-                .gap(metrics.space_xxs())
+            // The whole identity is the control: an avatar that looks
+            // tappable but is not was the gap this closes. A `Button` carries
+            // focus, keyboard activation and the accessible name, while the
+            // children keep the exact stack the header already drew.
+            Button::new("chat-identity-info")
+                .ghost()
+                .p_0()
+                .h_auto()
+                .flex_1()
+                .min_w_0()
+                .accessibility_label(info_title.clone())
+                .tooltip(info_title)
+                .cursor_pointer()
+                .on_click(move |_, window, cx| {
+                    info_entity.update(cx, |app, cx| {
+                        app.open_chat_info(info_jid.clone(), window, cx);
+                    });
+                })
                 .child(
-                    parts::one_line()
-                        .text_size(metrics.text_strong())
-                        .text_color(cx.theme().foreground)
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(name),
+                    Avatar::new(chat.jid.clone(), &chat.name, metrics.avatar_header())
+                        .group(chat.is_group)
+                        .picture(chat.avatar_cache_key.clone(), media)
+                        .presence(presence)
+                        .on(cx.theme().sidebar),
                 )
-                .children(subtitle.map(|(text, is_typing)| {
-                    parts::one_line()
-                        .text_size(metrics.text_small())
-                        .text_color(if is_typing {
-                            cx.theme().primary
-                        } else {
-                            cx.theme().muted_foreground
-                        })
-                        .child(text)
-                })),
+                .child(
+                    parts::detail_stack()
+                        .gap(metrics.space_xxs())
+                        .child(
+                            parts::one_line()
+                                .text_size(metrics.text_strong())
+                                .text_color(cx.theme().foreground)
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child(name),
+                        )
+                        .children(subtitle.map(|(text, is_typing)| {
+                            parts::one_line()
+                                .text_size(metrics.text_small())
+                                .text_color(if is_typing {
+                                    cx.theme().primary
+                                } else {
+                                    cx.theme().muted_foreground
+                                })
+                                .child(text)
+                        })),
+                ),
         )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn render_actions(
     chat: &Chat,
+    info_title: SharedString,
     can_send: bool,
     plugin_actions: Vec<gpui::AnyElement>,
     entity: Entity<WhatsAppApp>,
@@ -317,6 +358,7 @@ fn render_actions(
     let event_jid = chat.jid.clone();
     let poll_jid = chat.jid.clone();
     let overflow_jid = chat.jid.clone();
+    let info_jid = chat.jid.clone();
     let call_entity = entity.clone();
     let video_entity = entity.clone();
     let call_link_entity = entity.clone();
@@ -324,6 +366,7 @@ fn render_actions(
     let poll_entity = entity.clone();
     let label_entity = entity.clone();
     let overflow_entity = entity.clone();
+    let info_entity = entity.clone();
     let search_entity = entity;
 
     // Every native control, and none of them shrinks: the row around them
@@ -443,12 +486,31 @@ fn render_actions(
                 )
             },
         )
+        // Unlike the call controls this one stays on a phone. The sheet is
+        // the only place that states the raw identifier and the roster, so
+        // there must always be a labelled way to reach it.
+        .child(
+            parts::icon_button(
+                "chat-info",
+                Icon::new(IconName::Info),
+                info_title.clone(),
+                layout.icon_button_size(),
+            )
+            .accessibility_label(info_title)
+            .cursor_pointer()
+            .on_click(move |_, window, cx| {
+                info_entity.update(cx, |app, cx| {
+                    app.open_chat_info(info_jid.clone(), window, cx);
+                });
+            }),
+        )
         .child(render_overflow_menu(
             callable,
             can_send,
             can_create_channel_poll,
             can_edit_my_label.then_some(label_entity),
             overflow_jid,
+            chat.is_group,
             overflow_entity,
             layout,
         ))
@@ -460,12 +522,17 @@ fn render_actions(
 /// does, so narrowing the window changes where a command lives and never
 /// whether it exists. Below the breakpoint this is the only route to them,
 /// which is exactly why it cannot be a subset.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the menu needs the toolbar's facts plus the group flag for its label"
+)]
 fn render_overflow_menu(
     callable: bool,
     can_send: bool,
     can_create_channel_poll: bool,
     member_label: Option<Entity<WhatsAppApp>>,
     jid: String,
+    is_group: bool,
     entity: Entity<WhatsAppApp>,
     layout: ResponsiveLayout,
 ) -> impl IntoElement + use<> {
@@ -474,6 +541,7 @@ fn render_overflow_menu(
     let call_link_entity = entity.clone();
     let poll_entity = entity.clone();
     let member_label = member_label.clone();
+    let info_entity = entity.clone();
     let call_entity = entity;
 
     parts::icon_button(
@@ -490,6 +558,13 @@ fn render_overflow_menu(
         let call_link_entity = call_link_entity.clone();
         let poll_entity = poll_entity.clone();
         let member_label = member_label.clone();
+        let info_entity = info_entity.clone();
+        let info_jid = jid.clone();
+        let info_title: SharedString = if is_group {
+            crate::tr!(GroupInfo).into()
+        } else {
+            crate::tr!(ContactInfo).into()
+        };
         let video_jid = jid.clone();
         let poll_jid = jid.clone();
         let label_jid = jid.clone();
@@ -500,6 +575,16 @@ fn render_overflow_menu(
                 .icon(IconName::Search)
                 .on_click(move |_, window, cx| {
                     search_entity.update(cx, |app, cx| app.toggle_conversation_search(window, cx));
+                }),
+        );
+
+        let menu = menu.item(
+            PopupMenuItem::new(info_title)
+                .icon(IconName::Info)
+                .on_click(move |_, window, cx| {
+                    info_entity.update(cx, |app, cx| {
+                        app.open_chat_info(info_jid.clone(), window, cx);
+                    });
                 }),
         );
 

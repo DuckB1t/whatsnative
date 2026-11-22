@@ -12,9 +12,10 @@ use gpui_component::{checkbox::Checkbox, input::Input};
 
 use crate::app::{Destination, MessageListCache, OfflineRecovery, WhatsAppApp};
 use crate::components::{
-    CallsDetailProps, CallsListProps, ChatListProps, EmptyState, InputAreaView, PluginContext,
-    ProductIcon, StatusListProps, StatusSelection, StatusViewProps, ViewerProps, parts, plugin_ui,
-    render_call_card, render_calls_detail, render_calls_list, render_chat_header, render_chat_list,
+    CallsDetailProps, CallsListProps, ChatInfoModel, ChatInfoProps, ChatListProps, EmptyState,
+    InputAreaView, PluginContext, ProductIcon, StatusListProps, StatusSelection, StatusViewProps,
+    ViewerProps, loaded_media_count, parts, plugin_ui, render_call_card, render_calls_detail,
+    render_calls_list, render_chat_header, render_chat_info, render_chat_list,
     render_conversation_search, render_media_viewer, render_message_list, render_nav_rail,
     render_status_list, render_status_view,
 };
@@ -331,6 +332,43 @@ pub fn render_connected_view(
     // when the conversation was opened; until the answer lands the header
     // draws the name alone, as it did before there was anything to draw.
     let members = open_chat.as_deref().and_then(|jid| app.group_members(jid));
+    // The sheet is built here, while app is still readable. Every fact is
+    // copied into an owned model before any pane closure runs: a render
+    // helper must not borrow the chat, the roster or the app out of here.
+    // The media horizon is the timeline cache already built for this frame,
+    // so the label can say "loaded history" and mean exactly that.
+    let loaded_media = message_cache
+        .as_ref()
+        .map_or(0, |cache| loaded_media_count(&cache.messages));
+    let chat_info_model = app.chat_info_jid().and_then(|jid| {
+        if open_chat.as_deref() != Some(jid) {
+            return None;
+        }
+        let chat = app.chat_named(jid)?;
+        let (muted, archived) = app.chat_info_flags(jid)?;
+        Some(ChatInfoModel::new(
+            chat,
+            is_own_number,
+            members,
+            app.group_members_pending(jid),
+            loaded_media,
+            muted,
+            archived,
+        ))
+    });
+    let chat_info_sheet = chat_info_model.map(|model| {
+        render_chat_info(
+            ChatInfoProps {
+                model,
+                media: media.clone(),
+                entity: entity.clone(),
+                metrics: *layout.metrics(),
+                mobile: layout.is_mobile(),
+            },
+            cx,
+        )
+        .into_any_element()
+    });
     // The two call props are consumed by different panes, so split the pair
     // before either closure takes ownership.
     let (calls_list, calls_detail) = match calls_pane {
@@ -375,7 +413,10 @@ pub fn render_connected_view(
                     el.child(render_status_view(status_view, entity.clone(), layout, cx))
                 }
             } else {
-                el.child(render_chat_area(
+                // The timeline is built only for the pane that draws it.
+                // Calls and Status need none of it, and Channels and
+                // Communities reach here only when they show a conversation.
+                let chat_area = render_chat_area(
                     ChatAreaProps {
                         selected_chat,
                         message_cache,
@@ -396,7 +437,30 @@ pub fn render_connected_view(
                     entity.clone(),
                     layout,
                     cx,
-                ))
+                )
+                .into_any_element();
+                // The conversation pane and the sheet are separate surfaces
+                // around the same chat. On a desktop they sit side by side,
+                // with the list untouched; on a phone the sheet owns the
+                // chat-area slot and carries the way back.
+                match chat_info_sheet {
+                    Some(info) if layout.is_mobile() => el.child(info),
+                    Some(info) => el.child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .min_h_0()
+                            .min_w_0()
+                            .child(chat_area)
+                            .child(
+                                div()
+                                    .w(layout.metrics().chat_info_width())
+                                    .flex_shrink_0()
+                                    .child(info),
+                            ),
+                    ),
+                    None => el.child(chat_area),
+                }
             }
         });
 

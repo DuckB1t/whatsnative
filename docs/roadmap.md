@@ -665,6 +665,17 @@
   Storage & media says what the list is instead of drawing them. Storage totals
   and the cache-clear action were already complete and did not change.
 
+- **The chat detail sheet is a mirror of local state, not a profile.** It opens
+  from the header identity, the labelled info action, the overflow menu or a
+  chat row's context menu. On desktop it sits beside the timeline inside the
+  chat area; on a phone it owns that slot and carries a Back button. The name,
+  avatar and JID come from the loaded chat, the roster from the existing
+  `GroupMembers` request and media from loaded timeline rows only. Waiting and
+  unavailable rosters say so instead of claiming zero members. Mute and archive
+  rows call the existing mutations. There is no About, last seen, phone label,
+  privacy fact or store-wide media count to fetch here; those would need
+  upstream APIs this stack does not expose.
+
 Clickable `div`s that remain are deliberate: a chat row and a media thumbnail
 are surfaces, not commands, and have no semantic component to compose from.
 Anything that *is* a command (call accept/decline, back) is a `Button`.

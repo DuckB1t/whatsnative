@@ -41,26 +41,26 @@ media and call machinery come from
 We did a deep audit of what a normal user notices and wrote it in
 [docs/feature-plan.md](docs/feature-plan.md). The audit found no Calls tab, no
 chat info panel, a disabled new chat button, a media jump list and a local-only
-GIF/sticker picker with no search. That work is in waves. None of it is in
-v0.1.0.
+GIF/sticker picker with no search. Two of those gaps are closed locally now.
+None of this is in v0.1.0.
 
 Progress snapshot, not a live counter:
 
 | Area | Progress |
 | --- | --- |
 | Investigation and plan | 100% |
-| Wave 1, daily drivers | 20%, Calls done, four slices left |
+| Wave 1, daily drivers | 40%, Calls and chat info done, three slices left |
 | Wave 2, message actions | 0% |
 | Wave 3, privacy and settings | 0% |
 | Wave 4, multi-account | 0% |
 | MCP planning | 0% |
-| Whole program | about 17%, 0% released |
+| Whole program | about 24%, 0% released |
 
 Checklist:
 
 - [x] Investigation and plan
 - [x] Wave 1: Calls destination and call log view
-- [ ] Wave 1: chat info panel
+- [x] Wave 1: chat info panel
 - [ ] Wave 1: new chat dialog
 - [ ] Wave 1: media gallery
 - [ ] Wave 1: local GIF and sticker search
@@ -69,9 +69,12 @@ Checklist:
 - [ ] Wave 4: multi-account V2
 - [ ] MCP planning
 
-The Calls slice is implemented and green locally. It is not in v0.1.0. The log
-shows only finalized calls from this daemon start, capped at 100, and the pane
-says so on screen.
+Calls and chat info are implemented and green locally. Neither is in v0.1.0.
+The log shows only finalized calls from this daemon start, capped at 100, and
+the pane says so on screen. Chat info is a mirror of local state: name, raw JID,
+authoritative roster, loaded-history media count and working mute and archive
+controls. It does not invent About text, last seen, phone labels or a
+server-wide media total. Both surfaces say what they are on screen.
 
 UI target: familiar layout, original design. No copied proprietary assets or
 trade dress. The checklist gets updated after every wave.
@@ -85,6 +88,7 @@ trade dress. The checklist gets updated after every wave.
 | Saved and starred messages | Working. Pinning capped at 30 days because that is what upstream allows |
 | Media send and receive | Working. Local media list, no pretence of a cloud gallery |
 | Voice and video calls | 1:1 validated. Group calls draw a grid but have not been live tested |
+| Calls and chat details | Call log since daemon start, capped at 100. Details come from local state, not server profiles |
 | Plugins | Sandboxed `.wasm`, per-capability approval, no filesystem, no sockets |
 | Privacy | One real setting: DM read receipts. Everything else is honestly listed as missing |
 | Languages | English and Portuguese |

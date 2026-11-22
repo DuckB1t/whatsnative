@@ -17,12 +17,13 @@
   read by a test or a screenshot generator.
 - Agents implement. The coordinator reviews every diff, runs the gates, updates
   docs and commits centrally. Nothing is pushed without an explicit request.
+  The user authorized pushing after each completed wave on 2026-11-22.
 
 ## Current status, updated after each wave
 
 - [x] Wave 0, investigation and plan
 - [x] Wave 1.1, dedicated Calls destination and daemon call log
-- [ ] Wave 1.2, chat info panel
+- [x] Wave 1.2, chat info panel
 - [ ] Wave 1.3, new chat dialog
 - [ ] Wave 1.4, media gallery
 - [ ] Wave 1.5, local GIF and sticker search
@@ -31,9 +32,15 @@
 - [ ] Wave 4, multi-account V2
 - [ ] MCP planning
 
-Wave 1.1 is implemented and green locally. It is not in v0.1.0. The call log is
-a daemon-lifetime ring, capped at 100, and the pane says that plainly. The
-coordinator reran format, clippy, the full workspace suite and the xtask gates.
+Waves 1.1 and 1.2 are implemented, reviewed, green and cleared for push after
+their waves. Neither is in v0.1.0. The call log is a daemon-lifetime ring,
+capped at 100, and the pane says that plainly. Chat info is a mirror of local
+state: identity, authoritative roster, loaded-history media count and working
+mute and archive controls. It does not invent profile facts. The coordinator
+reran format, clippy, the full workspace suite (2717 passed, 45 ignored), the
+xtask gates (52 passed), the example plugin workspaces and the plugin host's
+ignored wasm-loading tests, then checked the publication range for account
+leaks before pushing.
 
 ## What the deep investigation found
 

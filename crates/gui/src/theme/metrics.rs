@@ -484,6 +484,13 @@ tokens! {
     /// call would have moved a settings column.
     settings_nav_width = dense(248.0);
 
+    /// The detail sheet beside a conversation.
+    ///
+    /// Its own token rather than the settings column's width: a sheet for one
+    /// chat holds a short identity and a roster, not a navigation list, and a
+    /// change to either pane should not move the other by accident.
+    chat_info_width = dense(320.0);
+
     // ---- call card ----------------------------------------------------
 
     call_card_width = dense(340.0);

@@ -803,6 +803,50 @@ plus the xtask format, clippy and test gates with the same result.
 `git diff --check` is clean. No em dashes or real identifiers are present in
 the new lines.
 
+### 27. Chat info sheet from state the window already owns (client only)
+
+**Problem.** The conversation header carried an avatar and a name but offered
+no route to details. There was no contact or group info view: no raw JID, no
+member list, no honest media total and no place to see or change mute and
+archive without leaving the chat. Drawing a profile card would have invented
+About text, last seen, phone labels or privacy facts this stack never receives.
+
+**Change.** The header identity is now an accessible button, and a labelled info
+action sits in the toolbar and the overflow menu. A chat row's context menu also
+offers Contact info or Group info. Opening the sheet selects that chat first,
+asks for the group roster through the existing `GroupMembers` request and keeps
+only a JID in app state. Selecting a different chat, clearing the account or
+losing the chat closes the sheet. On desktop it is a right-side sheet inside the
+chat area, so the list and timeline stay usable; on a phone it owns the chat
+area and has a labelled Back control.
+
+The sheet reuses `Avatar`, `chat_row::display_name` and the header's
+`members_line` roster formatting. Group size comes only from `GroupRoster`,
+never from `Chat::participants`, which records senders the window has seen. A
+roster that is still in flight says the connection has not answered; a group
+with no answer says the list is unavailable. Neither claims zero members. Media
+is a count of messages in the loaded timeline only and is labelled that way.
+Mute and archive rows call `set_chat_muted` and `set_chat_archived`. No new IPC
+request was added and the Calls protocol was not touched. Review kept the
+timeline build inside the Chats branch, so Calls and Status frames do not pay
+for a hidden conversation, and the desktop Close button has an accessible name.
+
+**Limitation.** This is not server-backed profile data. There is no About, last
+seen, phone label, contact photo beyond the existing media cache, privacy fact
+or whole-store media total. The roster is whatever the connection last told
+this window, and the media count moves as history loads. Nothing here was
+exercised against a paired account; fixtures use `.invalid` addresses only.
+
+**Gates.** `cargo +1.100.0 fmt --all -- --check`,
+`cargo +1.100.0 clippy --workspace --all-targets --all-features -- -D warnings`
+and `cargo +1.100.0 test --workspace --all-features -- --test-threads=1` are
+green (2717 passed, 45 ignored, 0 failed). The xtask format, clippy and test
+gates are green (52 passed). The example plugin workspaces and the plugin host's
+ignored wasm-loading tests are green too. `git diff --check` is clean. The
+no-account-leak audit on the full publication range found no em dashes,
+phone-shaped fixtures, real JID namespaces, account paths or secrets. No real
+identifiers are present in the new lines.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

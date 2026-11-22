@@ -16,6 +16,7 @@ mod calls;
 mod calls_ctl;
 mod channel_poll_dialog;
 mod chat_actions;
+mod chat_info;
 pub mod chat_row;
 mod chats;
 mod commands;
@@ -810,6 +811,12 @@ pub struct WhatsAppApp {
     chat_overlays: HashMap<String, chat_actions::ChatOverlay>,
     /// Currently selected chat JID
     selected_chat: Option<String>,
+    /// The chat whose detail sheet is open, if any.
+    ///
+    /// A JID rather than a `Chat`: the roster and the loaded messages keep
+    /// arriving while the sheet is up, and a second copy of a conversation
+    /// would go stale the moment the next frame arrived.
+    chat_info_jid: Option<String>,
     /// WhatsApp client wrapper
     client: Option<Session>,
     account_selection: recovery::AccountSelection,
@@ -1690,6 +1697,7 @@ impl WhatsAppApp {
             chats: Vec::new(),
             chat_overlays: HashMap::new(),
             selected_chat: None,
+            chat_info_jid: None,
             client: None,
             account_selection: recovery::AccountSelection::load(),
             incoming_file_epoch: 0,
@@ -2631,6 +2639,7 @@ impl WhatsAppApp {
         self.chats.clear();
         self.collapsed_communities.clear();
         self.selected_chat = None;
+        self.chat_info_jid = None;
         self.visible_chat = None;
         self.retained_chat = None;
         self.departed_chats.clear();
@@ -3109,6 +3118,9 @@ impl WhatsAppApp {
                 });
             }
             self.selected_chat = None;
+            // A sheet about a chat that no longer exists has nothing left to
+            // describe, and a stale JID here would hold a closed surface open.
+            self.chat_info_jid = None;
         }
     }
 
@@ -3309,6 +3321,10 @@ impl WhatsAppApp {
         }
         if self.selected_chat.as_deref() != Some(jid.as_str()) {
             self.cancel_message_delete(cx);
+            // The sheet describes one conversation. Following a new selection
+            // silently would show another chat's facts under the old header;
+            // closing it is the consistent answer to a deliberate row click.
+            self.chat_info_jid = None;
             // Message-text selection belongs to the conversation being left,
             // not to the next list reusing the window selection layer.
             clear_window_message_selection(window, cx);

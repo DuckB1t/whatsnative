@@ -649,4 +649,22 @@ catalog! {
     CouldNotPinChat => ("Could not update the conversation pin", "Não foi possível atualizar a fixação da conversa");
     CouldNotMuteConversation => ("Could not update the conversation mute", "Não foi possível atualizar o silenciamento da conversa");
     CouldNotArchiveChat => ("Could not archive or unarchive the conversation", "Não foi possível arquivar ou desarquivar a conversa");
+
+    // Wave 1.2's detail sheet. Every value here comes from state this window
+    // already holds. There is no profile, About or last-seen claim.
+    ContactInfo => ("Contact info", "Informações do contato");
+    GroupInfo => ("Group info", "Informações do grupo");
+    BackToConversation => ("Back to conversation", "Voltar à conversa");
+    ChatInfoIdentifier => ("Identifier", "Identificador");
+    ChatInfoKind => ("Kind", "Tipo");
+    ChatInfoDirect => ("Direct chat", "Conversa direta");
+    ChatInfoGroup => ("Group", "Grupo");
+    ChatInfoMembers => ("Members", "Membros");
+    ChatInfoMembersPending => ("Waiting for the connection's member list", "Aguardando a lista de membros da conexão");
+    ChatInfoMembersUnavailable => ("Member list unavailable here", "Lista de membros indisponível aqui");
+    ChatInfoLoadedMedia => ("Media in loaded history", "Mídia no histórico carregado");
+    ChatInfoNotifications => ("Notifications", "Notificações");
+    ChatInfoNotMuted => ("Not muted", "Não silenciada");
+    ChatInfoNotArchived => ("Not archived", "Não arquivada");
+    ChatInfoLimits => ("Details come from this window's state. Media counts only loaded messages.", "Os detalhes vêm do estado desta janela. A mídia conta apenas as mensagens carregadas.");
 }
