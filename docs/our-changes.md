@@ -729,6 +729,27 @@ daemon/session tests 16+35, nightly wasm GUI/session checks, xtask 52,
 plugin-host ignored tests and the shared-view ban all pass. All ids, values and
 addresses in tests are synthetic.
 
+### 25. Public README, screenshots and repository metadata
+
+**Problem.** A public fork needs a front page that says what it is in one
+glance, shows the actual interface, and points at the rest of the docs. The
+GitHub repo description and homepage still named upstream.
+
+**Change.** Rewrote `README.md` around a vector hero, status badges, a feature
+table, a front-end/daemon diagram, a screenshot gallery, quick-start steps and
+a documentation map. Added `docs/screenshots/banner.svg` plus three PNGs of the
+real GPUI window (conversations, privacy, shortcuts). The PNGs come from an
+`#[ignore]`d headless test in `crates/gui/src/app/mod.rs` that fabricates every
+name, JID and message; `AccountSelection::load()` returns its default under
+`cfg!(test)`, so no logged-in account is read. The test body is the provenance
+of the images and can regenerate them. Repository description, homepage and
+topics were set on `DuckB1t/whatsnative`, along with the first `v0.1.0` release.
+
+**Gates.** SVG parses and renders (1200×320), every local README link resolves,
+each PNG was checked with image statistics and OCR for real rendered content,
+and the screenshot generator passes with the GUI test suite. No account data
+appears in any image.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

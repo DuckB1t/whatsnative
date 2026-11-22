@@ -6827,3 +6827,201 @@ mod linked_play_tests {
         );
     }
 }
+
+/// Reproducible, account-free source of the images in `docs/screenshots/`.
+///
+/// Run with `OXIDEZAP_SHOT_DIR=/path/to/dir cargo test -p oxidezap-gui --bin
+/// oxidezap -- --ignored previews --nocapture`. Every JID, name and message
+/// below is invented; `AccountSelection::load()` returns its default under
+/// `cfg!(test)`, so no logged-in account is ever read.
+#[cfg(test)]
+mod screenshot_preview {
+    use super::*;
+    use gpui::{HeadlessAppContext, px, size};
+    use oxidezap_core::PrivacyReadReceipts;
+    use std::sync::Arc;
+
+    fn synthetic_chats() -> Vec<Arc<Chat>> {
+        // The active chat carries its own history; do not also add a bare row
+        // with the same JID or the list draws a name disambiguator and the
+        // selected conversation resolves to an empty chat.
+        let mut chats = vec![active_chat()];
+        for (jid, name, preview, unread) in [
+            (
+                "design-team@g.us",
+                "Design Team",
+                "Rafael: shipped the new icon set",
+                0,
+            ),
+            (
+                "noah@example.invalid",
+                "Noah Williams",
+                "Sounds good, see you at 10!",
+                0,
+            ),
+            (
+                "weekend-trip@g.us",
+                "Weekend Trip",
+                "Priya: I booked the cabin",
+                5,
+            ),
+            (
+                "sora@example.invalid",
+                "Sora",
+                "Thanks for the quick review!",
+                0,
+            ),
+        ] {
+            let mut chat = Chat::new(jid.to_string());
+            chat.name = name.to_string();
+            chat.last_message = Some(preview.to_string());
+            chat.last_message_time = Some(wacore::time::now_utc());
+            chat.unread_count = unread;
+            chat.is_group = jid.ends_with("@g.us");
+            if chat.is_group {
+                chat.participants
+                    .insert("rafael@example.invalid".into(), "Rafael".into());
+                chat.participants
+                    .insert("priya@example.invalid".into(), "Priya".into());
+            }
+            chats.push(Arc::new(chat));
+        }
+        chats
+    }
+
+    fn active_chat() -> Arc<Chat> {
+        let jid = "maya@example.invalid";
+        let mut chat = Chat::new(jid.to_string());
+        chat.name = "Maya Chen".to_string();
+        let rows = [
+            (
+                false,
+                "Hey! Did you get a chance to look at the new screenshots?",
+            ),
+            (
+                true,
+                "I did — they look fantastic. The privacy pane is my favourite.",
+            ),
+            (
+                false,
+                "Right? The read-receipts switch finally tells you what the server said.",
+            ),
+            (
+                true,
+                "No more guessing whether a toggle actually did anything.",
+            ),
+            (
+                false,
+                "Exactly. Unknown values stay honest instead of pretending to be off.",
+            ),
+            (true, "Let's ship it."),
+        ];
+        for (i, (from_me, text)) in rows.into_iter().enumerate() {
+            let mut message = if from_me {
+                ChatMessage::new_outgoing(format!("synthetic-out-{i}"), text.to_string())
+            } else {
+                ChatMessage::new_incoming(
+                    format!("synthetic-in-{i}"),
+                    jid.to_string(),
+                    text.to_string(),
+                )
+            };
+            message.is_read = true;
+            if from_me {
+                message.status = MessageStatus::Read;
+            }
+            if i == 2 {
+                message
+                    .reactions
+                    .insert("🙌".to_string(), vec![jid.to_string()]);
+            }
+            chat.messages.push(message);
+        }
+        chat.last_message = chat.messages.last().map(|m| m.content.clone());
+        chat.last_message_time = Some(wacore::time::now_utc());
+        Arc::new(chat)
+    }
+
+    fn capture(
+        path: std::ffi::OsString,
+        setup: impl FnOnce(&Entity<WhatsAppApp>, &mut gpui::Window, &mut gpui::App),
+    ) {
+        let mut cx = HeadlessAppContext::with_platform(
+            Arc::new(gpui_wgpu::CosmicTextSystem::new("DejaVu Sans")),
+            Arc::new(crate::assets::Assets),
+            || Ok(Some(Box::new(gpui_wgpu::WgpuHeadlessRenderer::new()?))),
+        );
+        cx.update(|cx| {
+            cx.set_app_identity("org.whatsnative.client.local", "WhatsNative");
+            crate::platform::fonts::fonts(cx);
+            gpui_component::init(cx);
+            crate::theme::init(cx);
+        });
+        let mut app_entity = None;
+        let window = cx
+            .open_window(size(px(1440.), px(900.)), |window, cx| {
+                let app = cx.new(|cx| {
+                    let mut app = WhatsAppApp::new(cx);
+                    app.app_state = AppState::Connected;
+                    app.destination = Destination::Chats;
+                    app.chats = synthetic_chats();
+                    app
+                });
+                app_entity = Some(app.clone());
+                cx.new(|cx| gpui_component::Root::new(app, window, cx))
+            })
+            .unwrap();
+        let app = app_entity.unwrap();
+        cx.update_window(*window, |_, window, cx| setup(&app, window, cx))
+            .unwrap();
+        for _ in 0..8 {
+            cx.run_until_parked();
+            cx.update_window(*window, |_, window, cx| {
+                window.refresh();
+                cx.refresh_windows();
+            })
+            .unwrap();
+            let _ = cx.capture_screenshot(*window).unwrap();
+        }
+        let screenshot = cx.capture_screenshot(*window).unwrap();
+        screenshot.save(&path).unwrap();
+        eprintln!("wrote preview to {}", path.to_string_lossy());
+    }
+
+    #[test]
+    #[ignore = "screenshot generator; writes files when OXIDEZAP_SHOT_DIR is set"]
+    fn previews() {
+        let Ok(dir) = std::env::var("OXIDEZAP_SHOT_DIR") else {
+            return;
+        };
+        let dir = std::path::Path::new(&dir);
+        std::fs::create_dir_all(dir).unwrap();
+
+        capture(dir.join("chats.png").into_os_string(), |app, window, cx| {
+            app.update(cx, |app, cx| {
+                app.select_chat(
+                    "maya@example.invalid".into(),
+                    ChatOpen::ToCompose,
+                    window,
+                    cx,
+                );
+            });
+        });
+        capture(
+            dir.join("privacy.png").into_os_string(),
+            |app, window, cx| {
+                app.update(cx, |app, cx| {
+                    app.open_settings(window, cx);
+                    app.adopt_read_receipts(PrivacyReadReceipts::All, cx);
+                    app.set_settings_section(SettingsSection::Privacy, cx);
+                });
+            },
+        );
+        capture(
+            dir.join("shortcuts.png").into_os_string(),
+            |app, window, cx| {
+                app.update(cx, |app, cx| app.open_shortcuts(window, cx));
+            },
+        );
+    }
+}
