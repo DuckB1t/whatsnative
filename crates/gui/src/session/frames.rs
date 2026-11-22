@@ -287,6 +287,13 @@ impl<'a> Frames<'a> {
                 }
                 self.publish(FromDaemon::Blocklist(entries))?;
             }
+            // Unlike the block list this frame carries no id: the setting is
+            // account-wide, so every front end adopts it. The asking window's
+            // entry stays until the acknowledgement that follows it, which is
+            // also what releases a read that only ever produced a refusal.
+            DaemonMessage::PrivacySettings { read_receipts } => {
+                self.publish(FromDaemon::PrivacySettings(read_receipts))?;
+            }
             DaemonMessage::UsernameLookup { id, result } => {
                 if take_pending(self.pending, id).is_none() {
                     debug!("a username lookup arrived for {id}, which nobody is waiting on");
@@ -349,6 +356,28 @@ impl<'a> Frames<'a> {
                 }
                 None => {}
             },
+            // A mutation's own answer, claimed before the generic ack path.
+            // The daemon publishes a fresh account-wide value just before this
+            // frame, so a success needs no local guess; a refusal must reach
+            // the press that caused it rather than become an accepted change.
+            DaemonMessage::PrivacyResult { id, ok, detail } => {
+                let result = if ok {
+                    Ok(())
+                } else {
+                    Err(Failure::permanent(detail.unwrap_or_else(|| {
+                        "the server did not say why the read-receipts change failed".into()
+                    })))
+                };
+                match take_pending(self.pending, id) {
+                    Some(Awaiting::Mutation(tx)) => {
+                        let _ = tx.send(result);
+                    }
+                    Some(waiting) => {
+                        self.fail(waiting, &Failure::permanent("unexpected privacy answer"))
+                    }
+                    None => debug!("a privacy result arrived for {id}, which nobody is waiting on"),
+                }
+            }
             // Every command is answered under the id it was asked with, which
             // is why this side no longer has to guess what a failure was
             // about.
@@ -1311,6 +1340,59 @@ mod tests {
         );
         frames.finish();
         assert!(lost_rx.try_recv().unwrap().is_err());
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    /// A privacy read is account-wide but the request still has to be released
+    /// by its ack, and a mutation's typed refusal has to reach the press that
+    /// made it. All ids and values here are synthetic.
+    #[test]
+    fn privacy_values_are_published_and_privacy_results_answer_their_press() {
+        use oxidezap_core::PrivacyReadReceipts;
+        let (sink, mut events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+
+        pending
+            .lock()
+            .unwrap()
+            .insert(11, Awaiting::PrivacySettings);
+        let _ = frames.apply(DaemonMessage::PrivacySettings {
+            read_receipts: PrivacyReadReceipts::All,
+        });
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            FromDaemon::PrivacySettings(PrivacyReadReceipts::All)
+        ));
+        assert!(
+            pending.lock().unwrap().contains_key(&11),
+            "the ack, not the value, releases the read"
+        );
+        let _ = frames.apply(DaemonMessage::Accepted { id: Some(11) });
+        assert!(pending.lock().unwrap().is_empty());
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        pending.lock().unwrap().insert(12, Awaiting::Mutation(tx));
+        let _ = frames.apply(DaemonMessage::PrivacyResult {
+            id: 12,
+            ok: false,
+            detail: Some("the server refused the change".into()),
+        });
+        assert_eq!(
+            rx.try_recv().unwrap().unwrap_err().detail,
+            "the server refused the change"
+        );
+        assert!(pending.lock().unwrap().is_empty());
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        pending.lock().unwrap().insert(13, Awaiting::Mutation(tx));
+        let _ = frames.apply(DaemonMessage::PrivacyResult {
+            id: 13,
+            ok: true,
+            detail: None,
+        });
+        assert!(rx.try_recv().unwrap().is_ok());
         assert!(pending.lock().unwrap().is_empty());
     }
 

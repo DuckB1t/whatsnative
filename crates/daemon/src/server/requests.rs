@@ -764,6 +764,43 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        // The account's read-receipts setting is server-owned like the block
+        // list. The fetch publishes the value to every front end and answers
+        // this request with an ordinary ack; the mutation's own typed result is
+        // the answer to the request that made it.
+        ClientRequest::FetchPrivacySettings => {
+            let id = match addressed(id, "a privacy read needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::FetchPrivacySettings {
+                    id,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::SetReadReceipts { enabled } => {
+            let id = match addressed(id, "a read-receipts change needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::SetReadReceipts {
+                    id,
+                    enabled,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::LookupUsername {
             username,
             username_key,

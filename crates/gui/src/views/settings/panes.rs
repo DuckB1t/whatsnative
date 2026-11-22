@@ -12,6 +12,7 @@ use gpui::{
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
+use gpui_component::switch::Switch;
 use gpui_component::{Disableable as _, Icon, IconName, Selectable as _, Sizable as _};
 
 use oxidezap_core::{LogLevel, UsernameLookupResult};
@@ -581,6 +582,11 @@ fn privacy(
             metrics,
         ))
         .child(group(
+            label(crate::tr!(ReadReceipts), metrics, cx),
+            read_receipts(app, entity.clone(), metrics, cx),
+            metrics,
+        ))
+        .child(group(
             label(crate::tr!(BlockedContacts), metrics, cx),
             blocklist(app, entity.clone(), metrics, cx),
             metrics,
@@ -622,6 +628,72 @@ fn privacy(
             metrics,
         ))
         .into_any_element()
+}
+
+/// Account-level DM read receipts, from the server and never guessed here.
+///
+/// The switch is drawn only for the two values this build can read. It is
+/// disabled while a change is in flight and is not flipped by the click: the
+/// daemon publishes the value it read back from WhatsApp, and that answer is
+/// what redraws it. An unrecognised value gets a sentence rather than an
+/// unchecked switch, which would claim something the server never said.
+fn read_receipts(
+    app: &WhatsAppApp,
+    entity: Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let value = app.read_receipts();
+    let loaded = app.read_receipts_loaded();
+    let busy = app.read_receipts_busy();
+
+    let control = match value {
+        Some(value) if value.is_known() => div()
+            .w_full()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(metrics.space_lg())
+            .p(metrics.space_lg())
+            .rounded(metrics.radius_md())
+            .bg(cx.theme().secondary)
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .text_size(metrics.text_secondary())
+                    .text_color(cx.theme().foreground)
+                    .child(crate::tr!(SendReadReceipts)),
+            )
+            .child(
+                Switch::new("settings-read-receipts")
+                    .checked(value == oxidezap_core::PrivacyReadReceipts::All)
+                    .disabled(busy)
+                    .cursor_pointer()
+                    .on_click(move |now, _window, cx| {
+                        let entity = entity.clone();
+                        let enabled = *now;
+                        entity.update(cx, |app, cx| app.set_read_receipts(enabled, cx));
+                    }),
+            )
+            .into_any_element(),
+        Some(_) => pending(crate::tr!(ReadReceiptsUnavailable), metrics, cx).into_any_element(),
+        None if !loaded => pending(crate::tr!(LoadingReadReceipts), metrics, cx).into_any_element(),
+        None => pending(crate::tr!(ReadReceiptsUnavailable), metrics, cx).into_any_element(),
+    };
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(metrics.space_lg())
+        .child(
+            div()
+                .text_size(metrics.text_small())
+                .text_color(cx.theme().muted_foreground)
+                .child(crate::tr!(ReadReceiptsGuidance)),
+        )
+        .child(control)
 }
 
 /// The account's block list, and the two ways to change it.

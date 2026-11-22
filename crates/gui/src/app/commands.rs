@@ -331,6 +331,9 @@ impl WhatsAppApp {
             // The list lives on the server. Read it on arrival so a block
             // placed from another device is visible here too.
             self.refresh_blocklist(cx);
+            // Same for the read-receipts setting. Neither is inferred from
+            // this window's chats, and both can change on another device.
+            self.refresh_read_receipts(cx);
         }
         if section == SettingsSection::Plugins {
             self.refresh_installed_plugins(cx);

@@ -34,6 +34,7 @@ mod messages;
 pub mod notices;
 mod paging;
 mod plugins_ctl;
+mod privacy;
 mod recording;
 mod recovery;
 mod saved_messages;
@@ -1123,6 +1124,9 @@ pub struct WhatsAppApp {
     /// The account's block list, as the daemon last answered, and the one
     /// request the Privacy pane keeps in flight. See [`blocklist`].
     blocklist: blocklist::BlocklistState,
+    /// The account's DM read-receipts value, including the case where the
+    /// server said something this build cannot read. See [`privacy`].
+    privacy: privacy::PrivacyState,
     /// The last username lookup this window asked for, and the one request it
     /// keeps in flight. See [`username_lookup`].
     username_lookup: username_lookup::UsernameLookupState,
@@ -1557,6 +1561,14 @@ impl WhatsAppApp {
                     FromDaemon::BlocklistLost { detail } => entity.update(cx, |app, cx| {
                         app.blocklist_failed(&detail, cx);
                     }),
+                    // One account-level value for every window, published by
+                    // the daemon after a read and after a successful change.
+                    FromDaemon::PrivacySettings(read_receipts) => entity.update(cx, |app, cx| {
+                        app.adopt_read_receipts(read_receipts, cx);
+                    }),
+                    FromDaemon::PrivacySettingsLost { detail } => entity.update(cx, |app, cx| {
+                        app.read_receipts_failed(&detail, cx);
+                    }),
                     FromDaemon::UsernameLookup(result) => entity.update(cx, |app, cx| {
                         app.adopt_username_lookup(result, cx);
                     }),
@@ -1761,6 +1773,7 @@ impl WhatsAppApp {
             group_rosters: HashMap::new(),
             rosters_in_flight: std::collections::HashSet::new(),
             blocklist: blocklist::BlocklistState::default(),
+            privacy: privacy::PrivacyState::default(),
             username_lookup: username_lookup::UsernameLookupState::default(),
             pending_notices: HashMap::new(),
             video_players: HashMap::new(),
@@ -2732,6 +2745,9 @@ impl WhatsAppApp {
         // The block list belongs to the account being left. Keeping it would
         // draw another account's blocked contacts the next time Settings opens.
         self.reset_blocklist();
+        // So does the read-receipts answer: an unchecked value from the old
+        // account must not decide what a new account's switch says.
+        self.reset_read_receipts();
         // A username answer belongs to that account too, including a verified
         // name that another account must not inherit.
         self.reset_username_lookup();

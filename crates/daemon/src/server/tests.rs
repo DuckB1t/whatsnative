@@ -786,6 +786,90 @@ async fn a_media_listing_dispatches_without_a_live_connection() {
     }
 }
 
+/// Both halves of the read-receipts control reach the session as addressed
+/// work. The read publishes its answer account-wide and is acked later; the
+/// mutation gets a typed result later. Neither may be answered here, or a
+/// window would draw a value or a success the server has not sent yet. Ids
+/// are synthetic.
+#[tokio::test]
+async fn privacy_reads_and_read_receipt_changes_take_the_addressed_path() {
+    let hub = connected_hub();
+    for (id, request) in [
+        (91, ClientRequest::FetchPrivacySettings),
+        (92, ClientRequest::SetReadReceipts { enabled: true }),
+        (93, ClientRequest::SetReadReceipts { enabled: false }),
+    ] {
+        let (commands, taken) = bridge(CommandOutcome::Accepted);
+        let answer = handle_request(
+            Request {
+                id: Some(id),
+                request,
+            },
+            &hub,
+            &no_plugins(),
+            &commands,
+            &outbox(),
+        )
+        .await;
+        assert!(
+            answer.frame.is_none(),
+            "the session's task owns the answer to {id}"
+        );
+        assert!(!answer.shutdown);
+        match taken.await.unwrap().expect("a command was dispatched") {
+            Action::FetchPrivacySettings { id: action_id, .. } => {
+                assert_eq!(action_id, 91);
+                assert!(
+                    Action::FetchPrivacySettings {
+                        id,
+                        answer_to: outbox()
+                    }
+                    .needs_network()
+                );
+            }
+            Action::SetReadReceipts {
+                id: action_id,
+                enabled,
+                ..
+            } => {
+                assert_eq!(action_id, id);
+                assert_eq!(enabled, id == 92);
+                assert!(
+                    Action::SetReadReceipts {
+                        id,
+                        enabled,
+                        answer_to: outbox()
+                    }
+                    .needs_network()
+                );
+            }
+            other => panic!("expected a privacy action, got {other:?}"),
+        }
+    }
+}
+
+/// An addressed privacy request without an id cannot be answered later: no
+/// window could claim the frame. Refuse it here rather than dispatch work whose
+/// answer would be dropped.
+#[tokio::test]
+async fn a_privacy_request_without_an_id_is_refused_before_it_reaches_the_session() {
+    let hub = connected_hub();
+    let (commands, _taken) = live_bridge();
+    for request in [
+        ClientRequest::FetchPrivacySettings,
+        ClientRequest::SetReadReceipts { enabled: true },
+    ] {
+        let answer = handle_request(bare(request), &hub, &no_plugins(), &commands, &outbox()).await;
+        assert!(matches!(
+            parse(answer.frame),
+            DaemonMessage::Error {
+                error: oxidezap_ipc::ProtocolError::Malformed { .. },
+                ..
+            }
+        ));
+    }
+}
+
 /// The payload moves rather than being unpacked and rebuilt, so what the
 /// session is handed is the struct the client sent. A field dropped between
 /// the two compiles and arrives as a document called "file" with no type on

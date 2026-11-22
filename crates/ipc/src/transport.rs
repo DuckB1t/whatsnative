@@ -377,7 +377,19 @@ use std::path::PathBuf;
 /// thumbnails, no kind filters, no cache-state keys and no wire or CLI parity.
 /// An older daemon cannot decode the request, and an older window cannot
 /// decode the answer, so neither half may attach across this version.
-pub const PROTOCOL_VERSION: u32 = 59;
+///
+/// 60 adds account-level direct-message read receipts to the legacy IPC/GUI
+/// plane: `ClientRequest::FetchPrivacySettings`, `ClientRequest::SetReadReceipts`,
+/// `DaemonMessage::PrivacySettings` and `DaemonMessage::PrivacyResult`. The read
+/// publishes the server's two documented values plus a third unknown state, and
+/// the mutation reports its own outcome under the request id because a SET IQ
+/// carries only a `dhash` and no push event follows it. Older daemons know
+/// neither the read nor the mutation, so a window offering either must not
+/// attach to one; older windows cannot decode the two new frames. This is
+/// legacy IPC/GUI parity only — no wire or CLI parity — and the mutation is a
+/// real change to the WhatsApp account setting, not exercised against a live
+/// account by the tests.
+pub const PROTOCOL_VERSION: u32 = 60;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

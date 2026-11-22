@@ -206,6 +206,14 @@ pub enum FromDaemon {
     /// A block list that never arrived. The pane stops waiting and says why
     /// rather than drawing an empty list over a read that failed.
     BlocklistLost { detail: String },
+    /// The account's DM read-receipts value, published to every front end.
+    ///
+    /// The DTO's third state is kept all the way here. A missing or newer
+    /// server value is not a false switch: the pane says it cannot read the
+    /// setting rather than claiming receipts are off.
+    PrivacySettings(oxidezap_core::PrivacyReadReceipts),
+    /// A privacy read that never arrived, releasing the pane's one request.
+    PrivacySettingsLost { detail: String },
     /// The typed answer to a username lookup, for the Contacts pane.
     ///
     /// The outcomes stay separate: needing a key is a different next step from
@@ -449,6 +457,9 @@ enum Awaiting {
     /// pane asks once on arrival and after a change, and a refusal is what
     /// lets it ask again.
     Blocklist,
+    /// A privacy-settings read. The value itself is published account-wide;
+    /// this holds the ask until its ack or refusal so the pane can try again.
+    PrivacySettings,
     /// A username lookup. The Contacts pane holds one in flight so two presses
     /// cannot race two answers into the same result card.
     UsernameLookup,
@@ -490,9 +501,11 @@ impl Awaiting {
             // Nor is a page: the view that asked for it is holding a request
             // open and only an answer closes it. A roster is held the same
             // way, by the same window.
-            Self::Page { .. } | Self::Members { .. } | Self::Blocklist | Self::UsernameLookup => {
-                false
-            }
+            Self::Page { .. }
+            | Self::Members { .. }
+            | Self::Blocklist
+            | Self::PrivacySettings
+            | Self::UsernameLookup => false,
         }
     }
 
@@ -607,6 +620,14 @@ impl Awaiting {
                 log::warn!("the block list did not arrive: {detail}");
                 if let Some(events) = events {
                     let _ = events.send(FromDaemon::BlocklistLost {
+                        detail: detail.to_string(),
+                    });
+                }
+            }
+            Self::PrivacySettings => {
+                log::warn!("the privacy settings did not arrive: {detail}");
+                if let Some(events) = events {
+                    let _ = events.send(FromDaemon::PrivacySettingsLost {
                         detail: detail.to_string(),
                     });
                 }
@@ -2133,6 +2154,33 @@ impl SessionHandle {
     /// holds, so a failed read can be tried again from the pane itself.
     pub fn load_blocklist(&self) {
         self.ask(ClientRequest::Blocklist, Awaiting::Blocklist);
+    }
+
+    /// Ask for the account's DM read-receipts setting.
+    ///
+    /// The value arrives as [`FromDaemon::PrivacySettings`] for every front
+    /// end, followed by this request's acknowledgement. Both a refusal and a
+    /// dropped connection arrive as [`FromDaemon::PrivacySettingsLost`], which
+    /// releases the pane's one request so it can ask again.
+    pub fn load_privacy_settings(&self) {
+        self.ask(
+            ClientRequest::FetchPrivacySettings,
+            Awaiting::PrivacySettings,
+        );
+    }
+
+    /// Change account-level DM read receipts, waiting for the server's answer.
+    ///
+    /// This is not acknowledged as soon as it is sent: the daemon answers under
+    /// the request id only after the device snapshot has been flushed and the
+    /// server has reported the value back. Nothing here changes a switch.
+    pub fn set_read_receipts(&self, enabled: bool) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::SetReadReceipts { enabled },
+            Awaiting::Mutation(tx),
+        );
+        rx
     }
 
     /// Ask the daemon to resolve a Meta username.

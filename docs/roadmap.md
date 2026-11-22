@@ -343,10 +343,27 @@
   feed and viewer were already native and were not rebuilt. Upstream exposes
   `Status::audience()` as synced app state with no public setter — the generic
   IQ `PrivacyCategory::Status` is the About text's visibility, not a story
-  audience — so there is no honest audience-edit control. Read receipts,
+  audience — so there is no honest audience-edit control. Status read receipts,
   group-status posting, camera capture, TTL/view-once and status mentions have
   no public path either. Local watched marking remains local. None of this has
-  been live-validated.
+  been live-validated. (Account-level *direct-message* read receipts are a
+  different setting and are exposed by protocol 60 below.)
+- **Privacy/security is one honest control, not a grid.** Protocol 60 reads and
+  sets only the account's DM read/played receipts: it maps the server's `all`
+  and `none` and keeps an absent or newer value as `Unknown`, drawing a sentence
+  rather than a switch over a fact the server never stated. A SET IQ answers
+  with only a `dhash` and no push event follows it, so the daemon writes the
+  device snapshot, flushes, then re-reads the server before reporting success;
+  the window never flips the switch optimistically. Everything else in that
+  pane stays a documented gap rather than a dead control: 2FA/PIN, passkeys,
+  security notifications, screenshot/screen-lock and key transparency are
+  server- or Meta-owned; last-seen/profile/About visibility and group-add
+  permissions have no public setter here; linked-device removal, chat lock and
+  the message-request inbox have no local read path; disappearing-message
+  defaults are account-scoped upstream state this build does not expose. The
+  blocked-contacts list came in protocol 46 and did not change. The mutation is
+  a real account change and has only been exercised synthetically, never
+  against a live account.
 - **Group member labels are self-only, and group status has no sender.**
   Protocol 56 gives the window a "My group label…" action that sets or clears
   the account's own label in a group. Upstream's mutation takes a group JID and

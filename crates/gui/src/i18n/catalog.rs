@@ -289,6 +289,12 @@ catalog! {
     OpenRetainedHistory => ("Open retained history", "Abrir histórico salvo");
     Notifications => ("NOTIFICATIONS", "NOTIFICAÇÕES");
     Encryption => ("ENCRYPTION", "CRIPTOGRAFIA");
+    ReadReceipts => ("DM READ RECEIPTS", "RECIBOS DE LEITURA DE MENSAGENS DIRETAS");
+    ReadReceiptsGuidance => ("This is your WhatsApp account's setting for direct-message read and played receipts. It does not change status read receipts, group receipts, story audience, last seen, or About visibility.", "Esta é a configuração da sua conta do WhatsApp para recibos de leitura e reprodução em mensagens diretas. Ela não altera recibos de leitura de status, recibos em grupos, público dos status, último acesso ou Sobre.");
+    LoadingReadReceipts => ("loading the read-receipts setting…", "carregando a configuração de recibos de leitura…");
+    ReadReceiptsUnavailable => ("WhatsApp did not report a supported read-receipts value. The switch stays hidden rather than guessing whether receipts are on.", "O WhatsApp não informou um valor compatível para recibos de leitura. O interruptor fica oculto para não presumir se os recibos estão ativados.");
+    SendReadReceipts => ("Send read receipts", "Enviar recibos de leitura");
+    ReadReceiptsSaved => ("Read-receipts setting saved", "Configuração de recibos de leitura salva");
     BlockedContacts => ("BLOCKED CONTACTS", "CONTATOS BLOQUEADOS");
     BlockedContactsGuidance => ("This list belongs to your WhatsApp account, not to this device. Blocking or unblocking changes it on WhatsApp's servers.", "Esta lista pertence à sua conta do WhatsApp, não a este dispositivo. Bloquear ou desbloquear altera os servidores do WhatsApp.");
     NoBlockedContacts => ("No blocked contacts yet.", "Nenhum contato bloqueado ainda.");

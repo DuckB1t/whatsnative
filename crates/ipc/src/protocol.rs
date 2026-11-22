@@ -6,8 +6,8 @@ use oxidezap_core::{
     ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
     CreatedMessageRef, DownloadableMedia, EventLocation, EventRsvp, GroupHierarchy, GroupRoster,
     JoinSubgroupRequest, LinkSubgroupsRequest, LogLevel, OutgoingMedia, PluginAction,
-    PluginSurface, QuotedMessage, StatusStyle, SubgroupDraft, UiEvent, UnlinkSubgroupsRequest,
-    UsernameLookupResult,
+    PluginSurface, PrivacyReadReceipts, QuotedMessage, StatusStyle, SubgroupDraft, UiEvent,
+    UnlinkSubgroupsRequest, UsernameLookupResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -568,6 +568,29 @@ pub enum DaemonMessage {
         id: RequestId,
         entries: Vec<BlockedContact>,
     },
+    /// The account's DM read-receipts setting, from a
+    /// [`ClientRequest::FetchPrivacySettings`] read or a successful
+    /// [`ClientRequest::SetReadReceipts`] change.
+    ///
+    /// Dedicated and unaddressed like [`DaemonMessage::StarredResults`]: the
+    /// setting belongs to the account, not to the window that asked. A fetch
+    /// gets an ordinary ack; the fresh value after a mutation is published
+    /// before that mutation's own correlated result. The DTO keeps its third
+    /// state so a missing or unrecognised server value is never drawn as "on".
+    PrivacySettings { read_receipts: PrivacyReadReceipts },
+    /// The correlated answer to [`ClientRequest::SetReadReceipts`].
+    ///
+    /// The SET response carries only a `dhash`, so an acknowledgement alone
+    /// would leave a window claiming a change the server may have refused.
+    /// There is no push event for this setting either, which is why the mutation
+    /// reports its own outcome under the id and the window re-reads the server.
+    /// `detail` is absent on success and optional on older frames.
+    PrivacyResult {
+        id: RequestId,
+        ok: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
     /// The answer to [`ClientRequest::LookupUsername`], under that request's
     /// id. One of three typed outcomes rather than a name plus a guess: the
     /// handle may need a key, or may resolve to nobody.
@@ -794,6 +817,7 @@ impl ClientRequest {
                 | Self::LoadChats(_)
                 | Self::GroupMembers(_)
                 | Self::Blocklist
+                | Self::FetchPrivacySettings
                 | Self::LookupUsername { .. }
                 | Self::StorageUsage
                 | Self::ListInstalledPlugins
@@ -1564,6 +1588,24 @@ pub enum ClientRequest {
     /// Take one address off the account's block list. The other half of
     /// [`ClientRequest::Block`], with the same answer and the same rule.
     Unblock(BlockTarget),
+    /// Read the account's DM read-receipts setting from the server.
+    ///
+    /// A network read like [`ClientRequest::Blocklist`]: the answer is
+    /// [`DaemonMessage::PrivacySettings`], published without an id, and this
+    /// request gets an ordinary ack. There is no local copy to query — login
+    /// fetches the whole privacy list but keeps only whether receipts are
+    /// disabled, and that is inside the session's store.
+    FetchPrivacySettings,
+    /// Set account-level DM read receipts. `true` sends `all`, `false` sends
+    /// `none`; those are the only values the upstream category accepts.
+    ///
+    /// A real change on WhatsApp, answered by [`DaemonMessage::PrivacyResult`]
+    /// under this request's id once the server has taken the IQ and the device
+    /// snapshot has been flushed. Other privacy categories have no setter here
+    /// and must not be inferred from this one.
+    SetReadReceipts {
+        enabled: bool,
+    },
     /// Resolve a Meta username through the account held by the daemon.
     ///
     /// Answered with [`DaemonMessage::UsernameLookup`] under this request's
@@ -3046,6 +3088,88 @@ mod tests {
         let line = serde_json::to_string(&empty).unwrap();
         assert!(line.contains(r#""entries":[]"#), "{line}");
         assert_eq!(serde_json::from_str::<DaemonMessage>(&line).unwrap(), empty);
+    }
+
+    /// Protocol 60's read and mutation have their own frames rather than
+    /// overloading `Accepted`: a SET IQ answers with only a `dhash`, and there
+    /// is no push event for this setting. Both the request and both answers are
+    /// pinned as literal JSON so an older daemon cannot be mistaken for one
+    /// that can carry them. All values are synthetic.
+    #[test]
+    fn protocol_60_privacy_frames_put_the_same_bytes_on_the_wire() {
+        let fetch = Request {
+            id: Some(31),
+            request: ClientRequest::FetchPrivacySettings,
+        };
+        assert_eq!(
+            serde_json::to_string(&fetch).unwrap(),
+            r#"{"id":31,"request":"fetch_privacy_settings"}"#
+        );
+        assert!(fetch.request.is_read());
+
+        let set = Request {
+            id: Some(32),
+            request: ClientRequest::SetReadReceipts { enabled: false },
+        };
+        assert_eq!(
+            serde_json::to_string(&set).unwrap(),
+            r#"{"id":32,"request":"set_read_receipts","enabled":false}"#
+        );
+        assert!(!set.request.is_read());
+
+        let answered = DaemonMessage::PrivacySettings {
+            read_receipts: PrivacyReadReceipts::All,
+        };
+        let line = serde_json::to_string(&answered).unwrap();
+        assert_eq!(line, r#"{"type":"privacy_settings","read_receipts":"all"}"#);
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).unwrap(),
+            answered
+        );
+
+        let unknown = DaemonMessage::PrivacySettings {
+            read_receipts: PrivacyReadReceipts::Unknown,
+        };
+        assert_eq!(
+            serde_json::to_string(&unknown).unwrap(),
+            r#"{"type":"privacy_settings","read_receipts":"unknown"}"#
+        );
+
+        let ok = DaemonMessage::PrivacyResult {
+            id: 32,
+            ok: true,
+            detail: None,
+        };
+        let line = serde_json::to_string(&ok).unwrap();
+        assert_eq!(line, r#"{"type":"privacy_result","id":32,"ok":true}"#);
+        assert_eq!(serde_json::from_str::<DaemonMessage>(&line).unwrap(), ok);
+
+        let failed = DaemonMessage::PrivacyResult {
+            id: 33,
+            ok: false,
+            detail: Some("the server refused the change".into()),
+        };
+        let line = serde_json::to_string(&failed).unwrap();
+        assert_eq!(
+            line,
+            r#"{"type":"privacy_result","id":33,"ok":false,"detail":"the server refused the change"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).unwrap(),
+            failed
+        );
+        // A frame from a daemon that left the optional reason out is still a
+        // failure, not an accidental success.
+        let terse: DaemonMessage =
+            serde_json::from_str(r#"{"type":"privacy_result","id":34,"ok":false}"#).unwrap();
+        assert_eq!(
+            terse,
+            DaemonMessage::PrivacyResult {
+                id: 34,
+                ok: false,
+                detail: None,
+            }
+        );
     }
 
     /// All three lookup outcomes are one addressed answer, and a frame from a

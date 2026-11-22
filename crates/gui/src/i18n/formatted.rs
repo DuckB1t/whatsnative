@@ -48,6 +48,8 @@ formatted_catalog! {
     blocklist_failed(error) => ("Could not load blocked contacts: {error}", "Não foi possível carregar os contatos bloqueados: {error}");
     block_failed(error) => ("Could not block that address: {error}", "Não foi possível bloquear esse endereço: {error}");
     unblock_failed(error) => ("Could not unblock that contact: {error}", "Não foi possível desbloquear esse contato: {error}");
+    read_receipts_failed(error) => ("Could not change read receipts: {error}", "Não foi possível alterar os recibos de leitura: {error}");
+    read_receipts_read_failed(error) => ("Could not load the read-receipts setting: {error}", "Não foi possível carregar a configuração de recibos de leitura: {error}");
     invalid_username(min, max) => ("Enter a username of {min} to {max} characters, without the @.", "Digite um usuário de {min} a {max} caracteres, sem o @.");
     username_lookup_failed(error) => ("Could not look up that username: {error}", "Não foi possível buscar esse usuário: {error}");
     event_time(start, end) => ("{start} – {end}", "{start} – {end}");

@@ -792,6 +792,75 @@ impl Bridge {
                 });
                 None
             }
+            Action::FetchPrivacySettings { id, answer_to } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.fetch_read_receipts();
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // The DTO names no request: every front end sees the same
+                    // account setting, and the asker gets the ordinary ack.
+                    let answer = match task.await {
+                        Ok(Ok(read_receipts)) => {
+                            hub.signal(&DaemonMessage::PrivacySettings { read_receipts });
+                            Ok(DaemonMessage::Accepted { id: Some(id) })
+                        }
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(error) => Err(ProtocolError::NoSession {
+                            detail: format!(
+                                "the session stopped before the privacy settings arrived: {error}"
+                            ),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::SetReadReceipts {
+                id,
+                enabled,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.set_read_receipts(enabled);
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // The session sends the IQ, flushes the device snapshot and
+                    // re-reads the server before returning. Publish that fresh
+                    // value first so a window that then reads its correlated
+                    // result never draws against an older setting.
+                    let (ok, detail) = match task.await {
+                        Ok(Ok(read_receipts)) => {
+                            hub.signal(&DaemonMessage::PrivacySettings { read_receipts });
+                            (true, None)
+                        }
+                        Ok(Err(reason)) => (false, Some(reason)),
+                        Err(error) => (
+                            false,
+                            Some(format!(
+                                "the session stopped before the read-receipts change was answered: {error}"
+                            )),
+                        ),
+                    };
+                    answer_now(
+                        &answer_to,
+                        answered(id, Ok(DaemonMessage::PrivacyResult { id, ok, detail })),
+                    );
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::LookupUsername {
                 id,
                 username,
@@ -2332,6 +2401,8 @@ impl Bridge {
             | Action::ArchiveChat { .. }
             | Action::ListStarredMessages { .. }
             | Action::ListMediaMessages { .. }
+            | Action::FetchPrivacySettings { .. }
+            | Action::SetReadReceipts { .. }
             | Action::SearchMessages { .. }
             | Action::CreateEvent { .. }
             | Action::PreviewCallLink { .. }

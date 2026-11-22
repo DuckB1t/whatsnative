@@ -301,6 +301,20 @@ pub enum Action {
         request: oxidezap_ipc::BlockTarget,
         answer_to: Outbox,
     },
+    /// Read the account's DM read-receipts setting from the server. A network
+    /// read like the block list, with no local snapshot to consult.
+    FetchPrivacySettings {
+        id: RequestId,
+        answer_to: Outbox,
+    },
+    /// Change account-level DM read receipts. A real WhatsApp mutation: the
+    /// request is not answered until the server has accepted it, the device
+    /// snapshot has been flushed and the value has been read back.
+    SetReadReceipts {
+        id: RequestId,
+        enabled: bool,
+        answer_to: Outbox,
+    },
     /// Resolve a username through the live session. Like the block list, this
     /// waits for a server answer rather than reading the store, so it is
     /// answered on `answer_to` from a task of its own.
