@@ -175,6 +175,84 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        // Chat-list mutations, like the message pin above: the request is
+        // answered by the session's own result, while the row every front end
+        // repaints arrives separately through the store's PinUpdate,
+        // MuteUpdate, ArchiveUpdate or MarkChatAsReadUpdate.
+        ClientRequest::MarkUnread { chat_jid } => {
+            let id = match addressed(id, "a mark-unread needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::MarkUnread {
+                    id,
+                    chat_jid,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::PinChat { chat_jid, pin } => {
+            let id = match addressed(id, "a chat pin needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::PinChat {
+                    id,
+                    chat_jid,
+                    pin,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::MuteChat {
+            chat_jid,
+            mute_duration_seconds,
+        } => {
+            let id = match addressed(id, "a mute needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::MuteChat {
+                    id,
+                    chat_jid,
+                    mute_duration_seconds,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::ArchiveChat { chat_jid, archive } => {
+            let id = match addressed(id, "an archive needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::ArchiveChat {
+                    id,
+                    chat_jid,
+                    archive,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::ListStarredMessages { limit } => {
             let id = match addressed(id, "a starred listing needs an id to answer under") {
                 Ok(id) => id,

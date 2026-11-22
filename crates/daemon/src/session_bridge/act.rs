@@ -884,6 +884,88 @@ impl Bridge {
                 });
                 None
             }
+            Action::MarkUnread {
+                id,
+                chat_jid,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.mark_chat_unread(chat_jid);
+                oxidezap_session::spawn(async move {
+                    // No signal here: the store's MarkChatAsReadUpdate is what
+                    // repaints the badge in every front end. The request's own
+                    // answer is only its ack or refusal.
+                    let answer = mutation_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::PinChat {
+                id,
+                chat_jid,
+                pin,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.pin_chat(chat_jid, pin);
+                oxidezap_session::spawn(async move {
+                    // PinUpdate moves the row for every front end; this id
+                    // only tells the one that asked whether it took.
+                    let answer = mutation_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::MuteChat {
+                id,
+                chat_jid,
+                mute_duration_seconds,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.mute_chat(chat_jid, mute_duration_seconds);
+                oxidezap_session::spawn(async move {
+                    // MuteUpdate is authoritative; no second event is needed.
+                    let answer = mutation_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::ArchiveChat {
+                id,
+                chat_jid,
+                archive,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.archive_chat(chat_jid, archive);
+                oxidezap_session::spawn(async move {
+                    // ArchiveUpdate flips the whole page for every front end.
+                    let answer = mutation_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::ListStarredMessages {
                 id,
                 limit,
@@ -2166,6 +2248,10 @@ impl Bridge {
             | Action::ForwardMessage { .. }
             | Action::SetStarred { .. }
             | Action::SetMessagePinned { .. }
+            | Action::MarkUnread { .. }
+            | Action::PinChat { .. }
+            | Action::MuteChat { .. }
+            | Action::ArchiveChat { .. }
             | Action::ListStarredMessages { .. }
             | Action::SearchMessages { .. }
             | Action::CreateEvent { .. }

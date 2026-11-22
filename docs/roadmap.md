@@ -350,6 +350,18 @@
   loaded, so pins made before the window attached, or rows outside the loaded
   page, do not appear there. Both panels reuse the global search's hit rows,
   and neither has been live-validated.
+- **Chat folders are a filter plus four mutations, not a full folder model.**
+  Protocol 54 gives the window a Pinned filter beside All/Unread/Groups/Archived
+  and a right-click menu for mark-unread, pin/unpin, mute/unmute and
+  archive/unarchive. The account's store remains authoritative: the optimistic
+  per-chat overlay only covers those four flags while a request is in flight,
+  and a refusal rolls back just the fields that request touched. A Pinned
+  filter with no pins can walk every unarchived page before it reports empty,
+  because the chat list is paged client-side. The upstream library has no public
+  Favorites setter, so a Favorites chip would have nothing to manage; labels and
+  custom lists need a store/event/IPC/UI model of their own and are deferred.
+  Bounded mute durations are in the protocol but not in the menu. None of this
+  has been live-validated.
 - **Four everyday message actions are now in the native window, with a few
   honest horizons.** Protocol 52 carries forward, star/unstar, `@mention` JIDs
   on `SendText`, and account-wide FTS5 search. The forward picker lists only

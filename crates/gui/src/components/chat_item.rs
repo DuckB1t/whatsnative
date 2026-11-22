@@ -13,6 +13,7 @@ use gpui::{
     Styled, div,
 };
 use gpui_component::ActiveTheme as _;
+use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_component::{Icon, IconName};
 
 use crate::app::{ChatOpen, ChatRow, Preview, PreviewGlyph, Unread, WhatsAppApp};
@@ -40,6 +41,16 @@ pub fn render_chat_item(
     let has_unread = row.has_unread();
     let toggle_jid = row.jid.clone();
     let toggle_entity = entity.clone();
+    // The context menu names the inverse of what the row currently says. All
+    // four flags are copied out before the builder takes ownership: building a
+    // menu must not borrow the row the virtual list is about to drop.
+    let menu_jid = row.jid.clone();
+    let menu_pinned = row.pinned;
+    let menu_muted = row
+        .muted_until
+        .as_ref()
+        .is_some_and(|until| *until > wacore::time::now_utc());
+    let menu_archived = row.archived;
 
     // The row's own ground, which the avatar's badge rings itself in.
     let ground = if is_selected {
@@ -84,10 +95,13 @@ pub fn render_chat_item(
             )
         })
         .cursor_pointer()
-        .on_click(move |_, window, cx| {
-            entity.update(cx, |this, cx| {
-                this.select_chat(jid.clone(), ChatOpen::ToCompose, window, cx)
-            });
+        .on_click({
+            let entity = entity.clone();
+            move |_, window, cx| {
+                entity.update(cx, |this, cx| {
+                    this.select_chat(jid.clone(), ChatOpen::ToCompose, window, cx)
+                });
+            }
         })
         .when(row.community_toggle_visible, |el| {
             let hover = cx.theme().list_hover;
@@ -130,6 +144,64 @@ pub fn render_chat_item(
                 .child(render_name_row(&row, name, has_unread, metrics, cx))
                 .child(render_preview_row(&row, has_unread, metrics, cx)),
         )
+        // A row is still a surface for the ordinary click above; the menu is
+        // the way into the account-wide actions that have no room on a row.
+        // Each item carries its own copy of the entity and address so a menu
+        // opened on one chat never acts on whichever row was built last.
+        .context_menu(move |menu, _, _| {
+            menu.item(PopupMenuItem::new(crate::tr!(MarkChatUnread)).on_click({
+                let app = entity.clone();
+                let jid = menu_jid.clone();
+                move |_, _, cx| {
+                    app.update(cx, |app, cx| app.mark_chat_unread(&jid, cx));
+                }
+            }))
+            .separator()
+            .item(
+                PopupMenuItem::new(if menu_pinned {
+                    crate::tr!(UnpinChat)
+                } else {
+                    crate::tr!(PinChat)
+                })
+                .on_click({
+                    let app = entity.clone();
+                    let jid = menu_jid.clone();
+                    move |_, _, cx| {
+                        app.update(cx, |app, cx| app.set_chat_pinned(&jid, !menu_pinned, cx));
+                    }
+                }),
+            )
+            .item(
+                PopupMenuItem::new(if menu_muted {
+                    crate::tr!(UnmuteConversation)
+                } else {
+                    crate::tr!(MuteConversation)
+                })
+                .on_click({
+                    let app = entity.clone();
+                    let jid = menu_jid.clone();
+                    move |_, _, cx| {
+                        app.update(cx, |app, cx| app.set_chat_muted(&jid, !menu_muted, cx));
+                    }
+                }),
+            )
+            .item(
+                PopupMenuItem::new(if menu_archived {
+                    crate::tr!(Unarchive)
+                } else {
+                    crate::tr!(Archive)
+                })
+                .on_click({
+                    let app = entity.clone();
+                    let jid = menu_jid.clone();
+                    move |_, _, cx| {
+                        app.update(cx, |app, cx| {
+                            app.set_chat_archived(&jid, !menu_archived, cx)
+                        });
+                    }
+                }),
+            )
+        })
 }
 
 fn render_name_row(

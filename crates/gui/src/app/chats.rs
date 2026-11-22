@@ -6,7 +6,8 @@ use std::sync::Arc;
 use gpui::{App, Context};
 use oxidezap_core::Chat;
 
-use super::chat_row::ChatRow;
+use super::chat_actions::{ChatOverlay, ChatView};
+use super::chat_row::{ChatRow, Unread};
 use super::{WhatsAppApp, newest_shared_message};
 use crate::utils::contains_ignore_case;
 use log::info;
@@ -23,17 +24,25 @@ pub enum ChatFilter {
     All,
     Unread,
     Groups,
+    Pinned,
     Archived,
 }
 
 impl ChatFilter {
-    pub const ALL: [Self; 4] = [Self::All, Self::Unread, Self::Groups, Self::Archived];
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::Unread,
+        Self::Groups,
+        Self::Pinned,
+        Self::Archived,
+    ];
 
     pub fn id(self) -> &'static str {
         match self {
             Self::All => "all",
             Self::Unread => "unread",
             Self::Groups => "groups",
+            Self::Pinned => "pinned",
             Self::Archived => "archived",
         }
     }
@@ -43,17 +52,32 @@ impl ChatFilter {
             Self::All => crate::tr!(All),
             Self::Unread => crate::tr!(Unread),
             Self::Groups => crate::tr!(Groups),
+            Self::Pinned => crate::tr!(Pinned),
             Self::Archived => crate::tr!(Archived),
         }
     }
 
     /// Whether `chat` belongs under this filter.
+    ///
+    /// The authority here is the store's row; the sidebar's own pending
+    /// mutations are folded in by [`Self::matches_view`].
     pub fn matches(self, chat: &Chat) -> bool {
+        self.matches_view(chat, &ChatView::of(chat, ChatOverlay::default()))
+    }
+
+    /// Whether a row belongs under this filter, with this window's optimistic
+    /// chat state applied.
+    ///
+    /// A pin made a moment ago must put the row in `Pinned` now, and an archive
+    /// must take it out of the active lists now — waiting for the account-wide
+    /// refresh would make the chip row disagree with what the reader sees.
+    pub(super) fn matches_view(self, chat: &Chat, view: &ChatView) -> bool {
         match self {
-            Self::All => !chat.archived,
-            Self::Unread => !chat.archived && (chat.unread_count > 0 || chat.manually_unread),
-            Self::Groups => !chat.archived && chat.is_group,
-            Self::Archived => chat.archived,
+            Self::All => !view.archived,
+            Self::Unread => !view.archived && view.unread != Unread::None,
+            Self::Groups => !view.archived && chat.is_group,
+            Self::Pinned => !view.archived && view.pinned,
+            Self::Archived => view.archived,
         }
     }
 }
@@ -196,7 +220,17 @@ impl WhatsAppApp {
             match index.get(&chat.jid).copied() {
                 Some(at) => {
                     let jid = chat.jid.clone();
+                    // Only a store-backed row may settle an optimistic flag:
+                    // a snapshot placeholder knows nothing about pins or
+                    // archives. The check is against the merged value, so a
+                    // load that still carries the old state leaves our pending
+                    // change alone until the account's own update arrives.
+                    let from_store = chat.is_from_store();
                     Arc::make_mut(&mut self.chats[at]).merge_history(chat);
+                    if from_store {
+                        let authoritative = ChatView::of(&self.chats[at], ChatOverlay::default());
+                        self.reconcile_chat_overlay(&jid, authoritative);
+                    }
                     // The chat *on screen* was read locally the moment the
                     // message arrived; the store row commits with the unread
                     // bump before our receipt lands, so the hydrated counter
@@ -419,11 +453,43 @@ mod tests {
     use super::*;
 
     fn chat(jid: &str, is_group: bool, unread: u32, marked: bool) -> Chat {
+        chat_with(jid, is_group, unread, marked, false, false)
+    }
+
+    /// The full fixture for the filter tests: the two flags the new `Pinned`
+    /// filter has to weigh against each other.
+    fn chat_with(
+        jid: &str,
+        is_group: bool,
+        unread: u32,
+        marked: bool,
+        pinned: bool,
+        archived: bool,
+    ) -> Chat {
         let mut chat = Chat::new(jid.to_string());
         chat.is_group = is_group;
         chat.unread_count = unread;
         chat.manually_unread = marked;
+        chat.pinned_at = pinned.then_some(
+            chrono::DateTime::from_timestamp(1_700_000_000, 0).expect("synthetic pin time"),
+        );
+        chat.archived = archived;
         chat
+    }
+
+    #[test]
+    fn pinned_selects_only_active_pinned_chats() {
+        let pinned = chat_with("155555500001@g.us", true, 0, false, true, false);
+        let unpinned = chat_with("155555500002@g.us", false, 3, false, false, false);
+        let pinned_and_archived = chat_with("155555500003@g.us", true, 0, false, true, true);
+
+        assert!(ChatFilter::Pinned.matches(&pinned));
+        assert!(!ChatFilter::Pinned.matches(&unpinned));
+        assert!(
+            !ChatFilter::Pinned.matches(&pinned_and_archived),
+            "the archived list keeps its own rows"
+        );
+        assert!(ChatFilter::All.matches(&pinned));
     }
 
     #[test]
@@ -722,6 +788,8 @@ mod tests {
         assert!(!ChatFilter::All.matches(&direct));
         assert!(!ChatFilter::Unread.matches(&direct));
         assert!(!ChatFilter::Groups.matches(&group));
+        assert!(!ChatFilter::Pinned.matches(&direct));
+        assert!(!ChatFilter::Pinned.matches(&group));
     }
 
     fn from_store(jid: &str) -> Chat {
@@ -817,7 +885,7 @@ mod tests {
     #[test]
     fn filter_ids_are_stable_and_distinct() {
         let ids: Vec<&str> = ChatFilter::ALL.iter().map(|f| f.id()).collect();
-        assert_eq!(ids, vec!["all", "unread", "groups", "archived"]);
+        assert_eq!(ids, vec!["all", "unread", "groups", "pinned", "archived"]);
     }
 
     fn tied_chat(jid: &str, pin_secs: Option<i64>, secs: Option<i64>) -> Chat {

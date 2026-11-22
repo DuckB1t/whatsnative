@@ -14,6 +14,7 @@ mod call_link_dialog;
 mod calls;
 mod calls_ctl;
 mod channel_poll_dialog;
+mod chat_actions;
 pub mod chat_row;
 mod chats;
 mod commands;
@@ -789,6 +790,12 @@ pub struct WhatsAppApp {
     /// taken by a frame still being drawn — which is a frame that is about to
     /// end.
     chats: Vec<Arc<Chat>>,
+    /// Unconfirmed chat-list mutations, keyed by chat JID.
+    ///
+    /// A small delta over the store's rows rather than a copy of them: the
+    /// flags here are what this window has just asked to change and has not
+    /// yet seen settled. See [`chat_actions`].
+    chat_overlays: HashMap<String, chat_actions::ChatOverlay>,
     /// Currently selected chat JID
     selected_chat: Option<String>,
     /// WhatsApp client wrapper
@@ -1634,6 +1641,7 @@ impl WhatsAppApp {
             body_renders: 0,
             app_state: AppState::Loading,
             chats: Vec::new(),
+            chat_overlays: HashMap::new(),
             selected_chat: None,
             client: None,
             account_selection: recovery::AccountSelection::load(),
@@ -1922,22 +1930,26 @@ impl WhatsAppApp {
         }
 
         let query = self.search.read(cx).list_query();
-        let filtered: Vec<&Chat> = self
+        let filter = self.chat_filter;
+        let destination = self.destination;
+        let filtered: Vec<(&Chat, chat_actions::ChatView)> = self
             .conversations()
-            .filter(|chat| {
-                self.destination.matches(chat)
-                    && (if self.destination == Destination::Chats {
-                        self.chat_filter.matches(chat)
+            .filter_map(|chat| {
+                let view = self.chat_view(chat);
+                let belongs = destination.matches(chat)
+                    && (if destination == Destination::Chats {
+                        filter.matches_view(chat, &view)
                     } else {
-                        !chat.archived
-                    })
+                        !view.archived
+                    });
+                belongs.then_some((chat, view))
             })
             .collect();
 
         let mut rows: Vec<ChatRow> = filtered
             .into_iter()
-            .map(|chat| {
-                ChatRow::new(
+            .map(|(chat, view)| {
+                let mut row = ChatRow::new(
                     chat,
                     self.presence.typing(&chat.jid),
                     // The open chat's text lives in the composer, not the
@@ -1946,7 +1958,14 @@ impl WhatsAppApp {
                         .then(|| self.drafts.get(&chat.jid).map(String::as_str))
                         .flatten(),
                     self.is_own_number(&chat.jid),
-                )
+                );
+                // The overlay is a view of a row, not a second store: every
+                // other field still comes from the chat the store gave us.
+                row.pinned = view.pinned;
+                row.archived = view.archived;
+                row.muted_until = view.muted_until;
+                row.unread = view.unread;
+                row
             })
             .collect();
         let mut rows = if self.destination == Destination::Communities {

@@ -1315,6 +1315,79 @@ impl SessionHandle {
         rx
     }
 
+    /// Mark a chat unread, so its row carries a badge again.
+    ///
+    /// The ack belongs to this request; the badge every front end draws comes
+    /// from the store's `MarkChatAsReadUpdate`.
+    pub fn mark_unread(&self, chat_jid: &str) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::MarkUnread {
+                chat_jid: chat_jid.to_string(),
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Pin or unpin a conversation in the chat list.
+    ///
+    /// This is the chat-list pin, not a message pin: the row moves for every
+    /// front end through the store's `PinUpdate`, while this request's ack only
+    /// tells this window whether its own optimistic change stood.
+    pub fn pin_chat(&self, chat_jid: &str, pin: bool) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::PinChat {
+                chat_jid: chat_jid.to_string(),
+                pin,
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Mute, unmute, or mute a conversation for a bounded time.
+    ///
+    /// `None` is an indefinite mute and `Some(0)` unmutes; the daemon writes
+    /// the store's `MuteUpdate` for every front end. A bounded duration is in
+    /// seconds.
+    pub fn mute_chat(
+        &self,
+        chat_jid: &str,
+        mute_duration_seconds: Option<u64>,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::MuteChat {
+                chat_jid: chat_jid.to_string(),
+                mute_duration_seconds,
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Move a conversation into or out of the archived list.
+    ///
+    /// The store's `ArchiveUpdate` reloads the chat list for every front end;
+    /// this correlated request only says whether ours was accepted.
+    pub fn archive_chat(
+        &self,
+        chat_jid: &str,
+        archive: bool,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::ArchiveChat {
+                chat_jid: chat_jid.to_string(),
+                archive,
+            },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
     /// List the account's starred messages, newest first.
     ///
     /// The ack says the read ran; the rows arrive separately as

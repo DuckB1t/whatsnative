@@ -344,7 +344,13 @@ use std::path::PathBuf;
 /// local read answered with `DaemonMessage::StarredResults`, reusing the
 /// search-hit shape. An older daemon knows neither frame, so a window that
 /// offers either must not attach to one.
-pub const PROTOCOL_VERSION: u32 = 53;
+///
+/// 54 adds chat-list management: mark-unread, pin/unpin, mute/unmute and
+/// archive/unarchive a conversation. Each is a correlated mutation; the
+/// authoritative row reaches every front end through the library's app-state
+/// updates, which the store already applies. An older daemon knows none of
+/// these frames, so a window that offers them must not attach to one.
+pub const PROTOCOL_VERSION: u32 = 54;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

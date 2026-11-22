@@ -462,6 +462,37 @@ daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
 session type-checks. CLI release 1,682,904 B (<2 MiB). Synthetic fixtures only;
 no pin, star or listing ran against the paired account.
 
+### 16. Native chat folders and list management (protocol 54)
+
+**Problem.** The sidebar had four filters but no way to manage the list itself:
+pinning, muting, archiving and marking a chat unread existed only in the
+terminal. Favorites has no public setter upstream, and labels/custom lists are
+a larger data-model slice, so neither is faked with a dead control.
+
+**Change.**
+- IPC moves to version **54** with four correlated mutations — `MarkUnread`,
+  `PinChat`, `MuteChat`, `ArchiveChat` — whose JSON shapes mirror the terminal's
+  wire requests exactly. No new events: the store already applies the library's
+  `PinUpdate`, `MuteUpdate`, `ArchiveUpdate` and `MarkChatAsReadUpdate`.
+- The daemon routes each mutation out of band to a focused `Action` and calls
+  the existing session wrapper. The correlated reply only says whether this
+  window's optimistic change stood; the authoritative row reaches every front
+  end through the store, so nothing is signalled twice.
+- The GUI adds a Pinned filter chip (the chip row wraps on narrow sidebars) and
+  a right-click menu on chat rows for all four operations. A small per-chat
+  overlay holds only those four flags while a request is in flight; it is
+  rolled back per field on a refusal and retired when a store-backed row
+  agrees. Bounded mute durations are in the protocol but not exposed — the menu
+  offers indefinite mute and unmute, which is what the row can name honestly.
+- No store migration: `Chat` already carries `pinned_at`, `muted_until`,
+  `archived` and the unread flags. All new tests use synthetic JIDs.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2649 passed, 44 ignored, 0 failed). Web gates green: shared-view ban, wasm
+daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
+session type-checks. CLI release unchanged at 1,682,904 B (<2 MiB). No real
+chat state was changed on the paired account.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

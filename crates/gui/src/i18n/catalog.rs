@@ -201,6 +201,7 @@ catalog! {
     NothingUnread => ("Nothing unread", "Nenhuma conversa não lida");
     NoGroups => ("No groups", "Nenhum grupo");
     NoArchivedChats => ("No archived chats", "Nenhuma conversa arquivada");
+    NoPinnedChats => ("No pinned chats", "Nenhuma conversa fixada");
     NoChats => ("No chats", "Nenhuma conversa");
     NothingHereUnderTheCurrentFilter => ("Nothing here under the current filter.", "Nenhum item para o filtro atual.");
     ShowAllChats => ("Show all chats", "Mostrar todas as conversas");
@@ -550,4 +551,18 @@ catalog! {
     CouldNotLoadSavedMessages => ("Could not load saved messages", "Não foi possível carregar as mensagens salvas");
     PinnedMessages => ("Pinned messages", "Mensagens fixadas");
     NoPinnedMessages => ("No pinned messages in loaded chats", "Nenhuma mensagem fixada nas conversas carregadas");
+
+    // Protocol 54's chat-list management. "Mute" alone names the call's
+    // microphone in this catalog, so these say which mute they mean.
+    MarkChatUnread => ("Mark as unread", "Marcar como não lida");
+    PinChat => ("Pin conversation", "Fixar conversa");
+    UnpinChat => ("Unpin conversation", "Desafixar conversa");
+    MuteConversation => ("Mute conversation", "Silenciar conversa");
+    UnmuteConversation => ("Unmute conversation", "Ativar som da conversa");
+    Archive => ("Archive", "Arquivar");
+    Unarchive => ("Unarchive", "Desarquivar");
+    CouldNotMarkChatUnread => ("Could not mark the conversation unread", "Não foi possível marcar a conversa como não lida");
+    CouldNotPinChat => ("Could not update the conversation pin", "Não foi possível atualizar a fixação da conversa");
+    CouldNotMuteConversation => ("Could not update the conversation mute", "Não foi possível atualizar o silenciamento da conversa");
+    CouldNotArchiveChat => ("Could not archive or unarchive the conversation", "Não foi possível arquivar ou desarquivar a conversa");
 }

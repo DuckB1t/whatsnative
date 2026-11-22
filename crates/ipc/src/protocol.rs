@@ -1373,6 +1373,40 @@ pub enum ClientRequest {
     /// when this is not the message it would name in a snapshot right now, and
     /// the client resends after catching up.
     MarkRead(MarkRead),
+    /// Mark a chat unread, keeping whatever is behind it unread too.
+    ///
+    /// A correlated mutation whose answer is only an ack or a refusal. The
+    /// store applies the library's `MarkChatAsReadUpdate` for everyone, so the
+    /// badge is refreshed from the account rather than from this request.
+    MarkUnread {
+        chat_jid: String,
+    },
+    /// Pin or unpin a conversation in the chat list.
+    ///
+    /// This is the chat-list pin, not a message pin: it moves a conversation
+    /// to the top of every front end through the library's `PinUpdate`. The
+    /// request itself gets an ack or a correlated error.
+    PinChat {
+        chat_jid: String,
+        pin: bool,
+    },
+    /// Mute a conversation indefinitely, for a bounded time, or unmute it.
+    ///
+    /// `None` mutes indefinitely and `Some(0)` unmutes — the same spelling the
+    /// terminal uses. A bounded duration is in seconds.
+    MuteChat {
+        chat_jid: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mute_duration_seconds: Option<u64>,
+    },
+    /// Move a conversation into or out of the archived list.
+    ///
+    /// The store flips its whole chat page on the library's `ArchiveUpdate`,
+    /// so a front end must be ready for the list to reload after the ack.
+    ArchiveChat {
+        chat_jid: String,
+        archive: bool,
+    },
     /// Record actual playback; offline observations are local only.
     MarkAudioPlayed(MarkAudioPlayed),
     /// Remember that these status updates have been watched.
@@ -3460,5 +3494,58 @@ mod audio_played_tests {
             .is_read(),
             "a pin is a correlated mutation"
         );
+    }
+
+    /// Protocol 54's chat-list mutations are one more set of bytes the daemon
+    /// and every front end agree on. The shapes mirror the terminal's wire
+    /// requests exactly, so a future parity test can compare them directly.
+    /// Every address here is synthetic.
+    #[test]
+    fn protocol_54_chat_mutations_put_the_same_bytes_on_the_wire() {
+        let requests = [
+            (
+                ClientRequest::MarkUnread {
+                    chat_jid: "155555500001@g.us".into(),
+                },
+                r#"{"request":"mark_unread","chat_jid":"155555500001@g.us"}"#,
+            ),
+            (
+                ClientRequest::PinChat {
+                    chat_jid: "155555500001@g.us".into(),
+                    pin: true,
+                },
+                r#"{"request":"pin_chat","chat_jid":"155555500001@g.us","pin":true}"#,
+            ),
+            (
+                ClientRequest::MuteChat {
+                    chat_jid: "155555500001@g.us".into(),
+                    mute_duration_seconds: None,
+                },
+                r#"{"request":"mute_chat","chat_jid":"155555500001@g.us"}"#,
+            ),
+            (
+                ClientRequest::MuteChat {
+                    chat_jid: "155555500001@g.us".into(),
+                    mute_duration_seconds: Some(0),
+                },
+                r#"{"request":"mute_chat","chat_jid":"155555500001@g.us","mute_duration_seconds":0}"#,
+            ),
+            (
+                ClientRequest::ArchiveChat {
+                    chat_jid: "155555500001@g.us".into(),
+                    archive: true,
+                },
+                r#"{"request":"archive_chat","chat_jid":"155555500001@g.us","archive":true}"#,
+            ),
+        ];
+        for (frame, expected) in requests {
+            let line = serde_json::to_string(&frame).expect("a request serializes");
+            assert_eq!(line, expected);
+            assert_eq!(
+                serde_json::from_str::<ClientRequest>(&line).expect("a request parses"),
+                frame
+            );
+            assert!(!frame.is_read(), "a chat mutation is not a local read");
+        }
     }
 }

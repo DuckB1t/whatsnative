@@ -863,6 +863,111 @@ async fn gui_edit_and_delete_reach_the_session_without_an_early_ack() {
     }
 }
 
+/// Chat-list mutations are addressed like message mutations: the session's
+/// result answers the request, while the authoritative row change reaches
+/// every front end through the store. A request with no id has nothing for
+/// that answer to be addressed to, so it is refused before dispatch.
+#[tokio::test]
+async fn chat_list_mutations_are_addressed_and_reach_the_session() {
+    let hub = connected_hub();
+    let jid = "155555500001@g.us";
+    let requests = [
+        ClientRequest::MarkUnread {
+            chat_jid: jid.into(),
+        },
+        ClientRequest::PinChat {
+            chat_jid: jid.into(),
+            pin: true,
+        },
+        ClientRequest::MuteChat {
+            chat_jid: jid.into(),
+            mute_duration_seconds: Some(3600),
+        },
+        ClientRequest::ArchiveChat {
+            chat_jid: jid.into(),
+            archive: true,
+        },
+    ];
+
+    for request in requests {
+        let (commands, _taken) = bridge(CommandOutcome::Accepted);
+        let refused = handle_request(
+            Request {
+                id: None,
+                request: request.clone(),
+            },
+            &hub,
+            &no_plugins(),
+            &commands,
+            &outbox(),
+        )
+        .await;
+        assert!(
+            matches!(
+                parse(refused.frame),
+                DaemonMessage::Error {
+                    id: None,
+                    error: ProtocolError::Malformed { .. }
+                }
+            ),
+            "an unaddressed {request:?} was not refused"
+        );
+
+        let (commands, taken) = bridge(CommandOutcome::Accepted);
+        let answer = handle_request(
+            Request {
+                id: Some(42),
+                request: request.clone(),
+            },
+            &hub,
+            &no_plugins(),
+            &commands,
+            &outbox(),
+        )
+        .await;
+        assert!(
+            answer.frame.is_none(),
+            "the mutation has not completed yet: {request:?}"
+        );
+        let action = taken.await.unwrap().unwrap();
+        assert!(action.needs_network(), "{request:?} reaches WhatsApp");
+        match action {
+            Action::MarkUnread { id, chat_jid, .. } => {
+                assert_eq!(id, 42);
+                assert_eq!(chat_jid, jid);
+            }
+            Action::PinChat {
+                id, chat_jid, pin, ..
+            } => {
+                assert_eq!(id, 42);
+                assert_eq!(chat_jid, jid);
+                assert!(pin);
+            }
+            Action::MuteChat {
+                id,
+                chat_jid,
+                mute_duration_seconds,
+                ..
+            } => {
+                assert_eq!(id, 42);
+                assert_eq!(chat_jid, jid);
+                assert_eq!(mute_duration_seconds, Some(3600));
+            }
+            Action::ArchiveChat {
+                id,
+                chat_jid,
+                archive,
+                ..
+            } => {
+                assert_eq!(id, 42);
+                assert_eq!(chat_jid, jid);
+                assert!(archive);
+            }
+            other => panic!("unexpected action for {request:?}: {other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn status_post_keeps_its_explicit_audience_until_the_session_confirms() {
     let hub = connected_hub();

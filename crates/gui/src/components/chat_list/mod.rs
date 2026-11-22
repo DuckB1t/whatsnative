@@ -365,6 +365,7 @@ fn render_empty(
         EmptyState::new(match props.filter {
             ChatFilter::Unread => crate::tr!(NothingUnread),
             ChatFilter::Groups => crate::tr!(NoGroups),
+            ChatFilter::Pinned => crate::tr!(NoPinnedChats),
             ChatFilter::Archived => crate::tr!(NoArchivedChats),
             ChatFilter::All => crate::tr!(NoChats),
         })

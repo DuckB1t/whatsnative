@@ -55,6 +55,38 @@ pub enum Action {
         pinned: bool,
         answer_to: Outbox,
     },
+    /// Mark a chat unread. Addressed like a message mutation, but the badge
+    /// every front end repaints comes from the store's
+    /// `MarkChatAsReadUpdate`; this request only carries the ack or refusal.
+    MarkUnread {
+        id: RequestId,
+        chat_jid: String,
+        answer_to: Outbox,
+    },
+    /// Pin or unpin a conversation in the chat list — not a message pin.
+    /// `PinUpdate` moves the row for everyone; the id answers only the asker.
+    PinChat {
+        id: RequestId,
+        chat_jid: String,
+        pin: bool,
+        answer_to: Outbox,
+    },
+    /// Mute a conversation indefinitely, for a bounded time, or unmute it.
+    /// `MuteUpdate` reaches every front end; the id carries the ack.
+    MuteChat {
+        id: RequestId,
+        chat_jid: String,
+        mute_duration_seconds: Option<u64>,
+        answer_to: Outbox,
+    },
+    /// Move a conversation into or out of the archived list. `ArchiveUpdate`
+    /// repaints the page everywhere; the id carries the ack.
+    ArchiveChat {
+        id: RequestId,
+        chat_jid: String,
+        archive: bool,
+        answer_to: Outbox,
+    },
     /// Full-text search, answered with `SearchResults` on the asking outbox.
     SearchMessages {
         id: RequestId,
@@ -626,6 +658,47 @@ mod device_action_tests {
                 }
                 .needs_network()
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod chat_list_action_tests {
+    use super::*;
+
+    /// The chat-list mutations reach WhatsApp even though their row changes
+    /// arrive later through the store. They belong in the default branch of
+    /// `needs_network`, not alongside the local reads and writes.
+    #[test]
+    fn chat_list_mutations_need_a_live_connection() {
+        let (answer_to, _rx) = tokio::sync::mpsc::channel(4);
+        let jid = "155555500001@g.us".to_owned();
+        for action in [
+            Action::MarkUnread {
+                id: 1,
+                chat_jid: jid.clone(),
+                answer_to: answer_to.clone(),
+            },
+            Action::PinChat {
+                id: 2,
+                chat_jid: jid.clone(),
+                pin: true,
+                answer_to: answer_to.clone(),
+            },
+            Action::MuteChat {
+                id: 3,
+                chat_jid: jid.clone(),
+                mute_duration_seconds: None,
+                answer_to: answer_to.clone(),
+            },
+            Action::ArchiveChat {
+                id: 4,
+                chat_jid: jid,
+                archive: true,
+                answer_to,
+            },
+        ] {
+            assert!(action.needs_network(), "{action:?}");
         }
     }
 }

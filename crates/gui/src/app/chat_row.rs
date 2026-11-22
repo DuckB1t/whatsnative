@@ -125,6 +125,10 @@ pub struct ChatRow {
     pub preview: Preview,
     pub pinned: bool,
     pub muted_until: Option<DateTime<Utc>>,
+    /// Whether the conversation is in the archived list. The context menu
+    /// needs it to name the inverse action; the list uses the app's projected
+    /// value while a mutation is in flight.
+    pub archived: bool,
 }
 
 impl ChatRow {
@@ -162,6 +166,7 @@ impl ChatRow {
             preview: preview_for(chat, typing, draft, is_own_number),
             pinned: chat.pinned_at.is_some(),
             muted_until: chat.muted_until,
+            archived: chat.archived,
         }
     }
 
