@@ -295,6 +295,19 @@ impl WhatsAppApp {
         cx.notify();
     }
 
+    /// Open Settings straight onto the shortcut map.
+    ///
+    /// It reuses the Settings screen rather than a second modal: the keyboard
+    /// is already owned there, Escape already closes it, and the body already
+    /// scrolls. A new overlay would need another focus owner and a second
+    /// Escape path for no benefit.
+    pub fn open_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_settings(window, cx);
+        if self.showing_settings(cx) {
+            self.set_settings_section(SettingsSection::Shortcuts, cx);
+        }
+    }
+
     /// Move to another pane, re-measuring what that pane is about.
     pub fn set_settings_section(&mut self, section: SettingsSection, cx: &mut Context<Self>) {
         let Some(section) = self

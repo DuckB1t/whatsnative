@@ -7,6 +7,7 @@
 mod appearance;
 mod devices;
 mod panes;
+mod shortcuts;
 
 use gpui::{
     App, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
@@ -95,6 +96,9 @@ pub fn render_settings_view(
                         .child(match section {
                             SettingsSection::Appearance => {
                                 appearance::render(settings, entity, metrics, cx).into_any_element()
+                            }
+                            SettingsSection::Shortcuts => {
+                                shortcuts::render(metrics, cx).into_any_element()
                             }
                             other => panes::render(other, app, entity, metrics, cx),
                         }),
@@ -437,6 +441,7 @@ fn icon_for(section: SettingsSection) -> Icon {
         SettingsSection::AudioVideo => Icon::new(ProductIcon::Volume),
         SettingsSection::Privacy => Icon::new(ProductIcon::Shield),
         SettingsSection::Storage => Icon::new(IconName::HardDrive),
+        SettingsSection::Shortcuts => Icon::new(IconName::Settings),
         SettingsSection::Plugins => Icon::new(IconName::LayoutDashboard),
         SettingsSection::Advanced => Icon::new(IconName::Settings2),
     }

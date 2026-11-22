@@ -37,8 +37,8 @@ pub fn render(
         SettingsSection::Storage => storage(app, entity, metrics, cx),
         SettingsSection::Advanced => advanced(entity, metrics, cx),
         SettingsSection::Plugins => plugins(app, entity, metrics, cx),
-        // Rendered by its own module.
-        SettingsSection::Appearance => div().into_any_element(),
+        // Rendered by their own modules.
+        SettingsSection::Appearance | SettingsSection::Shortcuts => div().into_any_element(),
     };
 
     div()

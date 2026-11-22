@@ -625,6 +625,25 @@ session type-checks. xtask (52 passed) and the plugin-host ignored test pass;
 CLI release unchanged at 1,682,904 B (<2 MiB). No community or group was
 changed; all fixtures are synthetic `@g.us` addresses.
 
+### 21. Keyboard shortcut map (client only, no protocol bump)
+
+**Problem.** The client installs a real keyboard map — `Ctrl/⌘ K`, `Shift F`,
+`Enter`, page keys and the rest — but nothing in the UI listed it. Users had to
+discover every binding by trying it, and actions with no binding were
+indistinguishable from missing features.
+
+**Change.** A new **Keyboard shortcuts** section in Settings draws the bindings
+the binary actually installs, grouped by scope (Everywhere, Chat list,
+Conversation, Calls, Media viewer) and followed by an explicit **No key
+assigned** group naming the actions that stay in a menu. `Ctrl/⌘ /` opens
+Settings straight onto that section; a synthetic GPUI test proves the chord
+lands there and the panel renders. No protocol, IPC, daemon or session code
+changed: a help table is not a wire frame, and bumping the version would have
+broken handshakes for no reason. EN/PT strings cover every heading and note.
+
+**Gates.** fmt and GUI clippy (`-D warnings`) green; the shortcut chord test
+passes. Full gates and the commit follow in the central review.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

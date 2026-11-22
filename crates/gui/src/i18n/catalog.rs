@@ -223,6 +223,29 @@ catalog! {
     Message => ("Message", "Mensagem");
     StartingANewConversationIsNotAvailableYet => ("Starting a new conversation is not available yet", "Iniciar uma nova conversa ainda não está disponível");
     Settings => ("Settings", "Configurações");
+    // The shortcut map. It names only keys this build binds, plus the actions
+    // that deliberately stay in a menu, so the panel cannot promise a key
+    // that does not exist.
+    KeyboardShortcuts => ("Keyboard shortcuts", "Atalhos de teclado");
+    KeyboardShortcutsIntro => ("These are the keys this build actually handles. Actions without a key stay in the chat or message menu.", "Estas são as teclas que esta versão realmente atende. Ações sem tecla continuam no menu da conversa ou da mensagem.");
+    ShortcutSecondaryNote => ("Ctrl on Linux/Windows, ⌘ on macOS", "Ctrl no Linux/Windows, ⌘ no macOS");
+    ShortcutColumnKeys => ("Keys", "Teclas");
+    ShortcutColumnAction => ("Action", "Ação");
+    ShortcutScopeEverywhere => ("Everywhere", "Em qualquer lugar");
+    ShortcutScopeChatList => ("Chat list", "Lista de conversas");
+    ShortcutScopeConversation => ("Conversation", "Conversa");
+    ShortcutScopeComposer => ("Composer", "Caixa de mensagem");
+    ShortcutScopeCalls => ("Calls", "Chamadas");
+    ShortcutScopeViewer => ("Media viewer", "Visualizador de mídia");
+    ShortcutScopeNone => ("No key assigned", "Sem tecla atribuída");
+    ShortcutQuit => ("Quit", "Sair");
+    ShortcutPreviousChat => ("Previous conversation", "Conversa anterior");
+    ShortcutNextChat => ("Next conversation", "Próxima conversa");
+    ShortcutGlobalSearch => ("All messages", "Todas as mensagens");
+    ShortcutPageHistory => ("Page through history", "Percorrer o histórico");
+    ShortcutToggleCommunity => ("Expand or collapse community", "Expandir ou recolher comunidade");
+    ShortcutReturnToCall => ("Return to call", "Voltar à chamada");
+    ShortcutNewLine => ("New line", "Nova linha");
     Loading => ("Loading...", "Carregando...");
     FetchingMoreConversations => ("Fetching more conversations.", "Buscando mais conversas.");
     NoMatches => ("No matches", "Nenhum resultado");

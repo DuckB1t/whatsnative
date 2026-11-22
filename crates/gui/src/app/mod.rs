@@ -361,6 +361,8 @@ actions!(
         PageChatHistoryDown,
         /// Open the Settings screen.
         OpenSettings,
+        /// Open Settings on the map of keys this build actually handles.
+        OpenShortcuts,
         /// Search every conversation's stored history, not just the sidebar.
         OpenGlobalSearch,
         /// List the account's starred messages.
@@ -724,6 +726,9 @@ pub fn init_app_bindings(cx: &mut gpui::App) {
             None,
         ),
         window_binding("secondary-,", OpenSettings, cx),
+        // A second, unbound chord goes straight to the key map. It lands on
+        // the Settings screen, which already owns the keyboard and Escape.
+        window_binding("secondary-/", OpenShortcuts, cx),
         // Scoped to the call so Enter and Escape keep their composer meaning
         // while nothing is ringing.
         KeyBinding::new("enter", AcceptCall, Some(CALL_CONTEXT)),
@@ -4837,6 +4842,9 @@ impl Render for WhatsAppApp {
             }))
             .on_action(cx.listener(|app, _: &OpenSettings, window, cx| {
                 app.open_settings(window, cx);
+            }))
+            .on_action(cx.listener(|app, _: &OpenShortcuts, window, cx| {
+                app.open_shortcuts(window, cx);
             }))
             .on_action(cx.listener(|app, _: &OpenGlobalSearch, window, cx| {
                 app.open_global_search(window, cx);

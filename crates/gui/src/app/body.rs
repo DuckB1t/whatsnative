@@ -444,6 +444,33 @@ pub(super) mod tests {
     }
 
     #[gpui::test]
+    fn shortcut_chord_opens_the_shortcut_map(cx: &mut gpui::TestAppContext) {
+        let (mut visual, app) = connected_app_fixture(cx);
+        visual.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-/"
+        } else {
+            "ctrl-/"
+        });
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        visual.run_until_parked();
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        visual.read(|cx| {
+            let app = app.read(cx);
+            assert!(app.showing_settings(cx), "the chord must open Settings");
+            assert_eq!(
+                app.settings(cx).map(|settings| settings.section),
+                Some(crate::app::SettingsSection::Shortcuts),
+                "the chord must land on the shortcut map"
+            );
+        });
+        let bounds = visual
+            .debug_bounds("shortcut-map")
+            .expect("the shortcut map must render");
+        assert!(bounds.size.width > gpui::px(0.0));
+        assert!(bounds.size.height > gpui::px(0.0));
+    }
+
+    #[gpui::test]
     fn own_reply_retains_identity_without_storing_a_translated_role(cx: &mut gpui::TestAppContext) {
         let (mut visual, app) = connected_app_fixture(cx);
         visual.update(|window, cx| {
