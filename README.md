@@ -138,10 +138,11 @@ cargo build --release --bin oxidezap --bin oxidezapd --bin oxidezap-cli
 The window starts the daemon beside itself, so keep the three binaries in the
 same directory. The first build compiles the whole GPUI tree and takes a while.
 
-Prebuilt archives and notes are on the
+Release notes and source archives are on the
 [releases page](https://github.com/DuckB1t/whatsnative/releases). Linux `.deb`,
 `.rpm` and `.AppImage` packages are described in
-[docs/linux-packaging.md](docs/linux-packaging.md).
+[docs/linux-packaging.md](docs/linux-packaging.md); this first release ships
+source only.
 
 ## Documentation
 
