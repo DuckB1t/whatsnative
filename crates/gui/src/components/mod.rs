@@ -2,6 +2,7 @@
 
 mod avatar;
 mod call_card;
+pub(crate) mod calls;
 mod chat_header;
 mod chat_item;
 mod chat_list;
@@ -26,6 +27,7 @@ mod sticker;
 
 pub use avatar::Avatar;
 pub use call_card::render_call_card;
+pub(crate) use calls::{CallsDetailProps, CallsListProps, render_calls_detail, render_calls_list};
 pub use chat_header::render_chat_header;
 pub use chat_item::render_chat_item;
 pub use chat_list::{AccountSummary, ChatListProps, render_chat_list};

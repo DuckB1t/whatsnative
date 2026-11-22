@@ -50,17 +50,25 @@ pub struct StatusMediaDraft {
 pub enum Destination {
     #[default]
     Chats,
+    Calls,
     Status,
     Channels,
     Communities,
 }
 
 impl Destination {
-    pub const ALL: [Self; 4] = [Self::Chats, Self::Status, Self::Channels, Self::Communities];
+    pub const ALL: [Self; 5] = [
+        Self::Chats,
+        Self::Calls,
+        Self::Status,
+        Self::Channels,
+        Self::Communities,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Chats => crate::tr!(Chats),
+            Self::Calls => crate::tr!(Calls),
             Self::Status => crate::tr!(Status),
             Self::Channels => crate::tr!(Channels),
             Self::Communities => crate::tr!(Communities),
@@ -68,7 +76,7 @@ impl Destination {
     }
 
     pub fn has_conversations(self) -> bool {
-        self != Self::Status
+        self != Self::Status && self != Self::Calls
     }
 
     pub fn matches(self, chat: &oxidezap_core::Chat) -> bool {
@@ -90,7 +98,7 @@ impl Destination {
             Self::Chats => {
                 !channel && !matches!(chat.group_hierarchy, Some(GroupHierarchy::Community))
             }
-            Self::Status => false,
+            Self::Status | Self::Calls => false,
         }
     }
 
@@ -98,6 +106,7 @@ impl Destination {
     pub fn id(self) -> &'static str {
         match self {
             Self::Chats => "nav-chats",
+            Self::Calls => "nav-calls",
             Self::Status => "nav-status",
             Self::Channels => "nav-channels",
             Self::Communities => "nav-communities",
@@ -254,6 +263,12 @@ impl WhatsAppApp {
         // an oversized initial snapshot reduced the history budget.
         if destination == Destination::Status {
             self.ensure_timeline_page(STATUS_BROADCAST_JID, cx);
+        }
+        // The call log lives in the daemon and is not part of the snapshot.
+        // Ask when the destination becomes visible; a later answer or a state
+        // change replaces the rows this window already holds.
+        if destination == Destination::Calls {
+            self.refresh_calls(cx);
         }
         self.search
             .update(cx, |search, cx| search.clear_list_query(window, cx));
@@ -1140,12 +1155,14 @@ mod tests {
             kind: SubgroupKind::Announcement,
         });
         let status = Chat::new(STATUS_BROADCAST_JID.into());
+        // The order is Chats, Calls, Status, Channels, Communities. Calls is
+        // a log rather than a conversation list and matches no chat.
         for (chat, expected) in [
-            (&direct, [true, false, false, false]),
-            (&channel, [false, false, true, false]),
-            (&parent, [false, false, false, true]),
-            (&child, [true, false, false, true]),
-            (&status, [false, true, false, false]),
+            (&direct, [true, false, false, false, false]),
+            (&channel, [false, false, false, true, false]),
+            (&parent, [false, false, false, false, true]),
+            (&child, [true, false, false, false, true]),
+            (&status, [false, false, true, false, false]),
         ] {
             assert_eq!(
                 Destination::ALL.map(|destination| destination.matches(chat)),

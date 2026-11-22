@@ -480,6 +480,19 @@ impl<'a> Frames<'a> {
                 }
                 None => debug!("a sticker listing arrived for a cancelled request"),
             },
+            // The call log is a bounded snapshot for this one window, not
+            // account state. A wrong waiter means the correlation is broken:
+            // fail it permanently rather than hand one request's rows to
+            // another pane.
+            DaemonMessage::Calls { id, calls } => match take_pending(self.pending, id) {
+                Some(Awaiting::Calls(tx)) => {
+                    let _ = tx.send(Ok(calls));
+                }
+                Some(waiting) => {
+                    self.fail(waiting, &Failure::permanent("unexpected call log answer"))
+                }
+                None => debug!("a call log answer arrived for {id}, which nobody is waiting on"),
+            },
             DaemonMessage::Storage {
                 id,
                 database_bytes,
@@ -1340,6 +1353,54 @@ mod tests {
         );
         frames.finish();
         assert!(lost_rx.try_recv().unwrap().is_err());
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    /// A call log answer belongs to the window that asked, so a wrong waiter
+    /// is a permanent failure rather than rows delivered to the wrong pane.
+    /// The address is synthetic.
+    #[test]
+    fn call_log_answers_are_correlated_and_wrong_waiters_fail_permanently() {
+        let (sink, _events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let (wrong, mut wrong_rx) = tokio::sync::oneshot::channel();
+        pending.lock().unwrap().insert(21, Awaiting::Calls(tx));
+        pending
+            .lock()
+            .unwrap()
+            .insert(22, Awaiting::Mutation(wrong));
+
+        let answer = DaemonMessage::Calls {
+            id: 21,
+            calls: vec![oxidezap_ipc::wire::dto::CallEventDto {
+                id: "synthetic-call".into(),
+                chat_jid: "synthetic-caller@example.invalid".into(),
+                caller_jid: "synthetic-caller@example.invalid".into(),
+                timestamp_ms: 1_700_000_000_000,
+                is_video: false,
+                is_group: false,
+                group_jid: None,
+                participants: Vec::new(),
+                group_transaction_id: None,
+                group_media: None,
+                duration_seconds: Some(5),
+                outcome: "connected".into(),
+            }],
+        };
+        let _ = frames.apply(answer);
+        assert_eq!(rx.try_recv().unwrap().unwrap().len(), 1);
+
+        let _ = frames.apply(DaemonMessage::Calls {
+            id: 22,
+            calls: Vec::new(),
+        });
+        assert_eq!(
+            wrong_rx.try_recv().unwrap().unwrap_err().detail,
+            "unexpected call log answer"
+        );
         assert!(pending.lock().unwrap().is_empty());
     }
 

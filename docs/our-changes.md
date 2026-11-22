@@ -767,6 +767,42 @@ sensitive pattern appears in any image. fmt, clippy `-D warnings` and the GUI
 suite stay green. The AppImage is built with `packaging/linux/package.sh` at the
 pinned tool versions, and the tarball follows `.github/workflows/build.yml`.
 
+### 26. Calls view for the daemon's live log (protocol 61)
+
+**Problem.** The daemon already kept a bounded ring of finalized calls and the
+CLI could print it, but the window had no Calls destination. Calls only showed
+up as system rows inside conversations, so there was no way to see what this
+daemon had observed without leaving the GUI.
+
+**Change.** Protocol **61** adds `ClientRequest::ListCalls` and
+`DaemonMessage::Calls`. The answer is addressed under the request id and goes
+only to the front end that asked; the wire and CLI `calls` request is untouched.
+The daemon ring now lives on `StateHub`, with the session bridge as its only
+writer, so a GUI read does not need a session command. The window asks when
+Calls opens, when a fresh attachment arrives, on explicit refresh, and when a
+call state changes while the pane is visible.
+
+A fifth rail destination uses the Phone icon and opens a dedicated Calls pane.
+Rows show an incoming or outgoing arrow, a voice or video icon, a resolved peer
+or group name with a synthetic-safe JID fallback, outcome, duration and time.
+A row opens its chat when that chat is loaded; when it is not, the row stays a
+label instead of pretending to navigate. All and Missed filters, honest
+loading, empty and error states, and EN/PT strings are included.
+
+**Limitation.** This is not durable history. The daemon keeps finalized calls
+from its own lifetime only, capped at 100, and a restart empties the log. The
+pane states this exactly: "Calls since this daemon started. Last 100 only."
+No server history is fetched and nothing is written to disk. No paired-device
+exercise was performed; every fixture uses `.invalid` addresses.
+
+**Gates.** `cargo +1.100.0 fmt --all`,
+`cargo +1.100.0 clippy --workspace --all-targets --all-features -- -D warnings`
+and `cargo +1.100.0 test --workspace --all-features -- --test-threads=1` are
+green (2705 passed, 45 ignored, 0 failed). The coordinator reran those three
+plus the xtask format, clippy and test gates with the same result.
+`git diff --check` is clean. No em dashes or real identifiers are present in
+the new lines.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

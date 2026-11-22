@@ -18,6 +18,23 @@
 - Agents implement. The coordinator reviews every diff, runs the gates, updates
   docs and commits centrally. Nothing is pushed without an explicit request.
 
+## Current status, updated after each wave
+
+- [x] Wave 0, investigation and plan
+- [x] Wave 1.1, dedicated Calls destination and daemon call log
+- [ ] Wave 1.2, chat info panel
+- [ ] Wave 1.3, new chat dialog
+- [ ] Wave 1.4, media gallery
+- [ ] Wave 1.5, local GIF and sticker search
+- [ ] Wave 2, message actions with real APIs
+- [ ] Wave 3, privacy and settings with real mutations
+- [ ] Wave 4, multi-account V2
+- [ ] MCP planning
+
+Wave 1.1 is implemented and green locally. It is not in v0.1.0. The call log is
+a daemon-lifetime ring, capped at 100, and the pane says that plainly. The
+coordinator reran format, clippy, the full workspace suite and the xtask gates.
+
 ## What the deep investigation found
 
 ### Navigation and conversation surface

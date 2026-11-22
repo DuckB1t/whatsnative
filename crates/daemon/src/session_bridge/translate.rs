@@ -62,7 +62,10 @@ impl Bridge {
         // Before the fold below, while the hub still holds the pre-state:
         // the log records what happened, and folding first would only say
         // what remains.
-        self.calls.observe(&event, &self.hub);
+        self.calls
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .observe(&event, &self.hub);
         prepare_avatars(&self.hub, &self.avatar_recorder, &mut event);
         let mut answer = if matches!(event, UiEvent::SessionResyncRequired(_)) {
             Answer::Restart

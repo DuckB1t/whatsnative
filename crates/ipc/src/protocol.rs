@@ -442,6 +442,17 @@ pub enum DaemonMessage {
         id: RequestId,
         preview: oxidezap_core::CallLinkPreview,
     },
+    /// The finalized calls this daemon has seen, answering
+    /// [`ClientRequest::ListCalls`].
+    ///
+    /// Addressed to the one front end that asked. A call log is a bounded view
+    /// into this daemon's lifetime, not state to fan out to every window and
+    /// not a durable archive: it dies with the process and holds at most 100
+    /// finalized calls.
+    Calls {
+        id: RequestId,
+        calls: Vec<oxidezap_wire::dto::CallEventDto>,
+    },
     /// What this account occupies on disk, answering
     /// [`ClientRequest::StorageUsage`].
     Storage {
@@ -820,6 +831,7 @@ impl ClientRequest {
                 | Self::FetchPrivacySettings
                 | Self::LookupUsername { .. }
                 | Self::StorageUsage
+                | Self::ListCalls { .. }
                 | Self::ListInstalledPlugins
         )
     }
@@ -1626,6 +1638,15 @@ pub enum ClientRequest {
     /// cache, so it is the only one that can measure either — a front end
     /// asking the filesystem would be guessing at paths it does not own.
     StorageUsage,
+    /// Ask for the daemon's in-memory call log, newest first.
+    ///
+    /// Answered with [`DaemonMessage::Calls`] under this request's id. Only
+    /// finalized calls since this daemon started are kept, capped at 100, so
+    /// this is not a durable history. The wire and CLI `calls` command has its
+    /// own request and is unchanged by this GUI path.
+    ListCalls {
+        limit: usize,
+    },
     /// Delete the cached media, keeping the store.
     ///
     /// Distinct from [`ForgetSession`](Self::ForgetSession): the history stays
@@ -2651,6 +2672,49 @@ mod tests {
         let line = serde_json::to_string(&msg).unwrap();
         assert!(!line.contains('\n'), "frames are newline-delimited");
         assert_eq!(serde_json::from_str::<DaemonMessage>(&line).unwrap(), msg);
+    }
+
+    /// The GUI call-log request and its addressed answer use synthetic
+    /// addresses only; nothing here reads an account's history.
+    #[test]
+    fn list_calls_request_and_answer_round_trip() {
+        let request = ClientRequest::ListCalls { limit: 7 };
+        assert!(request.is_read());
+        let line = serde_json::to_string(&Request {
+            id: Some(11),
+            request: request.clone(),
+        })
+        .expect("a call log request serializes");
+        assert_eq!(
+            serde_json::from_str::<Request>(&line)
+                .expect("a call log request parses")
+                .request,
+            request
+        );
+
+        let answer = DaemonMessage::Calls {
+            id: 11,
+            calls: vec![oxidezap_wire::dto::CallEventDto {
+                id: "synthetic-call".into(),
+                chat_jid: "synthetic-caller@example.invalid".into(),
+                caller_jid: "synthetic-caller@example.invalid".into(),
+                timestamp_ms: 1_700_000_000_000,
+                is_video: false,
+                is_group: false,
+                group_jid: None,
+                participants: Vec::new(),
+                group_transaction_id: None,
+                group_media: None,
+                duration_seconds: Some(42),
+                outcome: "connected".into(),
+            }],
+        };
+        let line = serde_json::to_string(&answer).expect("a call log answer serializes");
+        assert!(!line.contains('\n'), "frames are newline-delimited");
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).expect("a call log answer parses"),
+            answer
+        );
     }
 
     /// Every request that carries a payload, spelled out as the exact bytes it

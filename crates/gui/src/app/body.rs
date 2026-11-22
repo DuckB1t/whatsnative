@@ -758,7 +758,10 @@ pub(super) mod tests {
         cx.read(|cx| assert_eq!(app.read(cx).destination(), Destination::Channels));
         cx.update(|window, cx| {
             window.blur(cx);
-            for _ in 0..6 {
+            // One more stop than before the Calls button joined the rail:
+            // the focus order now walks Chats, Calls, Status, Channels,
+            // Communities before it comes back around.
+            for _ in 0..7 {
                 window.focus_next(cx);
             }
         });

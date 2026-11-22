@@ -6,6 +6,11 @@
 > ship fake switches. If you think one of these entries is stale, check upstream
 > first, then tell us.
 
+> The active implementation program is in [feature-plan.md](feature-plan.md).
+> It records the deep investigation, what is buildable with this tree, what is
+> blocked upstream, and the waves. It also records the UI decision: familiar
+> layout, original design, no copied proprietary assets.
+
 > The multi-account V2 implementation tracker is in
 > [multi-account-todo.md](multi-account-todo.md). It is kept separate from the
 > older product gaps below so those measurements and their rationale remain
@@ -433,6 +438,14 @@
   group chat's call buttons place a `StartGroup` call. Real group calls have
   not been placed or answered in this workspace: that needs explicit consent
   on the paired account. Name resolution for the ringing card is still open.
+- **Call history has a GUI Calls view, but only for this daemon's lifetime.**
+  The window asks for the daemon's bounded ring under protocol 61 and shows
+  direction, voice or video, a resolved peer or group name with a JID fallback,
+  outcome, duration and time. A row opens its chat when that chat is loaded.
+  The wire and CLI `calls` path is unchanged. What remains is retention: the
+  log holds finalized calls from this daemon start only, capped at 100, and is
+  gone after a restart. It is not a durable archive and no server history is
+  fetched.
 - **Only some failures reach the person who asked.** `app/notices.rs` is the
   transient surface the app had been missing: one sentence, expiring on its
   own, changing no state, drawn by the root over whatever screen is up, the

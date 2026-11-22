@@ -11,6 +11,7 @@ mod blocklist;
 mod body;
 mod call_devices;
 mod call_link_dialog;
+pub(crate) mod call_log;
 mod calls;
 mod calls_ctl;
 mod channel_poll_dialog;
@@ -1226,6 +1227,9 @@ pub struct WhatsAppApp {
     /// Which of the sidebar's destinations is on screen.
     destination: Destination,
     destination_selections: HashMap<&'static str, Option<String>>,
+    /// Last daemon-lifetime call log this window received, and its load state.
+    /// Kept while Calls is closed so reopening the pane does not blink empty.
+    call_log: call_log::CallLogState,
     /// Whose status updates are open, and which one of them.
     status_pane: StatusPane,
     status_reply: Option<status::StatusReply>,
@@ -1468,6 +1472,13 @@ impl WhatsAppApp {
                     // and a call this account placed was never an event.
                     FromDaemon::Calls(calls) => entity.update(cx, |app, cx| {
                         app.adopt_calls(*calls, cx);
+                        // A live call state snapshot means a call began,
+                        // answered or ended. The log only grows on an end,
+                        // but asking again while Calls is open is how the
+                        // pane sees that end without a second subscription.
+                        if app.destination == Destination::Calls {
+                            app.refresh_calls(cx);
+                        }
                     }),
                     // Whole every time. A plugin republishes its tree when
                     // anything in it changes, and the daemon publishes
@@ -1785,6 +1796,7 @@ impl WhatsAppApp {
             chat_cache_version: std::cell::Cell::new(0),
             destination: Destination::default(),
             destination_selections: HashMap::new(),
+            call_log: call_log::CallLogState::default(),
             status_pane: StatusPane::default(),
             status_reply: None,
             status_post: None,
@@ -1914,6 +1926,8 @@ impl WhatsAppApp {
                 self.selected_destination_jid().is_some()
             }
             Destination::Status => self.status_pane.is_open() || self.status_post.is_some(),
+            // The call log is its own list, not a conversation panel.
+            Destination::Calls => false,
         }
     }
 
@@ -2642,6 +2656,7 @@ impl WhatsAppApp {
         self.status_post = None;
         self.destination = Destination::default();
         self.destination_selections.clear();
+        self.call_log.clear();
         self.message_list_cache.borrow_mut().clear();
         self.chat_list_cache.borrow_mut().take();
         self.status_feed_cache.borrow_mut().take();
@@ -3551,6 +3566,13 @@ impl WhatsAppApp {
                         // new one. Nothing is sent if nobody chose.
                         app.resend_log_level(cx);
                         app.refresh_call_device_preferences(cx);
+                        // A fresh attachment may face a different daemon with
+                        // a different in-memory ring. The pane can be open
+                        // across a reconnect, so ask again instead of showing
+                        // rows the daemon on the other end never held.
+                        if app.destination == Destination::Calls {
+                            app.refresh_calls(cx);
+                        }
                     }
                     Err(e) if Session::is_settled(&e) => {
                         // A refusal, not a failure to reach anything: this

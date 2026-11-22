@@ -386,10 +386,17 @@ use std::path::PathBuf;
 /// carries only a `dhash` and no push event follows it. Older daemons know
 /// neither the read nor the mutation, so a window offering either must not
 /// attach to one; older windows cannot decode the two new frames. This is
-/// legacy IPC/GUI parity only — no wire or CLI parity — and the mutation is a
+/// legacy IPC/GUI parity only, with no wire or CLI parity, and the mutation is a
 /// real change to the WhatsApp account setting, not exercised against a live
 /// account by the tests.
-pub const PROTOCOL_VERSION: u32 = 60;
+///
+/// 61 adds the GUI call log: `ClientRequest::ListCalls` and
+/// `DaemonMessage::Calls`. The rows are a bounded, daemon-lifetime snapshot of
+/// finalized calls, answered only to the window that asked. Older daemons have
+/// no such frame to answer with, and older windows cannot decode the answer, so
+/// neither half may attach across this version. The wire and CLI `calls`
+/// request is unchanged.
+pub const PROTOCOL_VERSION: u32 = 61;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

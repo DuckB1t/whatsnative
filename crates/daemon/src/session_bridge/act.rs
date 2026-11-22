@@ -1630,7 +1630,11 @@ impl Bridge {
                 }
             },
             WireRequest::ListCalls { limit } => {
-                let calls = self.calls.list(limit);
+                let calls = self
+                    .calls
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .list(limit);
                 let answer_to = answer_to.clone();
                 oxidezap_session::spawn(async move {
                     send_wire_result(&answer_to, id, Ok(DaemonResponse::Calls { calls }));

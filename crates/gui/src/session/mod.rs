@@ -94,6 +94,7 @@ use oxidezap_core::{
     CreatedMessageRef, DownloadableMedia, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest,
     QuotedMessage, SubgroupDraft, UiEvent, UnlinkSubgroupsRequest,
 };
+use oxidezap_ipc::wire::dto::CallEventDto;
 use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, RequestId};
 // The payload structs the protocol declares, named rather than glob-imported
 // so `Typing` and `Download` read at the call site as what they are: the
@@ -395,6 +396,9 @@ enum Awaiting {
     Download(oneshot::Sender<Result<std::sync::Arc<Vec<u8>>, Failure>>),
     /// What this account occupies on disk, for the Storage pane.
     Storage(oneshot::Sender<StorageUsage>),
+    /// The daemon's finalized calls, for the Calls pane. Addressed to this
+    /// window because the log is a bounded snapshot, not shared state.
+    Calls(oneshot::Sender<Result<Vec<CallEventDto>, Failure>>),
     CallDevices(oneshot::Sender<Result<oxidezap_ipc::CallDeviceReply, String>>),
     /// The metadata a call link resolved to, for the preview form. Addressed
     /// to the window that asked: it is a thing to look at, not shared state.
@@ -486,6 +490,7 @@ impl Awaiting {
             Self::SyncedStickers(tx) => tx.is_closed(),
             Self::Download(tx) => tx.is_closed(),
             Self::Storage(tx) => tx.is_closed(),
+            Self::Calls(tx) => tx.is_closed(),
             Self::CallDevices(tx) => tx.is_closed(),
             Self::CallLinkPreview(tx) => tx.is_closed(),
             Self::Acted(tx) => tx.is_closed(),
@@ -529,6 +534,9 @@ impl Awaiting {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::CallLinkPreview(tx) => {
+                let _ = tx.send(Err(failure.clone()));
+            }
+            Self::Calls(tx) => {
                 let _ = tx.send(Err(failure.clone()));
             }
             Self::SyncedStickers(tx) => {
@@ -2588,6 +2596,20 @@ impl SessionHandle {
     pub fn storage_usage(&self) -> oneshot::Receiver<StorageUsage> {
         let (tx, rx) = oneshot::channel();
         self.ask(ClientRequest::StorageUsage, Awaiting::Storage(tx));
+        rx
+    }
+
+    /// Ask for the daemon's finalized calls, newest first.
+    ///
+    /// The rows are the answer, not a later event: the daemon owns this
+    /// in-memory log and sends it back under the request id, so only the
+    /// window that asked gets them.
+    pub fn list_calls(
+        &self,
+        limit: usize,
+    ) -> oneshot::Receiver<Result<Vec<CallEventDto>, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(ClientRequest::ListCalls { limit }, Awaiting::Calls(tx));
         rx
     }
 

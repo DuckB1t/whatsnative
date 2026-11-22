@@ -1,6 +1,6 @@
 //! The window's destinations.
 //!
-//! Chats, Status, Channels and Communities share the same navigation on both targets.
+//! Chats, Calls, Status, Channels and Communities share the same navigation on both targets.
 //!
 //! One list of destinations, drawn along whichever axis there is room for: a
 //! strip down the side of a window, a bar across the foot of a phone. The
@@ -19,7 +19,7 @@ use crate::theme::Metrics;
 
 pub fn render_nav_rail(
     current: Destination,
-    unread: [usize; 4],
+    unread: [usize; 5],
     entity: Entity<WhatsAppApp>,
     layout: ResponsiveLayout,
     cx: &App,
@@ -100,6 +100,7 @@ fn render_destination(
 ) -> impl IntoElement + use<> {
     let icon: Icon = match destination {
         Destination::Chats => crate::components::ProductIcon::MessageSquare.into(),
+        Destination::Calls => crate::components::ProductIcon::Phone.into(),
         Destination::Status => crate::components::ProductIcon::CircleDashed.into(),
         Destination::Channels => crate::components::ProductIcon::Channels.into(),
         Destination::Communities => crate::components::ProductIcon::Users.into(),

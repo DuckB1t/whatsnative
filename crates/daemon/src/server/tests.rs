@@ -751,6 +751,49 @@ async fn a_command_reaches_the_session_rather_than_being_refused() {
     ));
 }
 
+/// The GUI call log is a bounded read of daemon state, not a session command.
+/// It still needs an id, because the rows are the answer rather than an ack.
+#[tokio::test]
+async fn a_call_log_query_is_answered_under_its_id_without_a_session() {
+    let hub = StateHub::new();
+    let (commands, _bridge) = live_bridge();
+
+    let answer = handle_request(
+        Request {
+            id: Some(31),
+            request: ClientRequest::ListCalls { limit: 5 },
+        },
+        &hub,
+        &no_plugins(),
+        &commands,
+        &outbox(),
+    )
+    .await;
+    match parse(answer.frame) {
+        DaemonMessage::Calls { id, calls } => {
+            assert_eq!(id, 31);
+            assert!(calls.is_empty(), "a fresh daemon has finalized no calls");
+        }
+        other => panic!("unexpected answer: {other:?}"),
+    }
+
+    let refused = handle_request(
+        bare(ClientRequest::ListCalls { limit: 5 }),
+        &hub,
+        &no_plugins(),
+        &commands,
+        &outbox(),
+    )
+    .await;
+    assert!(matches!(
+        parse(refused.frame),
+        DaemonMessage::Error {
+            error: ProtocolError::Malformed { .. },
+            ..
+        }
+    ));
+}
+
 /// The media jump list is a local read: it routes to the session bridge even
 /// with no connection, and the action does not demand one. Synthetic ids only.
 #[tokio::test]

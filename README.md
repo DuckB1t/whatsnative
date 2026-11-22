@@ -39,9 +39,9 @@ media and call machinery come from
 ## Program status, blunt version
 
 We did a deep audit of what a normal user notices and wrote it in
-[docs/feature-plan.md](docs/feature-plan.md). Short version: no Calls tab, no
-chat info panel, new chat is disabled, media is a jump list, and the GIF/sticker
-picker is local only with no search. That work is in waves. None of it is in
+[docs/feature-plan.md](docs/feature-plan.md). The audit found no Calls tab, no
+chat info panel, a disabled new chat button, a media jump list and a local-only
+GIF/sticker picker with no search. That work is in waves. None of it is in
 v0.1.0.
 
 Progress snapshot, not a live counter:
@@ -49,17 +49,17 @@ Progress snapshot, not a live counter:
 | Area | Progress |
 | --- | --- |
 | Investigation and plan | 100% |
-| Wave 1, daily drivers | 8%, Calls in progress |
+| Wave 1, daily drivers | 20%, Calls done, four slices left |
 | Wave 2, message actions | 0% |
 | Wave 3, privacy and settings | 0% |
 | Wave 4, multi-account | 0% |
 | MCP planning | 0% |
-| Whole program | about 12%, 0% shipped implementation |
+| Whole program | about 17%, 0% released |
 
 Checklist:
 
 - [x] Investigation and plan
-- [ ] Wave 1: Calls destination and call log view, IN PROGRESS
+- [x] Wave 1: Calls destination and call log view
 - [ ] Wave 1: chat info panel
 - [ ] Wave 1: new chat dialog
 - [ ] Wave 1: media gallery
@@ -68,6 +68,10 @@ Checklist:
 - [ ] Wave 3: privacy and settings with real mutations
 - [ ] Wave 4: multi-account V2
 - [ ] MCP planning
+
+The Calls slice is implemented and green locally. It is not in v0.1.0. The log
+shows only finalized calls from this daemon start, capped at 100, and the pane
+says so on screen.
 
 UI target: familiar layout, original design. No copied proprietary assets or
 trade dress. The checklist gets updated after every wave.

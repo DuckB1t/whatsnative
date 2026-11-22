@@ -12,10 +12,11 @@ use gpui_component::{checkbox::Checkbox, input::Input};
 
 use crate::app::{Destination, MessageListCache, OfflineRecovery, WhatsAppApp};
 use crate::components::{
-    ChatListProps, EmptyState, InputAreaView, PluginContext, ProductIcon, StatusListProps,
-    StatusSelection, StatusViewProps, ViewerProps, parts, plugin_ui, render_call_card,
-    render_chat_header, render_chat_list, render_conversation_search, render_media_viewer,
-    render_message_list, render_nav_rail, render_status_list, render_status_view,
+    CallsDetailProps, CallsListProps, ChatListProps, EmptyState, InputAreaView, PluginContext,
+    ProductIcon, StatusListProps, StatusSelection, StatusViewProps, ViewerProps, parts, plugin_ui,
+    render_call_card, render_calls_detail, render_calls_list, render_chat_header, render_chat_list,
+    render_conversation_search, render_media_viewer, render_message_list, render_nav_rail,
+    render_status_list, render_status_view,
 };
 use crate::responsive::ResponsiveLayout;
 use crate::theme::Metrics;
@@ -253,6 +254,24 @@ pub fn render_connected_view(
         selected: StatusSelection::of(app.status_pane().author()),
         scroll: app.status_list_scroll().clone(),
     });
+    // The call log is already in this window when the pane is visible. Read it
+    // once per frame and hand owned rows to the render helpers, so the pane's
+    // borrow here cannot fight the later mutable reads of status and media.
+    let calls_pane = (destination == Destination::Calls).then(|| {
+        let state = app.call_log_state();
+        let loading = state.is_loading();
+        let error = state.last_error().map(|error| error.to_string());
+        let filter = state.filter();
+        (
+            CallsListProps {
+                rows: app.call_rows(),
+                filter,
+                loading,
+                error: error.clone(),
+            },
+            CallsDetailProps { loading, error },
+        )
+    });
     let unseen_status = app.status_unseen();
     let unread_chats = app.unread_chat_count();
     // Read-only: the user stopped waiting for a connection. The composer is
@@ -294,6 +313,7 @@ pub fn render_connected_view(
         destination,
         [
             unread_chats,
+            0,
             unseen_status,
             app.unread_destination_count(Destination::Channels),
             app.unread_destination_count(Destination::Communities),
@@ -311,6 +331,12 @@ pub fn render_connected_view(
     // when the conversation was opened; until the answer lands the header
     // draws the name alone, as it did before there was anything to draw.
     let members = open_chat.as_deref().and_then(|jid| app.group_members(jid));
+    // The two call props are consumed by different panes, so split the pair
+    // before either closure takes ownership.
+    let (calls_list, calls_detail) = match calls_pane {
+        Some((list, detail)) => (Some(list), Some(detail)),
+        None => (None, None),
+    };
     // The two panes, whichever destination they belong to.
     let panes = div()
         .flex()
@@ -318,19 +344,26 @@ pub fn render_connected_view(
         .min_h_0()
         .min_w_0()
         .bg(cx.theme().sidebar)
-        .when(layout.show_sidebar(), |el| match status_list {
-            Some(props) => el.child(render_status_list(props, entity.clone(), layout, cx)),
-            None => el.child(render_chat_list(
-                list_props,
-                &chat_list_scroll,
-                &chat_list_focus,
-                entity.clone(),
-                layout,
-                cx,
-            )),
+        .when(layout.show_sidebar(), |el| {
+            if let Some(props) = calls_list {
+                el.child(render_calls_list(props, entity.clone(), layout, cx))
+            } else if let Some(props) = status_list {
+                el.child(render_status_list(props, entity.clone(), layout, cx))
+            } else {
+                el.child(render_chat_list(
+                    list_props,
+                    &chat_list_scroll,
+                    &chat_list_focus,
+                    entity.clone(),
+                    layout,
+                    cx,
+                ))
+            }
         })
         .when(layout.show_chat_area(), |el| {
-            if destination == Destination::Status {
+            if let Some(props) = calls_detail {
+                el.child(render_calls_detail(props, entity.clone(), cx))
+            } else if destination == Destination::Status {
                 if app.status_post().is_some() {
                     el.child(render_status_post(
                         app,

@@ -839,6 +839,22 @@ pub(super) async fn handle_request(
         ClientRequest::MarkStatusWatched(request) => {
             acted(dispatch(hub, commands, Action::MarkStatusWatched(request)).await)
         }
+        // The daemon's own ring of finalized calls, not the store. Answered
+        // under the request id like a storage query, on this connection only:
+        // a window that asked for its Calls pane is the one that can use the
+        // rows, and the log itself is daemon-lifetime state.
+        ClientRequest::ListCalls { limit } => {
+            let id = match addressed(id, "a call log query needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            let calls = hub.call_log(|calls| calls.list(limit));
+            Answer::frame(always(
+                Some(id),
+                serde_json::to_string(&DaemonMessage::Calls { id, calls })
+                    .map_err(anyhow::Error::from),
+            ))
+        }
         // Measured here rather than by the client: the daemon is the only
         // process that opens the store or writes the media cache, so a front
         // end asking the filesystem would be guessing at paths it does not

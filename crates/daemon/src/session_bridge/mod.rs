@@ -28,7 +28,7 @@ use crate::state::StateHub;
 mod act;
 mod action;
 mod call_devices;
-mod call_log;
+pub(crate) mod call_log;
 mod downloads;
 mod externalize;
 mod read_tracker;
@@ -714,9 +714,11 @@ struct Bridge {
     reads: Arc<Mutex<ReadTracker>>,
     in_flight: Arc<Semaphore>,
     downloads: downloads::Downloads,
-    /// The call history the wire reports: finalized calls with their
-    /// outcome, fed by the same events the hub folds.
-    calls: call_log::CallLog,
+    /// The call history the wire and the GUI both report: finalized calls
+    /// with their outcome, fed by the same events the hub folds. The hub owns
+    /// the ring so a request handler can read it without a session command;
+    /// this bridge is still the only writer.
+    calls: Arc<Mutex<call_log::CallLog>>,
     /// Points the session's durable store at cached avatar bytes.
     ///
     /// The bridge does the byte write through [`crate::avatar`]; the store
@@ -753,6 +755,7 @@ impl Bridge {
         // events no client could then recover.
         let (publish, queue) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
         let publisher = crate::publisher::start(Arc::clone(&hub), queue);
+        let calls = hub.call_log_handle();
 
         Self {
             devices: call_devices::Devices::new(&hub),
@@ -764,7 +767,7 @@ impl Bridge {
             reads: Arc::new(Mutex::new(ReadTracker::default())),
             in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
             downloads: downloads::Downloads::default(),
-            calls: call_log::CallLog::new(),
+            calls,
             avatar_recorder,
         }
     }

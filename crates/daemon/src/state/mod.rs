@@ -22,12 +22,14 @@
 mod fanout;
 mod store;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use oxidezap_core::AccountId;
 use oxidezap_ipc::{ChatSummary, ConnectionState, DaemonEvent, DaemonMessage, PROTOCOL_VERSION};
 use oxidezap_ipc::{StateSnapshot, StateVersion};
 use tokio::sync::{broadcast, watch};
+
+use crate::session_bridge::call_log::CallLog;
 
 pub use fanout::Delivery;
 pub use store::{Change, StateStore, TrayState};
@@ -51,6 +53,13 @@ pub struct StateHub {
     id: u64,
     state: StateStore,
     out: Fanout,
+    /// Finalized calls since this daemon started, bounded to 100.
+    ///
+    /// The session bridge observes events into this ring and is its only
+    /// writer. Keeping it on the hub lets a request handler read a bounded
+    /// snapshot without sending a command the session would have to answer;
+    /// the log is daemon-lifetime state and never part of a snapshot.
+    call_log: Arc<Mutex<CallLog>>,
 }
 
 /// One attached client that owns a window, counted while it is connected.
@@ -75,6 +84,7 @@ impl StateHub {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
             state: StateStore::new(),
             out: Fanout::new(),
+            call_log: Arc::new(Mutex::new(CallLog::new())),
         })
     }
 
@@ -244,6 +254,25 @@ impl StateHub {
         if let Some(published) = self.state.change_calls(change, || self.out.claim()) {
             Self::deliver(published);
         }
+    }
+
+    /// Read a snapshot of the daemon-lifetime call log.
+    ///
+    /// A closure rather than a cloned `Vec`: the ring is bounded, and this
+    /// keeps the lock's lifetime inside the method. The session bridge feeds
+    /// the same ring, so a window asking here sees the calls this daemon has
+    /// actually finalized, not a second copy that could lag behind it.
+    pub(crate) fn call_log<T>(&self, read: impl FnOnce(&CallLog) -> T) -> T {
+        let log = self
+            .call_log
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        read(&log)
+    }
+
+    /// The shared ring, for the one component that writes it.
+    pub(crate) fn call_log_handle(&self) -> Arc<Mutex<CallLog>> {
+        Arc::clone(&self.call_log)
     }
 
     /// Send the call state again, unchanged.
