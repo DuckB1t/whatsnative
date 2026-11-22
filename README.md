@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/screenshots/banner.png" alt="WhatsNative" width="820">
+<img src="docs/screenshots/banner-dark.png" alt="WhatsNative" width="820">
 
 <br><br>
 
@@ -58,7 +58,7 @@ invented. No logged-in account was touched to make them.
 <summary><b>Conversations</b>, in the shipped dark theme.</summary>
 
 <div align="center">
-  <img src="docs/screenshots/chats.png" alt="WhatsNative conversation window" width="780">
+  <img src="docs/screenshots/chats-dark.png" alt="WhatsNative conversation window" width="780">
 </div>
 
 </details>
@@ -67,7 +67,7 @@ invented. No logged-in account was touched to make them.
 <summary><b>Privacy and keys</b>, including the one setting we can change honestly.</summary>
 
 <div align="center">
-  <img src="docs/screenshots/privacy.png" alt="WhatsNative privacy settings" width="780">
+  <img src="docs/screenshots/privacy-dark.png" alt="WhatsNative privacy settings" width="780">
 </div>
 
 </details>
@@ -76,7 +76,7 @@ invented. No logged-in account was touched to make them.
 <summary><b>Keyboard shortcuts</b>, every key this build really handles.</summary>
 
 <div align="center">
-  <img src="docs/screenshots/shortcuts.png" alt="WhatsNative keyboard shortcut map" width="780">
+  <img src="docs/screenshots/shortcuts-dark.png" alt="WhatsNative keyboard shortcut map" width="780">
 </div>
 
 </details>

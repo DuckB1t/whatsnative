@@ -7000,18 +7000,21 @@ mod screenshot_preview {
         let dir = std::path::Path::new(&dir);
         std::fs::create_dir_all(dir).unwrap();
 
-        capture(dir.join("chats.png").into_os_string(), |app, window, cx| {
-            app.update(cx, |app, cx| {
-                app.select_chat(
-                    "maya@example.invalid".into(),
-                    ChatOpen::ToCompose,
-                    window,
-                    cx,
-                );
-            });
-        });
         capture(
-            dir.join("privacy.png").into_os_string(),
+            dir.join("chats-dark.png").into_os_string(),
+            |app, window, cx| {
+                app.update(cx, |app, cx| {
+                    app.select_chat(
+                        "maya@example.invalid".into(),
+                        ChatOpen::ToCompose,
+                        window,
+                        cx,
+                    );
+                });
+            },
+        );
+        capture(
+            dir.join("privacy-dark.png").into_os_string(),
             |app, window, cx| {
                 app.update(cx, |app, cx| {
                     app.open_settings(window, cx);
@@ -7021,7 +7024,7 @@ mod screenshot_preview {
             },
         );
         capture(
-            dir.join("shortcuts.png").into_os_string(),
+            dir.join("shortcuts-dark.png").into_os_string(),
             |app, window, cx| {
                 app.update(cx, |app, cx| app.open_shortcuts(window, cx));
             },
