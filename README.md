@@ -79,7 +79,7 @@ graph and packaging intact. The product you see is WhatsNative.
 > regenerate them:
 >
 > ```bash
-> OXIDEZAP_SHOT_DIR=docs/screenshots cargo test -p oxidezap-gui --bin oxidezap \
+> OXIDEZAP_SHOT_DIR="$(pwd)/docs/screenshots" cargo test -p oxidezap-gui --bin oxidezap \
 >   -- --ignored previews --nocapture
 > ```
 
