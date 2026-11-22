@@ -36,6 +36,42 @@ bullshit work with no payoff. The product is WhatsNative. The protocol, Signal,
 media and call machinery come from
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust).
 
+## Program status, blunt version
+
+We did a deep audit of what a normal user notices and wrote it in
+[docs/feature-plan.md](docs/feature-plan.md). Short version: no Calls tab, no
+chat info panel, new chat is disabled, media is a jump list, and the GIF/sticker
+picker is local only with no search. That work is in waves. None of it is in
+v0.1.0.
+
+Progress snapshot, not a live counter:
+
+| Area | Progress |
+| --- | --- |
+| Investigation and plan | 100% |
+| Wave 1, daily drivers | 8%, Calls in progress |
+| Wave 2, message actions | 0% |
+| Wave 3, privacy and settings | 0% |
+| Wave 4, multi-account | 0% |
+| MCP planning | 0% |
+| Whole program | about 12%, 0% shipped implementation |
+
+Checklist:
+
+- [x] Investigation and plan
+- [ ] Wave 1: Calls destination and call log view, IN PROGRESS
+- [ ] Wave 1: chat info panel
+- [ ] Wave 1: new chat dialog
+- [ ] Wave 1: media gallery
+- [ ] Wave 1: local GIF and sticker search
+- [ ] Wave 2: message actions with real APIs
+- [ ] Wave 3: privacy and settings with real mutations
+- [ ] Wave 4: multi-account V2
+- [ ] MCP planning
+
+UI target: familiar layout, original design. No copied proprietary assets or
+trade dress. The checklist gets updated after every wave.
+
 ## What actually works
 
 | Thing | Status |
@@ -156,6 +192,7 @@ and `.rpm` packages are described in
 | Guide | What is in it |
 | --- | --- |
 | [Our changes](docs/our-changes.md) | What we changed slice by slice, with the gates each passed |
+| [Feature plan](docs/feature-plan.md) | Investigation, feasibility, waves and current progress |
 | [Roadmap](docs/roadmap.md) | What is missing and why we refuse to fake it |
 | [Architecture](docs/architecture.md) | Crate map, theme, one number that drives layout |
 | [Building](docs/building.md) | Web, plugin and profiling builds |
