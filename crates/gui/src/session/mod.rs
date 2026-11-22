@@ -1479,14 +1479,22 @@ impl SessionHandle {
         rx
     }
 
+    /// Publish a text status. `style` is the background and font the
+    /// recipients see behind the words; pass it verbatim so the daemon sends
+    /// exactly what the composer chose.
     pub fn publish_status(
         &self,
         text: String,
         recipients: Vec<String>,
+        style: Option<oxidezap_ipc::StatusStyle>,
     ) -> oneshot::Receiver<Result<(), Failure>> {
         let (tx, rx) = oneshot::channel();
         self.ask(
-            ClientRequest::PublishStatus { text, recipients },
+            ClientRequest::PublishStatus {
+                text,
+                recipients,
+                style,
+            },
             Awaiting::Mutation(tx),
         );
         rx

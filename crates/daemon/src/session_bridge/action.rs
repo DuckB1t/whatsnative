@@ -120,6 +120,9 @@ pub enum Action {
         id: RequestId,
         text: String,
         recipients: Vec<String>,
+        /// `None` keeps the original green background and system font, so a
+        /// frame from before the style was added still reads the same.
+        style: Option<oxidezap_core::StatusStyle>,
         answer_to: Outbox,
     },
     PublishStatusMedia {

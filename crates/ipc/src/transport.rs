@@ -361,7 +361,12 @@ use std::path::PathBuf;
 /// account's own label in a group. There is no push event for labels: other
 /// front ends see one only by refreshing group metadata. An older daemon knows
 /// no such frame, so a window offering this action must not attach to one.
-pub const PROTOCOL_VERSION: u32 = 56;
+///
+/// 57 adds optional background/font metadata to `PublishStatus`. A window that
+/// can style a text status must not attach to a daemon that would ignore it;
+/// the field is still optional on the wire so an unstyled frame keeps its old
+/// meaning. An older window cannot decode the extra field.
+pub const PROTOCOL_VERSION: u32 = 57;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

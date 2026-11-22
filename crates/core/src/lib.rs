@@ -98,7 +98,7 @@ pub use rich_text::{
     Emphasis, RichText, Span as TextSpan, parse as parse_rich_text,
     plain_text as plain_message_text,
 };
-pub use status::{StatusAuthor, StatusFeed};
+pub use status::{StatusAuthor, StatusFeed, StatusFont, StatusStyle};
 pub use system_notice::{CallOutcome, CallRecord, SystemNotice, format_duration};
 pub use username_lookup::{
     ResolvedUsername, USERNAME_MAX_LENGTH, USERNAME_MIN_LENGTH, UsernameLookupResult,

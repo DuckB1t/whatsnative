@@ -5,6 +5,7 @@ use gpui::{
     StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{ActiveTheme as _, Disableable as _};
 use gpui_component::{Icon, IconName};
 use gpui_component::{checkbox::Checkbox, input::Input};
@@ -19,7 +20,7 @@ use crate::components::{
 use crate::responsive::ResponsiveLayout;
 use crate::theme::Metrics;
 
-use oxidezap_core::{CallState, Chat};
+use oxidezap_core::{CallState, Chat, StatusFont};
 
 pub fn render_connected_view(
     app: &mut WhatsAppApp,
@@ -438,6 +439,18 @@ fn render_status_post(
         )
         .child(render_status_media(post, entity.clone(), editable, metrics))
         .child(Input::new(&post.text).w_full().disabled(!editable))
+        // Only a text status has background/font metadata. With a photo or
+        // video chosen these controls would describe something the wire has
+        // no field for, so they are not drawn at all.
+        .when(post.media.is_none(), |el| {
+            el.child(render_status_style(
+                post,
+                entity.clone(),
+                editable,
+                metrics,
+                cx,
+            ))
+        })
         .child(
             div()
                 .text_color(cx.theme().muted_foreground)
@@ -490,6 +503,225 @@ fn render_status_post(
                         }),
                 ),
         )
+}
+
+/// The fixed palette offered for a text status. The first entry is the legacy
+/// green the protocol defaults to. These ARGB values are *content metadata* —
+/// the background the recipient sees behind the words — so they are literals
+/// here rather than theme tokens, the one deliberate exception to the rule
+/// that UI colour comes from `cx.theme()`. Only the swatch's chrome follows
+/// the palette.
+const STATUS_BACKGROUNDS: [(u32, crate::i18n::TextKey); 6] = [
+    (0xFF1E_6E4F, crate::i18n::TextKey::StatusBackgroundGreen),
+    (0xFF7B_1FA2, crate::i18n::TextKey::StatusBackgroundPurple),
+    (0xFF19_76D2, crate::i18n::TextKey::StatusBackgroundBlue),
+    (0xFF00_897B, crate::i18n::TextKey::StatusBackgroundTeal),
+    (0xFFD3_2F2F, crate::i18n::TextKey::StatusBackgroundRed),
+    (0xFFF5_7C00, crate::i18n::TextKey::StatusBackgroundOrange),
+];
+
+/// All eight fonts the protocol defines, in enum order. Names say what the
+/// font is rather than borrowing the window's type vocabulary.
+const STATUS_FONTS: [(StatusFont, crate::i18n::TextKey); 8] = [
+    (StatusFont::System, crate::i18n::TextKey::StatusFontSystem),
+    (
+        StatusFont::SystemText,
+        crate::i18n::TextKey::StatusFontSystemText,
+    ),
+    (StatusFont::FbScript, crate::i18n::TextKey::StatusFontScript),
+    (StatusFont::SystemBold, crate::i18n::TextKey::StatusFontBold),
+    (
+        StatusFont::MorningbreezeRegular,
+        crate::i18n::TextKey::StatusFontMorningbreeze,
+    ),
+    (
+        StatusFont::CalistogaRegular,
+        crate::i18n::TextKey::StatusFontCalistoga,
+    ),
+    (
+        StatusFont::Exo2Extrabold,
+        crate::i18n::TextKey::StatusFontExo2,
+    ),
+    (
+        StatusFont::CourierprimeBold,
+        crate::i18n::TextKey::StatusFontMonospace,
+    ),
+];
+
+/// A status background travels as `0xAARRGGBB`; the renderer wants
+/// `0xRRGGBBAA`, so move the alpha byte. This colour is the status's content,
+/// not UI chrome, which is why it is the one literal here.
+fn status_swatch(argb: u32) -> gpui::Rgba {
+    gpui::rgba(argb.rotate_left(8))
+}
+
+/// The two text-status controls in one compact row: a heading plus a pair of
+/// dropdowns that share the width, so a narrow window keeps the audience list
+/// on screen.
+fn render_status_style(
+    post: &crate::app::StatusPost,
+    entity: Entity<WhatsAppApp>,
+    editable: bool,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    div()
+        .flex()
+        .flex_col()
+        .gap(metrics.space_xs())
+        .child(
+            div()
+                .text_size(metrics.text_small())
+                .text_color(cx.theme().muted_foreground)
+                .child(crate::tr!(StatusStyleHeading)),
+        )
+        .child(
+            div()
+                .flex()
+                .gap(metrics.space_sm())
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(metrics.space_xxs())
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(metrics.text_micro())
+                                .text_color(cx.theme().muted_foreground)
+                                .child(crate::tr!(StatusBackgroundLabel)),
+                        )
+                        .child(render_status_background_picker(
+                            post,
+                            entity.clone(),
+                            editable,
+                            metrics,
+                            cx,
+                        )),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(metrics.space_xxs())
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(metrics.text_micro())
+                                .text_color(cx.theme().muted_foreground)
+                                .child(crate::tr!(StatusFontLabel)),
+                        )
+                        .child(render_status_font_picker(post, entity, editable)),
+                ),
+        )
+}
+
+/// A dropdown over the fixed palette. The trigger carries a swatch of the
+/// current background; each item names a colour and shows a swatch beside it.
+fn render_status_background_picker(
+    post: &crate::app::StatusPost,
+    entity: Entity<WhatsAppApp>,
+    editable: bool,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let current = post.style.background_argb;
+    let name = crate::i18n::Language::current().text(
+        STATUS_BACKGROUNDS
+            .iter()
+            .find(|(argb, _)| *argb == current)
+            .map(|(_, key)| *key)
+            .unwrap_or(crate::i18n::TextKey::StatusBackgroundGreen),
+    );
+    let palette = STATUS_BACKGROUNDS;
+
+    Button::new("status-background-picker")
+        .ghost()
+        .compact()
+        .label(name)
+        .disabled(!editable)
+        .child(
+            div()
+                .w(metrics.space_md())
+                .h(metrics.space_md())
+                .rounded(metrics.radius_sm())
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(status_swatch(current)),
+        )
+        .dropdown_menu(move |menu, _window, _cx| {
+            let mut menu = menu;
+            for (argb, key) in palette {
+                let entity = entity.clone();
+                let swatch = status_swatch(argb);
+                let chosen = argb == current;
+                menu = menu.item(
+                    PopupMenuItem::element(move |_window, cx| {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(metrics.space_sm())
+                            .child(
+                                div()
+                                    .w(metrics.space_md())
+                                    .h(metrics.space_md())
+                                    .rounded(metrics.radius_sm())
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .bg(swatch),
+                            )
+                            .child(crate::i18n::Language::current().text(key))
+                    })
+                    .checked(chosen)
+                    .disabled(!editable)
+                    .on_click(move |_, _, cx| {
+                        entity.update(cx, |app, cx| app.set_status_background(argb, cx));
+                    }),
+                );
+            }
+            menu
+        })
+}
+
+/// A dropdown over the eight protocol fonts, with the current one named on
+/// the trigger.
+fn render_status_font_picker(
+    post: &crate::app::StatusPost,
+    entity: Entity<WhatsAppApp>,
+    editable: bool,
+) -> impl IntoElement + use<> {
+    let current = post.style.font;
+    let name = crate::i18n::Language::current().text(
+        STATUS_FONTS
+            .iter()
+            .find(|(font, _)| *font == current)
+            .map(|(_, key)| *key)
+            .unwrap_or(crate::i18n::TextKey::StatusFontSystem),
+    );
+
+    Button::new("status-font-picker")
+        .ghost()
+        .compact()
+        .label(name)
+        .disabled(!editable)
+        .dropdown_menu(move |menu, _window, _cx| {
+            let mut menu = menu;
+            for (font, key) in STATUS_FONTS {
+                let entity = entity.clone();
+                let chosen = font == current;
+                menu = menu.item(
+                    PopupMenuItem::new(crate::i18n::Language::current().text(key))
+                        .checked(chosen)
+                        .disabled(!editable)
+                        .on_click(move |_, _, cx| {
+                            entity.update(cx, |app, cx| app.set_status_font(font, cx));
+                        }),
+                );
+            }
+            menu
+        })
 }
 
 /// The photo or video chosen for a status, or the button that chooses one.

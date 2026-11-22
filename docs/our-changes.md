@@ -555,6 +555,39 @@ daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
 session type-checks. xtask (52 passed) and the plugin-host ignored test pass;
 CLI release unchanged at 1,682,904 B (<2 MiB). No real group label was changed.
 
+### 19. Text-status styling in the native composer (protocol 57)
+
+**Problem.** The composer, audience selection, feed and viewer were already
+native, but a text status was always sent with the same hardcoded green
+background and system font. Upstream's `Status::send_text` accepts both a
+background and a typed font; the client never surfaced either. The wire/CLI
+status path has no style field and keeps its original look.
+
+**Change.**
+- IPC moves to version **57** with an optional `style` on `PublishStatus`.
+  `StatusFont` is a written enum (eight protocol values, not integers —
+  upstream silently drops unknown numbers at encode time) and `StatusStyle`
+  carries the `0xAARRGGBB` background. Absence still means the legacy
+  green/system post; the GUI always sends an explicit style.
+- The style type lives in `core`, so the session's font mapping and both front
+  ends use one vocabulary. The daemon forwards the field verbatim through an
+  addressed, out-of-band mutation; the wire path passes `None` explicitly.
+- The GUI offers six named backgrounds (including the legacy green) and all
+  eight fonts as compact dropdowns in the text composer only. Selecting media
+  hides them, and a pending post ignores late changes. The swatch colour is
+  recipient-visible content metadata rather than theme chrome; the picker
+  itself still takes its colours from `cx.theme()`. EN/PT names every option.
+- No dead controls for upstream-blocked features: story-audience mutation has
+  no public setter, and read receipts, group-status posting, camera capture,
+  TTL/view-once and status mentions have no public path. Those stay documented
+  gaps. Local watched marking remains local, not a sent receipt.
+
+**Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
+(2675 passed, 44 ignored, 0 failed). Web gates green: shared-view ban, wasm
+daemon/session browser tests (16 and 35 passed), and the nightly wasm GUI and
+session type-checks. xtask (52 passed) and the plugin-host ignored test pass;
+CLI release unchanged at 1,682,904 B (<2 MiB). No status was posted.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

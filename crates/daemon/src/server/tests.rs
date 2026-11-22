@@ -1043,19 +1043,24 @@ async fn a_group_member_label_is_addressed_and_reaches_the_session() {
 }
 
 #[tokio::test]
-async fn status_post_keeps_its_explicit_audience_until_the_session_confirms() {
+async fn status_post_keeps_its_explicit_audience_and_style_until_the_session_confirms() {
     let hub = connected_hub();
     let (commands, taken) = bridge(CommandOutcome::Accepted);
     let recipients = vec![
-        "15550001111@s.whatsapp.net".to_owned(),
-        "123456@lid".to_owned(),
+        "155555500001@s.whatsapp.net".to_owned(),
+        "155555500002@s.whatsapp.net".to_owned(),
     ];
+    let style = oxidezap_core::StatusStyle {
+        background_argb: 0xFF12_34AB,
+        font: oxidezap_core::StatusFont::SystemBold,
+    };
     let answer = handle_request(
         Request {
             id: Some(42),
             request: ClientRequest::PublishStatus {
                 text: "A status update".into(),
                 recipients: recipients.clone(),
+                style: Some(style),
             },
         },
         &hub,
@@ -1070,6 +1075,7 @@ async fn status_post_keeps_its_explicit_audience_until_the_session_confirms() {
         id,
         text,
         recipients: dispatched,
+        style: dispatched_style,
         ..
     } = taken.await.unwrap().unwrap()
     else {
@@ -1078,6 +1084,50 @@ async fn status_post_keeps_its_explicit_audience_until_the_session_confirms() {
     assert_eq!(id, 42);
     assert_eq!(text, "A status update");
     assert_eq!(dispatched, recipients);
+    let dispatched_style = dispatched_style.expect("the style must reach the action");
+    assert_eq!(dispatched_style.background_argb, style.background_argb);
+    assert_eq!(dispatched_style.font, style.font);
+}
+
+#[tokio::test]
+async fn status_post_without_a_style_keeps_none_and_still_needs_an_id() {
+    let hub = connected_hub();
+    let request = || ClientRequest::PublishStatus {
+        text: "A legacy status".into(),
+        recipients: vec!["155555500001@s.whatsapp.net".to_owned()],
+        style: None,
+    };
+
+    // No id: refused before anything is handed to the session.
+    let (refusing, _never_taken) = bridge(CommandOutcome::Accepted);
+    let refused = handle_request(bare(request()), &hub, &no_plugins(), &refusing, &outbox()).await;
+    assert!(matches!(
+        parse(refused.frame),
+        DaemonMessage::Error {
+            id: None,
+            error: ProtocolError::Malformed { .. },
+        }
+    ));
+
+    // With an id: absence of a style survives as `None`, not as a default the
+    // action quietly invents.
+    let (commands, taken) = bridge(CommandOutcome::Accepted);
+    let answer = handle_request(
+        Request {
+            id: Some(9),
+            request: request(),
+        },
+        &hub,
+        &no_plugins(),
+        &commands,
+        &outbox(),
+    )
+    .await;
+    assert!(answer.frame.is_none(), "the send has not completed yet");
+    let Action::PublishStatus { style, .. } = taken.await.unwrap().unwrap() else {
+        panic!("expected a status post");
+    };
+    assert_eq!(style, None);
 }
 
 #[tokio::test]

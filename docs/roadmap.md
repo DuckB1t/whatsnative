@@ -337,6 +337,16 @@
   than to anything here; the alternative — not dropping — is the one thing
   this path exists to do.
 
+- **The status composer can style text, but cannot change its audience after
+  the fact.** Protocol 57 surfaces upstream's text-status background and font
+  on the composer; the text/photo/video posting, explicit audience selection,
+  feed and viewer were already native and were not rebuilt. Upstream exposes
+  `Status::audience()` as synced app state with no public setter — the generic
+  IQ `PrivacyCategory::Status` is the About text's visibility, not a story
+  audience — so there is no honest audience-edit control. Read receipts,
+  group-status posting, camera capture, TTL/view-once and status mentions have
+  no public path either. Local watched marking remains local. None of this has
+  been live-validated.
 - **Group member labels are self-only, and group status has no sender.**
   Protocol 56 gives the window a "My group label…" action that sets or clears
   the account's own label in a group. Upstream's mutation takes a group JID and

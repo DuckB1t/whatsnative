@@ -53,6 +53,8 @@ pub use framing::{
     FrameRead, FrameResult, MAX_DAEMON_FRAME_BYTES, MAX_REQUEST_BYTES, read_frame, read_frame_with,
 };
 pub use link::Link;
+#[cfg(feature = "legacy-protocol")]
+pub use oxidezap_core::{StatusFont, StatusStyle};
 pub use oxidezap_wire as wire;
 #[cfg(feature = "legacy-protocol")]
 pub use protocol::{

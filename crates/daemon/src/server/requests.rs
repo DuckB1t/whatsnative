@@ -335,7 +335,11 @@ pub(super) async fn handle_request(
             )
             .await
         }
-        ClientRequest::PublishStatus { text, recipients } => {
+        ClientRequest::PublishStatus {
+            text,
+            recipients,
+            style,
+        } => {
             let id = match addressed(id, "a status post needs an id to answer under") {
                 Ok(id) => id,
                 Err(refusal) => return refusal,
@@ -348,6 +352,7 @@ pub(super) async fn handle_request(
                     id,
                     text,
                     recipients,
+                    style,
                     answer_to: outbox.clone(),
                 },
             )

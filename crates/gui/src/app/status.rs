@@ -13,6 +13,7 @@ use gpui::{AppContext as _, Context, Entity, Window};
 use gpui_component::input::{InputEvent, InputState};
 use oxidezap_core::{
     ChatMessage, MediaType, QuotedKind, QuotedMessage, STATUS_BROADCAST_JID, StatusFeed,
+    StatusFont, StatusStyle,
 };
 
 use super::WhatsAppApp;
@@ -30,6 +31,10 @@ pub struct StatusPost {
     pub pending: bool,
     /// A photo or video chosen to post instead of text.
     pub media: Option<StatusMediaDraft>,
+    /// Background and font for a *text* status only. This is content metadata
+    /// sent to recipients, not UI chrome; a photo or video status has no such
+    /// fields upstream, so the media path never reads it.
+    pub style: StatusStyle,
 }
 
 /// A photo or video waiting to be posted as a status.
@@ -500,6 +505,9 @@ impl WhatsAppApp {
             recipients: Default::default(),
             pending: false,
             media: None,
+            // A fresh composer always starts at the protocol's legacy look;
+            // a style chosen in a previous one is not carried over.
+            style: StatusStyle::default(),
         });
         self.navigate_to_chat();
         cx.notify();
@@ -608,6 +616,35 @@ impl WhatsAppApp {
         cx.notify();
     }
 
+    /// Set the background of a text status.
+    ///
+    /// A style is content metadata on the outgoing frame, not a window
+    /// setting: it is sent to whoever receives the update. Media statuses have
+    /// no such field, so a chosen photo or video makes this a no-op; so does a
+    /// post already in flight, whose frame was built when it was submitted.
+    pub fn set_status_background(&mut self, argb: u32, cx: &mut Context<Self>) {
+        let Some(post) = &mut self.status_post else {
+            return;
+        };
+        if post.pending || post.media.is_some() || post.style.background_argb == argb {
+            return;
+        }
+        post.style.background_argb = argb;
+        cx.notify();
+    }
+
+    /// Set the font of a text status, under the same rules as the background.
+    pub fn set_status_font(&mut self, font: StatusFont, cx: &mut Context<Self>) {
+        let Some(post) = &mut self.status_post else {
+            return;
+        };
+        if post.pending || post.media.is_some() || post.style.font == font {
+            return;
+        }
+        post.style.font = font;
+        cx.notify();
+    }
+
     pub fn publish_status(&mut self, cx: &mut Context<Self>) {
         if !self.can_send() {
             return;
@@ -645,7 +682,10 @@ impl WhatsAppApp {
                     recipients,
                 )
             }
-            None => client.publish_status(text.to_owned(), recipients),
+            // The style belongs to this text frame only. A photo or video has
+            // no background/font on the wire, so the media arm above never
+            // reads `post.style`.
+            None => client.publish_status(text.to_owned(), recipients, Some(post.style)),
         };
         cx.spawn(async move |app, cx| {
             let result = result
@@ -1252,5 +1292,254 @@ mod tests {
         assert_eq!(pane.author(), Some(""));
         pane.close();
         assert!(!pane.is_open());
+    }
+
+    /// A connected window with no chats and no session: enough to open the
+    /// composer, which is all the state tests below need. No account data.
+    fn fixture(cx: &mut gpui::TestAppContext) -> (gpui::VisualTestContext, Entity<WhatsAppApp>) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::init(cx);
+            super::super::init_app_bindings(cx);
+        });
+        let mut app_entity = None;
+        let window = cx.open_window(gpui::size(gpui::px(800.), gpui::px(600.)), |window, cx| {
+            let app = cx.new(|cx| {
+                let mut app = WhatsAppApp::new(cx);
+                app.app_state = oxidezap_core::AppState::Connected;
+                app
+            });
+            app_entity = Some(app.clone());
+            gpui_component::Root::new(app, window, cx)
+        });
+        let app = app_entity.expect("the app was created");
+        let cx = gpui::VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        (cx, app)
+    }
+
+    /// A local socket stands in for the daemon; only the frames the composer
+    /// wrote are read from the other end.
+    #[cfg(target_os = "linux")]
+    fn recording_client() -> (
+        crate::session::Session,
+        std::os::unix::net::UnixStream,
+        std::path::PathBuf,
+    ) {
+        use portable_atomic::AtomicU64;
+        use std::os::unix::net::UnixListener;
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "oxidezap-status-style-{}-{}.sock",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let listener = UnixListener::bind(&path).expect("a synthetic socket");
+        let endpoint = oxidezap_ipc::Endpoint::connect_at(&path).expect("a client endpoint");
+        let (peer, _) = listener.accept().expect("the client connected");
+        peer.set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("a read deadline");
+        let client = crate::session::Session::recording_test_session(endpoint);
+        (client, peer, path)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn read_frame_line(reader: &mut impl std::io::BufRead) -> String {
+        let mut line = String::new();
+        let bytes = reader.read_line(&mut line).expect("a frame from the peer");
+        assert!(bytes > 0, "the synthetic daemon wrote no frame");
+        line
+    }
+
+    #[cfg(target_os = "linux")]
+    fn read_frame(reader: &mut impl std::io::BufRead) -> oxidezap_ipc::Request {
+        let line = read_frame_line(reader);
+        serde_json::from_str(&line).expect("a client frame")
+    }
+
+    #[gpui::test]
+    fn a_new_composer_defaults_to_legacy_green_and_system_font(cx: &mut gpui::TestAppContext) {
+        let (mut cx, app) = fixture(cx);
+        cx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.begin_status_post(window, cx);
+                let style = app.status_post().expect("the composer opened").style;
+                assert_eq!(style.background_argb, 0xFF1E_6E4F, "legacy green");
+                assert_eq!(style.font, StatusFont::System);
+                assert_eq!(style, StatusStyle::default());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn style_changes_only_apply_to_an_editable_text_composer(cx: &mut gpui::TestAppContext) {
+        let (mut cx, app) = fixture(cx);
+        cx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.begin_status_post(window, cx);
+                app.set_status_background(0xFF7B_1FA2, cx);
+                app.set_status_font(StatusFont::SystemBold, cx);
+                let style = app.status_post().expect("the composer").style;
+                assert_eq!(style.background_argb, 0xFF7B_1FA2);
+                assert_eq!(style.font, StatusFont::SystemBold);
+
+                // A photo has no background/font field on the wire, so the
+                // text style must not change once media is chosen.
+                let file = crate::platform::picker::Picked::automatic(
+                    "synthetic.png".to_string(),
+                    "image/png".to_string(),
+                    vec![0x89, b'P', b'N', b'G'],
+                );
+                app.status_post.as_mut().expect("the composer").media = Some(StatusMediaDraft {
+                    file,
+                    preview: None,
+                });
+                app.set_status_background(0xFFD3_2F2F, cx);
+                app.set_status_font(StatusFont::FbScript, cx);
+                let style = app.status_post().expect("the composer").style;
+                assert_eq!(style.background_argb, 0xFF7B_1FA2);
+                assert_eq!(style.font, StatusFont::SystemBold);
+
+                // Nor while a post is in flight: its frame was already built.
+                app.status_post.as_mut().expect("the composer").pending = true;
+                app.set_status_background(0xFF19_76D2, cx);
+                app.set_status_font(StatusFont::CalistogaRegular, cx);
+                let style = app.status_post().expect("the composer").style;
+                assert_eq!(style.background_argb, 0xFF7B_1FA2);
+                assert_eq!(style.font, StatusFont::SystemBold);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn beginning_another_composer_resets_a_chosen_style(cx: &mut gpui::TestAppContext) {
+        let (mut cx, app) = fixture(cx);
+        cx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.begin_status_post(window, cx);
+                app.set_status_background(0xFF7B_1FA2, cx);
+                app.set_status_font(StatusFont::Exo2Extrabold, cx);
+
+                // A composer already open is left alone.
+                app.begin_status_post(window, cx);
+                let style = app.status_post().expect("the composer").style;
+                assert_eq!(style.background_argb, 0xFF7B_1FA2);
+                assert_eq!(style.font, StatusFont::Exo2Extrabold);
+
+                // Cancelling and starting again is a new composer.
+                app.cancel_status_post(cx);
+                assert!(app.status_post().is_none());
+                app.begin_status_post(window, cx);
+                assert_eq!(
+                    app.status_post().expect("the new composer").style,
+                    StatusStyle::default()
+                );
+            });
+        });
+    }
+
+    /// The text frame carries the exact style the composer chose. One
+    /// synthetic recipient, no account data.
+    #[cfg(target_os = "linux")]
+    #[gpui::test]
+    fn a_text_status_sends_the_exact_chosen_style(cx: &mut gpui::TestAppContext) {
+        const RECIPIENT: &str = "155555500001@s.whatsapp.net";
+        let (client, mut peer, path) = recording_client();
+        let (mut cx, app) = fixture(cx);
+        cx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.client = Some(client);
+                app.begin_status_post(window, cx);
+                let text = app.status_post().expect("the composer").text.clone();
+                text.update(cx, |input, cx| {
+                    input.set_value("synthetic status", window, cx)
+                });
+                app.set_status_recipient(RECIPIENT, true, cx);
+                app.set_status_background(0xFF7B_1FA2, cx);
+                app.set_status_font(StatusFont::SystemBold, cx);
+                app.publish_status(cx);
+            });
+        });
+        let mut reader = std::io::BufReader::new(&mut peer);
+        loop {
+            let frame = read_frame(&mut reader);
+            match frame.request {
+                oxidezap_ipc::ClientRequest::Hello { .. }
+                | oxidezap_ipc::ClientRequest::LoadChats(_) => {}
+                oxidezap_ipc::ClientRequest::PublishStatus {
+                    text,
+                    recipients,
+                    style,
+                } => {
+                    assert_eq!(text, "synthetic status");
+                    assert_eq!(recipients, vec![RECIPIENT.to_string()]);
+                    assert_eq!(
+                        style,
+                        Some(StatusStyle {
+                            background_argb: 0xFF7B_1FA2,
+                            font: StatusFont::SystemBold,
+                        })
+                    );
+                    break;
+                }
+                other => panic!("an unexpected request was sent: {other:?}"),
+            }
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A photo goes out as a media status: that frame has no style field at
+    /// all, even when a style had been chosen on the composer first.
+    #[cfg(target_os = "linux")]
+    #[gpui::test]
+    fn a_media_status_sends_no_style(cx: &mut gpui::TestAppContext) {
+        const RECIPIENT: &str = "155555500001@s.whatsapp.net";
+        let (client, mut peer, path) = recording_client();
+        let (mut cx, app) = fixture(cx);
+        cx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.client = Some(client);
+                app.begin_status_post(window, cx);
+                app.set_status_recipient(RECIPIENT, true, cx);
+                app.set_status_background(0xFF7B_1FA2, cx);
+                app.set_status_font(StatusFont::SystemBold, cx);
+                let file = crate::platform::picker::Picked::automatic(
+                    "synthetic.png".to_string(),
+                    "image/png".to_string(),
+                    vec![0x89, b'P', b'N', b'G'],
+                );
+                app.status_post.as_mut().expect("the composer").media = Some(StatusMediaDraft {
+                    file,
+                    preview: None,
+                });
+                app.publish_status(cx);
+            });
+        });
+        let mut reader = std::io::BufReader::new(&mut peer);
+        loop {
+            let line = read_frame_line(&mut reader);
+            let frame: oxidezap_ipc::Request = serde_json::from_str(&line).expect("a client frame");
+            match frame.request {
+                oxidezap_ipc::ClientRequest::Hello { .. }
+                | oxidezap_ipc::ClientRequest::LoadChats(_) => {}
+                oxidezap_ipc::ClientRequest::PublishStatusMedia(payload) => {
+                    assert!(
+                        !line.contains("\"style\""),
+                        "a media status carries no style metadata"
+                    );
+                    assert_eq!(payload.recipients, vec![RECIPIENT.to_string()]);
+                    assert_eq!(payload.caption, None);
+                    break;
+                }
+                oxidezap_ipc::ClientRequest::PublishStatus { .. } => {
+                    panic!("a media status must not go out as a styled text status")
+                }
+                other => panic!("an unexpected request was sent: {other:?}"),
+            }
+        }
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -19,6 +19,51 @@ use wacore_binary::jid::Jid;
 
 use crate::chat::{Chat, ChatMessage, fallback_chat_name};
 
+/// One of the fonts the protocol defines for a text status.
+///
+/// The names, not the protobuf numbers, travel over IPC: an arbitrary integer
+/// would be accepted here and silently dropped at encode time upstream. The
+/// order and spelling follow the `ExtendedTextMessage.FontType` enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum StatusFont {
+    #[serde(rename = "system")]
+    #[default]
+    System,
+    #[serde(rename = "system_text")]
+    SystemText,
+    #[serde(rename = "fb_script")]
+    FbScript,
+    #[serde(rename = "system_bold")]
+    SystemBold,
+    #[serde(rename = "morningbreeze_regular")]
+    MorningbreezeRegular,
+    #[serde(rename = "calistoga_regular")]
+    CalistogaRegular,
+    #[serde(rename = "exo2_extrabold")]
+    Exo2Extrabold,
+    #[serde(rename = "courierprime_bold")]
+    CourierprimeBold,
+}
+
+/// How a text status is drawn. This is content metadata, not UI theme: the
+/// colour is the background the *recipient* sees behind the words, and must
+/// not follow the window's palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StatusStyle {
+    /// Background as `0xAARRGGBB`, the form upstream's `send_text` takes.
+    pub background_argb: u32,
+    pub font: StatusFont,
+}
+
+impl Default for StatusStyle {
+    fn default() -> Self {
+        Self {
+            background_argb: 0xFF1E_6E4F,
+            font: StatusFont::System,
+        }
+    }
+}
+
 /// One contact's run of updates, newest run first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusAuthor {
@@ -432,5 +477,34 @@ mod tests {
         notice.system = Some(crate::SystemNotice::GroupChanged("changed".to_string()));
         let feed = feed_of(vec![notice]);
         assert!(feed.is_empty());
+    }
+
+    /// A styled status crosses the daemon socket as names, never as the
+    /// protobuf's integers: an unknown number would be dropped at encode time.
+    #[test]
+    fn status_style_round_trips_as_written_names() {
+        let style = StatusStyle {
+            background_argb: 0xFF1E_6E4F,
+            font: StatusFont::CourierprimeBold,
+        };
+        let line = serde_json::to_string(&style).expect("a style serializes");
+        assert_eq!(
+            line,
+            r#"{"background_argb":4280184399,"font":"courierprime_bold"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<StatusStyle>(&line).expect("a style parses"),
+            style
+        );
+        assert!(serde_json::from_str::<StatusFont>(r#""nonesuch""#).is_err());
+    }
+
+    /// Old posts used one green background and the system font; that remains
+    /// the default when a frame carries no style at all.
+    #[test]
+    fn the_default_status_style_is_the_legacy_one() {
+        let style = StatusStyle::default();
+        assert_eq!(style.background_argb, 0xFF1E_6E4F);
+        assert_eq!(style.font, StatusFont::System);
     }
 }

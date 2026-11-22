@@ -183,13 +183,14 @@ impl Bridge {
                 id,
                 text,
                 recipients,
+                style,
                 answer_to,
             } => {
                 let Some(permit) = self.permit() else {
                     let _ = reply.send(too_busy());
                     return None;
                 };
-                let task = client.send_status(text, recipients);
+                let task = client.send_status(text, recipients, style);
                 oxidezap_session::spawn(async move {
                     let result = mutation_answer(id, task.await);
                     answer_now(&answer_to, answered(id, result));
@@ -1660,7 +1661,9 @@ impl Bridge {
                 );
             }
             WireRequest::SendStatus { text } => {
-                let task = client.send_status(text, Vec::new());
+                // The wire request has no style field; `None` keeps the
+                // original green background and system font.
+                let task = client.send_status(text, Vec::new(), None);
                 run_wire(
                     answer_to.clone(),
                     id,

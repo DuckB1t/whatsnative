@@ -7,7 +7,9 @@
 //! what keeps this crate from depending on the transport it serves.
 
 use oxidezap_chat_store::MessageCoverage;
-use oxidezap_core::{ChannelPollCreated, ChannelPollDraft, ChannelReact, ChannelVotePoll};
+use oxidezap_core::{
+    ChannelPollCreated, ChannelPollDraft, ChannelReact, ChannelVotePoll, StatusFont, StatusStyle,
+};
 use whatsapp_rust::wacore::poll::compute_option_hash;
 use whatsapp_rust::wacore::proto_helpers::MessageExt as _;
 use whatsapp_rust::wacore_binary::jid::{Jid, JidExt as _};
@@ -530,11 +532,30 @@ impl WhatsAppClient {
         })
     }
 
-    /// Publish a text status broadcast.
+    /// The protocol's font enum, not an integer from a frame. Upstream drops
+    /// values outside the enum silently at encode time, so the mapping here is
+    /// deliberately exhaustive and lives where a new font must be named.
+    fn status_font(font: StatusFont) -> wa::message::extended_text_message::FontType {
+        use wa::message::extended_text_message::FontType;
+        match font {
+            StatusFont::System => FontType::SYSTEM,
+            StatusFont::SystemText => FontType::SYSTEM_TEXT,
+            StatusFont::FbScript => FontType::FB_SCRIPT,
+            StatusFont::SystemBold => FontType::SYSTEM_BOLD,
+            StatusFont::MorningbreezeRegular => FontType::MORNINGBREEZE_REGULAR,
+            StatusFont::CalistogaRegular => FontType::CALISTOGA_REGULAR,
+            StatusFont::Exo2Extrabold => FontType::EXO2_EXTRABOLD,
+            StatusFont::CourierprimeBold => FontType::COURIERPRIME_BOLD,
+        }
+    }
+
+    /// Publish a text status broadcast. A frame with no style keeps the
+    /// original green background and system font.
     pub fn send_status(
         &self,
         text: String,
         recipients: Vec<String>,
+        style: Option<StatusStyle>,
     ) -> Task<Result<(String, i64), String>> {
         use whatsapp_rust::features::StatusSendOptions;
 
@@ -558,8 +579,9 @@ impl WhatsAppClient {
             let mut message = wa::Message::default();
             let mut body = wa::message::ExtendedTextMessage::default();
             body.text = Some(text.to_owned());
-            body.background_argb = Some(0xFF1E_6E4F);
-            body.font = Some(wa::message::extended_text_message::FontType::System);
+            let style = style.unwrap_or_default();
+            body.background_argb = Some(style.background_argb);
+            body.font = Some(Self::status_font(style.font));
             message.extended_text_message = whatsapp_rust::buffa::MessageField::some(body);
             let result = live
                 .client
@@ -1817,5 +1839,35 @@ mod channel_tests {
         let hashes = channel_option_hashes(&creation, &[1]).expect("maps an existing option");
         assert_eq!(hashes, vec![compute_option_hash("Second")]);
         assert!(channel_option_hashes(&creation, &[2]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod status_style_tests {
+    use super::*;
+
+    /// Every written font maps to a protocol value, and the legacy default
+    /// stays the system font with the original green background.
+    #[test]
+    fn every_status_font_has_a_protocol_value() {
+        use wa::message::extended_text_message::FontType;
+        let pairs = [
+            (StatusFont::System, FontType::SYSTEM),
+            (StatusFont::SystemText, FontType::SYSTEM_TEXT),
+            (StatusFont::FbScript, FontType::FB_SCRIPT),
+            (StatusFont::SystemBold, FontType::SYSTEM_BOLD),
+            (
+                StatusFont::MorningbreezeRegular,
+                FontType::MORNINGBREEZE_REGULAR,
+            ),
+            (StatusFont::CalistogaRegular, FontType::CALISTOGA_REGULAR),
+            (StatusFont::Exo2Extrabold, FontType::EXO2_EXTRABOLD),
+            (StatusFont::CourierprimeBold, FontType::COURIERPRIME_BOLD),
+        ];
+        for (ours, theirs) in pairs {
+            assert_eq!(WhatsAppClient::status_font(ours), theirs);
+        }
+        assert_eq!(StatusStyle::default().font, StatusFont::System);
+        assert_eq!(StatusStyle::default().background_argb, 0xFF1E_6E4F);
     }
 }

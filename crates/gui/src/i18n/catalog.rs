@@ -56,6 +56,25 @@ catalog! {
     ChooseStatusAudience => ("Shared with everyone your WhatsApp status privacy allows, usually all your contacts. Select people only to share with just them.", "Compartilhado com todos que a privacidade de status do WhatsApp permite, normalmente todos os seus contatos. Selecione pessoas apenas para compartilhar somente com elas.");
     StatusPublished => ("Status published", "Status publicado");
     NoStatusRecipientsFound => ("No matching chats", "Nenhuma conversa correspondente");
+    // Text-status styling. Say what the control changes, not "theme", because
+    // this is the background and type recipients see, not the window's look.
+    StatusStyleHeading => ("Status text style", "Estilo do texto do status");
+    StatusBackgroundLabel => ("Status background", "Fundo do status");
+    StatusFontLabel => ("Status font", "Fonte do status");
+    StatusBackgroundGreen => ("Green", "Verde");
+    StatusBackgroundPurple => ("Purple", "Roxo");
+    StatusBackgroundBlue => ("Blue", "Azul");
+    StatusBackgroundTeal => ("Teal", "Turquesa");
+    StatusBackgroundRed => ("Red", "Vermelho");
+    StatusBackgroundOrange => ("Orange", "Laranja");
+    StatusFontSystem => ("System default", "Padrão do sistema");
+    StatusFontSystemText => ("System text", "Texto do sistema");
+    StatusFontScript => ("Script", "Manuscrita");
+    StatusFontBold => ("Bold", "Negrito");
+    StatusFontMorningbreeze => ("Morning Breeze", "Morning Breeze");
+    StatusFontCalistoga => ("Calistoga", "Calistoga");
+    StatusFontExo2 => ("Exo 2 extra bold", "Exo 2 extra negrito");
+    StatusFontMonospace => ("Monospace (Courier Prime)", "Monoespaçada (Courier Prime)");
     StatusPosting => ("Posting…", "Publicando…");
     OriginalStatusUnavailable => ("This status is no longer available here.", "Este status não está mais disponível aqui.");
     SaveEdit => ("Save edit", "Salvar edição");

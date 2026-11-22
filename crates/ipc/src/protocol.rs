@@ -6,7 +6,7 @@ use oxidezap_core::{
     ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
     CreatedMessageRef, DownloadableMedia, EventLocation, EventRsvp, GroupHierarchy, GroupRoster,
     JoinSubgroupRequest, LinkSubgroupsRequest, LogLevel, OutgoingMedia, PluginAction,
-    PluginSurface, QuotedMessage, SubgroupDraft, UiEvent, UsernameLookupResult,
+    PluginSurface, QuotedMessage, StatusStyle, SubgroupDraft, UiEvent, UsernameLookupResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1298,9 +1298,16 @@ pub enum ClientRequest {
         message_id: String,
         target: String,
     },
+    /// Publish a text status broadcast.
+    ///
+    /// `style` is the background and font the recipients see behind the words.
+    /// It is optional so an older frame still means the legacy green and
+    /// system font; a window that offers styling always sends it.
     PublishStatus {
         text: String,
         recipients: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        style: Option<StatusStyle>,
     },
     /// Publish a photo or video as a status. The bytes are staged through
     /// the media cache like [`SendMedia`]'s, and the answer is the daemon's
@@ -3585,5 +3592,38 @@ mod audio_played_tests {
             );
             assert!(!frame.is_read(), "a member label is a correlated mutation");
         }
+    }
+
+    /// Protocol 57 writes the drawing metadata as names. A frame with no
+    /// style still parses and means the legacy green/system post.
+    #[test]
+    fn protocol_57_status_style_puts_the_same_bytes_on_the_wire() {
+        let styled = ClientRequest::PublishStatus {
+            text: "synthetic update".into(),
+            recipients: vec!["155555500001@s.whatsapp.net".into()],
+            style: Some(StatusStyle {
+                background_argb: 0xFF1E_6E4F,
+                font: oxidezap_core::StatusFont::SystemBold,
+            }),
+        };
+        let line = serde_json::to_string(&styled).expect("a styled post serializes");
+        assert_eq!(
+            line,
+            r#"{"request":"publish_status","text":"synthetic update","recipients":["155555500001@s.whatsapp.net"],"style":{"background_argb":4280184399,"font":"system_bold"}}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&line).expect("a styled post parses"),
+            styled
+        );
+
+        let legacy = r#"{"request":"publish_status","text":"synthetic update","recipients":[]}"#;
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(legacy).expect("an unstyled post parses"),
+            ClientRequest::PublishStatus {
+                text: "synthetic update".into(),
+                recipients: vec![],
+                style: None,
+            }
+        );
     }
 }
