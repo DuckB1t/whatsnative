@@ -8,12 +8,12 @@ use std::sync::Arc;
 
 use gpui::{
     App, Entity, FocusHandle, Image, ImageSource, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement as _, StatefulInteractiveElement as _, Styled as _, StyledImage as _, div, img,
-    prelude::FluentBuilder as _,
+    ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _,
+    StyledImage as _, div, img, prelude::FluentBuilder as _,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
-use gpui_component::{Disableable as _, FocusTrapElement as _};
+use gpui_component::{Disableable as _, FocusTrapElement as _, Selectable as _, Sizable as _};
 use oxidezap_core::OutgoingMedia;
 
 use crate::app::WhatsAppApp;
@@ -99,7 +99,7 @@ pub fn render_paste_preview(props: PastePreviewProps<'_>, cx: &App) -> impl Into
                 .text_color(parts::on_scrim(cx))
                 .child(title_for(files)),
         )
-        .child(render_files(files, list_scroll, metrics, cx))
+        .child(render_files(files, list_scroll, &app, metrics, cx))
         .children(caption.map(|caption| {
             div()
                 .id("paste-preview-caption")
@@ -170,6 +170,7 @@ fn title_for(files: &[PreviewFile]) -> String {
 fn render_files(
     files: &[PreviewFile],
     list_scroll: &gpui::ScrollHandle,
+    app: &Entity<WhatsAppApp>,
     metrics: Metrics,
     cx: &App,
 ) -> impl IntoElement + use<> {
@@ -182,13 +183,22 @@ fn render_files(
             .flex_1()
             .min_h_0()
             .flex()
-            .items_center()
-            .justify_center()
+            .flex_col()
+            .gap(metrics.space_sm())
             .child(
-                img(ImageSource::Image(image))
-                    .size_full()
-                    .object_fit(ObjectFit::Contain),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        img(ImageSource::Image(image))
+                            .size_full()
+                            .object_fit(ObjectFit::Contain),
+                    ),
             )
+            .child(render_kind_selector(0, only.kind(), app, metrics, cx))
             .into_any_element();
     }
     // Scrollable rather than centred: the picker bounds a selection in
@@ -209,11 +219,60 @@ fn render_files(
         .gap(metrics.space_md())
         .overflow_y_scroll()
         .track_scroll(list_scroll)
-        .children(files.iter().map(|file| render_file_row(file, metrics, cx)))
+        .children(
+            files
+                .iter()
+                .enumerate()
+                .map(|(index, file)| render_file_row(index, file, app, metrics, cx)),
+        )
         .into_any_element()
 }
 
-fn render_file_row(file: &PreviewFile, metrics: Metrics, cx: &App) -> impl IntoElement + use<> {
+/// The three ways a file can go out. A picture kept as a document arrives with
+/// its bytes untouched, which is sometimes exactly what somebody wants; the
+/// choice belongs here, next to the preview, rather than buried in a setting.
+fn render_kind_selector(
+    index: usize,
+    current: OutgoingMedia,
+    app: &Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let choices = [
+        (OutgoingMedia::Image, crate::tr!(AsImage)),
+        (OutgoingMedia::Video, crate::tr!(Video)),
+        (OutgoingMedia::Document, crate::tr!(Document)),
+    ];
+    div()
+        .flex()
+        .items_center()
+        .gap(metrics.space_sm())
+        .child(
+            div()
+                .text_size(metrics.text_secondary())
+                .text_color(parts::on_scrim(cx))
+                .child(crate::tr!(SendAs)),
+        )
+        .children(choices.into_iter().map(|(kind, label)| {
+            let target = app.clone();
+            Button::new(SharedString::from(format!("send-as-{index}-{kind:?}")))
+                .debug_selector(move || format!("send-as-{index}-{kind:?}"))
+                .label(label)
+                .xsmall()
+                .selected(current == kind)
+                .on_click(move |_, _, cx| {
+                    target.update(cx, |app, cx| app.set_preview_file_kind(index, kind, cx));
+                })
+        }))
+}
+
+fn render_file_row(
+    index: usize,
+    file: &PreviewFile,
+    app: &Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
     let icon = match file.kind() {
         OutgoingMedia::Image => ProductIcon::Image,
         OutgoingMedia::Video => ProductIcon::Video,
@@ -221,28 +280,35 @@ fn render_file_row(file: &PreviewFile, metrics: Metrics, cx: &App) -> impl IntoE
     };
     div()
         .flex()
-        .items_center()
-        .gap(metrics.space_lg())
+        .flex_col()
+        .gap(metrics.space_sm())
         .child(
-            gpui_component::Icon::new(icon)
-                .size(metrics.icon_media())
-                .text_color(parts::on_scrim(cx)),
-        )
-        .child(
-            parts::detail_stack()
+            div()
+                .flex()
+                .items_center()
+                .gap(metrics.space_lg())
                 .child(
-                    parts::one_line()
-                        .text_size(metrics.text_body())
-                        .text_color(parts::on_scrim(cx))
-                        .child(file.file.file_name.clone()),
+                    gpui_component::Icon::new(icon)
+                        .size(metrics.icon_media())
+                        .text_color(parts::on_scrim(cx)),
                 )
                 .child(
-                    div()
-                        .text_size(metrics.text_secondary())
-                        .text_color(parts::on_scrim(cx).opacity(0.7))
-                        .child(crate::utils::format_size(file.file.bytes.len() as u64)),
+                    parts::detail_stack()
+                        .child(
+                            parts::one_line()
+                                .text_size(metrics.text_body())
+                                .text_color(parts::on_scrim(cx))
+                                .child(file.file.file_name.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(metrics.text_secondary())
+                                .text_color(parts::on_scrim(cx).opacity(0.7))
+                                .child(crate::utils::format_size(file.file.bytes.len() as u64)),
+                        ),
                 ),
         )
+        .child(render_kind_selector(index, file.kind(), app, metrics, cx))
 }
 
 #[cfg(test)]

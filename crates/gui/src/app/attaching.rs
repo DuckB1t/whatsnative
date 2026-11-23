@@ -8,6 +8,8 @@
 //! [`crate::platform::picker`], staging is the media cache, and both are one
 //! question with two answers behind them.
 
+use std::sync::Arc;
+
 use oxidezap_core::OutgoingMedia;
 
 use gpui_component::input::{InputEvent, InputState};
@@ -618,6 +620,36 @@ impl WhatsAppApp {
         cancelled
     }
 
+    /// Override the kind one pending file will be sent as. The preview's own
+    /// bytes stay untouched: sending a picture as a document is a statement
+    /// about the message the recipient receives, not a claim that the bytes
+    /// turned into something else. Rebuild the preview image when switching
+    /// into `Image`, so a file picked as a document but really holding a
+    /// picture draws what will actually go out.
+    pub(crate) fn set_preview_file_kind(
+        &mut self,
+        index: usize,
+        kind: oxidezap_core::OutgoingMedia,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(preview) = self.paste_preview.as_mut() else {
+            return;
+        };
+        let Some(file) = preview.files.get_mut(index) else {
+            return;
+        };
+        if file.file.kind == kind {
+            return;
+        }
+        file.file.kind = kind;
+        file.image = (kind == oxidezap_core::OutgoingMedia::Image)
+            .then(|| crate::platform::picker::previewable_image_mime(&file.file.bytes))
+            .flatten()
+            .and_then(gpui::ImageFormat::from_mime_type)
+            .map(|format| Arc::new(gpui::Image::from_bytes(format, file.file.bytes.clone())));
+        cx.notify();
+    }
+
     pub(crate) fn confirm_paste_preview(&mut self, cx: &mut Context<Self>) {
         // The keyboard path bypasses the rendered Send button's disabled
         // state: leaving `Connected` with the modal open must keep the files
@@ -789,7 +821,10 @@ mod tests {
     use oxidezap_core::{MediaType, OutgoingMedia};
 
     use super::echo_of;
+    use crate::app::WhatsAppApp;
+    use crate::components::PreviewFile;
     use crate::platform::picker::{Picked, kind_for};
+    use gpui::AppContext as _;
 
     /// Document bytes need no signature; photo echoes must match real bytes.
     fn picked(file_name: &str, mime_type: &str) -> Picked {
@@ -852,6 +887,46 @@ mod tests {
         let echo = echo_of(&file, file.kind);
         assert_eq!(echo.media_type, MediaType::Document);
         assert!(echo.data.is_empty());
+    }
+
+    /// The confirmation modal can change what a file is sent as without
+    /// touching its bytes: the same JPEG goes out as a photo or as a document,
+    /// and the preview is rebuilt when a document turns out to hold a picture.
+    #[gpui::test]
+    fn overriding_the_pending_kind_changes_only_the_kind(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::init(cx);
+        });
+        let app = cx.update(|cx| cx.new(WhatsAppApp::new));
+        let original = picked("photo.jpg", "image/jpeg");
+        let original_bytes = original.bytes.clone();
+        app.update(cx, |app, cx| {
+            app.paste_preview = Some(super::PendingPastePreview {
+                jid: "peer@example.invalid".into(),
+                reply: None,
+                files: vec![PreviewFile::with_preview(original, true)],
+                caption: None,
+                list_scroll: gpui::ScrollHandle::new(),
+                chat_was_visible: false,
+            });
+            assert_eq!(
+                app.paste_preview.as_ref().unwrap().files[0].file.kind,
+                OutgoingMedia::Image
+            );
+            assert!(app.paste_preview.as_ref().unwrap().files[0].image.is_some());
+
+            app.set_preview_file_kind(0, OutgoingMedia::Document, cx);
+            let file = &app.paste_preview.as_ref().unwrap().files[0];
+            assert_eq!(file.file.kind, OutgoingMedia::Document);
+            assert_eq!(file.file.bytes, original_bytes, "the bytes are untouched");
+            assert!(file.image.is_none(), "a document has no inline preview");
+
+            app.set_preview_file_kind(0, OutgoingMedia::Image, cx);
+            let file = &app.paste_preview.as_ref().unwrap().files[0];
+            assert_eq!(file.file.kind, OutgoingMedia::Image);
+            assert!(file.image.is_some(), "the picture preview is back");
+        });
     }
 
     #[test]

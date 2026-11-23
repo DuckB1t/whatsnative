@@ -120,6 +120,8 @@ catalog! {
     SendThisImage => ("Send this image?", "Enviar esta imagem?");
     SendThisVideo => ("Send this video?", "Enviar este vídeo?");
     SendThisFile => ("Send this file?", "Enviar este arquivo?");
+    SendAs => ("Send as", "Enviar como");
+    AsImage => ("Image", "Imagem");
     NotSavedYetPressEnterOrClickSave => ("Not saved yet. Press Enter, or click Save.", "Ainda não foi salvo. Pressione Enter ou clique em Salvar.");
     Save => ("Save", "Salvar");
     Running => ("Running", "Em execução");

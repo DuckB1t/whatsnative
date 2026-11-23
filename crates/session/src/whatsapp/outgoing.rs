@@ -121,6 +121,17 @@ const PHOTO_MIME: &str = "image/jpeg";
 /// original, at a quality nobody looking at it would question.
 const PHOTO_QUALITY: u8 = 85;
 
+/// The longest edge a picture sent as a photo is reduced to.
+///
+/// A camera original is several thousand pixels on its long side and several
+/// megabytes. Nothing on the recipient's phone needs that to draw a chat
+/// bubble, and the upload costs the sender's connection the whole file. This
+/// is the trade a photo message makes: the bytes are re-encoded to fit this
+/// edge at [`PHOTO_QUALITY`], which is what WhatsApp's own clients do. A file
+/// sent as a document keeps its bytes exactly; this limit applies only to a
+/// photo, where the point is to be looked at inline.
+const MAX_PHOTO_EDGE: u32 = 1600;
+
 /// Past this, the picture is described but not scaled down.
 ///
 /// Decoding is what costs: four bytes a pixel, allocated inside the process
@@ -458,23 +469,49 @@ fn still(data: &[u8]) -> (Shape, Option<Photo>) {
         }
     };
 
-    // Decoded once, used twice: the thumbnail always, and the payload only
-    // where the format it arrived in is not one the other side will draw.
+    // Decoded once, used for the thumbnail and, where the picture is too big
+    // to be a chat photo or arrived in a format nobody draws, for the payload.
+    // A camera original is several megabytes for a bubble nobody opens at full
+    // size; reducing it is the trade a photo message makes. The document kind
+    // never reaches here, so its bytes stay exactly as picked.
     let thumbnail = jpeg_thumbnail(&decoded);
-    let transcoded = (!draws_as_a_photo(format))
-        .then(|| as_jpeg(&decoded, PHOTO_QUALITY))
+    let oversized = width.max(height) > MAX_PHOTO_EDGE;
+    let scaled = oversized.then(|| {
+        let (sw, sh) = if width >= height {
+            (
+                MAX_PHOTO_EDGE,
+                (u64::from(MAX_PHOTO_EDGE) * u64::from(height) / u64::from(width)) as u32,
+            )
+        } else {
+            (
+                (u64::from(MAX_PHOTO_EDGE) * u64::from(width) / u64::from(height)) as u32,
+                MAX_PHOTO_EDGE,
+            )
+        };
+        (decoded.thumbnail(MAX_PHOTO_EDGE, MAX_PHOTO_EDGE), (sw, sh))
+    });
+    let transcoded = scaled
+        .as_ref()
+        .map(|(image, _)| as_jpeg(image, PHOTO_QUALITY))
+        .or_else(|| (!draws_as_a_photo(format)).then(|| as_jpeg(&decoded, PHOTO_QUALITY)))
         .flatten();
-    // The type the *bytes* are, either way. A re-encode is a JPEG and an
-    // untouched picture is whatever the header said it was — which is not
-    // necessarily what it was picked as, and the message is read by a client
-    // that has only what we tell it.
-    let mime = match &transcoded {
-        Some(_) => PHOTO_MIME,
-        None => format.to_mime_type(),
+    // Dimensions and mime describe the bytes that actually go out. If an
+    // encode failed, the original bytes and the original dimensions travel
+    // together, which is the only honest pairing available then.
+    let (final_width, final_height, mime) = if transcoded.is_some() {
+        let (w, h) = scaled.as_ref().map_or((width, height), |(_, dims)| *dims);
+        (w, h, PHOTO_MIME)
+    } else {
+        (width, height, format.to_mime_type())
     };
 
     (
-        Shape { thumbnail, ..shape },
+        Shape {
+            width: Some(final_width),
+            height: Some(final_height),
+            thumbnail,
+            ..shape
+        },
         Some(Photo {
             data: transcoded,
             mime,
@@ -1113,6 +1150,33 @@ mod tests {
             assert_eq!(sent.mime_type, mime);
             assert!(shape.thumbnail.is_some(), "{mime} should still preview");
         }
+    }
+
+    /// A camera original sent as a photo is reduced to a chat-sized picture.
+    /// The document kind keeps its bytes; this is the other half of that
+    /// choice. The header must describe the bytes that actually go out, or
+    /// the recipient draws a placeholder at the wrong size.
+    #[test]
+    fn an_oversized_photo_is_downscaled_and_described_by_what_was_sent() {
+        let original = encoded(3200, 2400, image::ImageFormat::Jpeg);
+        let (shape, sent) = prepared("image/jpeg", original.clone());
+        assert_eq!(sent.mime_type, PHOTO_MIME);
+        assert_ne!(sent.data, original, "the payload should be re-encoded");
+        assert!(
+            sent.data.len() < original.len(),
+            "a {} byte photo became {} bytes",
+            original.len(),
+            sent.data.len()
+        );
+        let (width, height) = image::ImageReader::new(std::io::Cursor::new(&sent.data))
+            .with_guessed_format()
+            .expect("the re-encode should be readable")
+            .into_dimensions()
+            .expect("the re-encode should have dimensions");
+        assert_eq!(width, MAX_PHOTO_EDGE);
+        assert_eq!(height, MAX_PHOTO_EDGE * 3 / 4);
+        assert_eq!((shape.width, shape.height), (Some(width), Some(height)));
+        assert!(shape.thumbnail.is_some(), "and it still has a preview");
     }
 
     /// A file this build cannot read is still sent. Refusing it would be
