@@ -656,14 +656,17 @@
   therefore covers only the one public community hierarchy mutation that can be
   reported honestly, unlinking subgroups, with per-group failures. Wire/CLI
   parity for that unlink is not part of the slice.
-- **The media tab is a jump list, not a gallery.** Protocol 59 lists the
-  account's stored messages that carry media, newest first, from the local
-  store and opens a row at its chat. Upstream has no public gallery, cache
-  accounting or thumbnail API, and the stored hit carries only a boolean media
-  flag, no kind, filename, cache key or thumbnail bytes. Kind filters,
-  previews, “downloaded only” filtering and bulk retry would all be guesses, so
-  Storage & media says what the list is instead of drawing them. Storage totals
-  and the cache-clear action were already complete and did not change.
+- **The media gallery is local and bounded, not a cloud gallery.** Protocol 59
+  still lists the account's stored messages that carry media, newest first, from
+  the local store and opens a row at its chat. Wave 1.4 taught the hit to carry
+  the kind, filename, MIME type, dimensions and two presence flags the stored
+  proto can actually prove. The gallery groups those 50 rows by chat, filters
+  only the rows in hand and draws a thumbnail only when this window already has
+  decodable bytes. Otherwise it draws an honest kind card. Upstream still has
+  no public gallery, cache accounting or thumbnail API, so there is no server
+  total, no downloaded-only filter and no bulk retry hiding behind the chips.
+  Storage totals and the cache-clear action were already complete and did not
+  change.
 
 - **The chat detail sheet is a mirror of local state, not a profile.** It opens
   from the header identity, the labelled info action, the overflow menu or a

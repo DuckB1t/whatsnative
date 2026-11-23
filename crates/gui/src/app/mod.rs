@@ -1218,8 +1218,12 @@ pub struct WhatsAppApp {
     /// while the saved panel is closed so reopening it is not briefly empty.
     saved_messages: Vec<oxidezap_ipc::MessageSearchHit>,
     /// Rows from the latest store-wide media listing, newest first. Like the
-    /// saved rows, these are kept while the panel is closed.
+    /// saved rows, these are kept while the panel is closed. Optional media
+    /// facts on a row come from the stored proto, never from a server query.
     media_messages: Vec<oxidezap_ipc::MessageSearchHit>,
+    /// The kind filter on the local media gallery. Kept with the rows so
+    /// reopening the panel does not throw away the reader's choice.
+    media_filter: saved_messages::MediaFilter,
     /// Whether a message panel is on screen. The rows live in the fields
     /// above and in `pinned_rows`, not in these flags.
     saved_messages_panel: bool,
@@ -1734,6 +1738,7 @@ impl WhatsAppApp {
             saved_messages_focus: cx.focus_handle(),
             pinned_messages_focus: cx.focus_handle(),
             media_messages_focus: cx.focus_handle(),
+            media_filter: saved_messages::MediaFilter::All,
             root_focus: cx.focus_handle(),
             keyboard_owner: None,
             window_focused: false,
@@ -5184,9 +5189,20 @@ impl Render for WhatsAppApp {
         });
         let media_messages = self.media_messages_panel.then(|| {
             let rows = self.media_rows();
-            saved_messages::render_panel(
-                saved_messages::MessagePanel::Media,
+            let counts = self.media_filter_counts();
+            // Decode here, where the app is already borrowed as `self`. A
+            // render helper cannot read the entity it is drawing, and a card
+            // must not pretend a preview exists when the message was never
+            // loaded into this window.
+            let thumbs = rows
+                .iter()
+                .map(|row| self.gallery_thumb(&row.chat_jid, &row.message_id, cx))
+                .collect::<Vec<_>>();
+            saved_messages::render_media_gallery(
                 &rows,
+                &thumbs,
+                &counts,
+                self.media_filter,
                 &self.media_messages_focus,
                 &cx.entity(),
                 cx,

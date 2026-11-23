@@ -256,17 +256,7 @@ impl WhatsAppClient {
 
             let mut results: Vec<MessageSearchHit> = hits
                 .into_iter()
-                .map(|stored| {
-                    let snippet = search_snippet(&stored);
-                    MessageSearchHit {
-                        chat_jid: stored.chat_jid.to_string(),
-                        message_id: stored.id,
-                        snippet,
-                        sender_jid: Some(stored.sender_jid.to_string()),
-                        timestamp_ms: stored.timestamp.timestamp_millis(),
-                        has_media: stored.kind.has_media(),
-                    }
-                })
+                .map(|stored| search_hit_projection(&stored))
                 .collect();
             results.sort_by(|a, b| {
                 b.timestamp_ms
@@ -299,17 +289,7 @@ impl WhatsAppClient {
                 .map_err(|e| format!("database query failed: {e}"))?;
             let results = rows
                 .into_iter()
-                .map(|stored| {
-                    let snippet = search_snippet(&stored);
-                    MessageSearchHit {
-                        chat_jid: stored.chat_jid.to_string(),
-                        message_id: stored.id,
-                        snippet,
-                        sender_jid: Some(stored.sender_jid.to_string()),
-                        timestamp_ms: stored.timestamp.timestamp_millis(),
-                        has_media: stored.kind.has_media(),
-                    }
-                })
+                .map(|stored| search_hit_projection(&stored))
                 .collect();
             Ok(results)
         })
@@ -318,11 +298,11 @@ impl WhatsAppClient {
     /// Messages carrying media across every chat as search-shaped hits.
     ///
     /// The jump list reuses the hit projection and snippet exactly as the
-    /// starred listing does: a row names a chat and a message to open, and
-    /// nothing else. The store chooses which rows carry media and orders them
-    /// newest first; the client clamps the bound again for safety. There is no
-    /// kind, cache state, filename or thumbnail here — those belong to the
-    /// message itself, not to this list.
+    /// starred listing does: a row names a chat and a message to open, plus
+    /// whatever media facts the stored proto can prove. The store chooses
+    /// which rows carry media and orders them newest first; the client clamps
+    /// the bound again for safety. No bytes cross this boundary and no server
+    /// total is claimed.
     pub fn list_media_hits(&self, limit: i64) -> Task<Result<Vec<MessageSearchHit>, String>> {
         let session = self.session.clone();
         self.exec.spawn(async move {
@@ -337,17 +317,7 @@ impl WhatsAppClient {
                 .map_err(|e| format!("database query failed: {e}"))?;
             let results = rows
                 .into_iter()
-                .map(|stored| {
-                    let snippet = search_snippet(&stored);
-                    MessageSearchHit {
-                        chat_jid: stored.chat_jid.to_string(),
-                        message_id: stored.id,
-                        snippet,
-                        sender_jid: Some(stored.sender_jid.to_string()),
-                        timestamp_ms: stored.timestamp.timestamp_millis(),
-                        has_media: true,
-                    }
-                })
+                .map(|stored| search_hit_projection(&stored))
                 .collect();
             Ok(results)
         })
@@ -669,6 +639,60 @@ impl WhatsAppClient {
             Self::attach_avatar_descriptors(store, &mut chats).await;
             Ok(Page { items: chats, next })
         })
+    }
+}
+
+/// One store row as the compact protocol hit every local listing shares.
+///
+/// The media fields are a projection of the stored proto, not a fetch: the
+/// bytes stay in the store and only their kind, name, size and presence flags
+/// cross the wire. A row whose proto is missing or undecodable keeps the old
+/// shape with no media facts rather than guessing from the kind label alone.
+fn search_hit_projection(stored: &oxidezap_chat_store::StoredMessage) -> MessageSearchHit {
+    let media = (!stored.revoked && stored.kind.has_media())
+        .then_some(stored.message.as_deref())
+        .flatten()
+        .map(oxidezap_chat_store::normalized_message)
+        .and_then(|message| super::media::media_of(message, None));
+
+    let (media_kind, file_name, mime_type, width, height, has_stored_preview, fetchable) =
+        match media {
+            Some(media) => {
+                use oxidezap_core::MediaType;
+                let kind = match media.media_type {
+                    MediaType::Image => "image",
+                    MediaType::Sticker => "sticker",
+                    MediaType::Video => "video",
+                    MediaType::Audio => "audio",
+                    MediaType::Document => "document",
+                };
+                (
+                    Some(kind.to_owned()),
+                    media.file_name,
+                    Some(media.mime_type),
+                    media.width,
+                    media.height,
+                    !media.data.is_empty(),
+                    media.downloadable.is_some() || media.preview_downloadable.is_some(),
+                )
+            }
+            None => (None, None, None, None, None, false, false),
+        };
+
+    MessageSearchHit {
+        chat_jid: stored.chat_jid.to_string(),
+        message_id: stored.id.clone(),
+        snippet: search_snippet(stored),
+        sender_jid: Some(stored.sender_jid.to_string()),
+        timestamp_ms: stored.timestamp.timestamp_millis(),
+        has_media: stored.kind.has_media(),
+        media_kind,
+        file_name,
+        mime_type,
+        width,
+        height,
+        has_stored_preview,
+        fetchable,
     }
 }
 

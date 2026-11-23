@@ -1924,9 +1924,10 @@ async fn starred_and_pending_media_reads_project_rehydrated_quotes() {
     assert_eq!(quote.kind, Some(oxidezap_core::QuotedKind::Image));
 }
 
-/// The media jump list is a bounded, search-shaped view of the store's
-/// media rows: newest first, no caption necessary, and every row marked as
-/// carrying media. Both addresses below are synthetic.
+/// The media listing is a bounded, search-shaped view of the store's media
+/// rows: newest first, no caption necessary, every row marked as carrying
+/// media, and the stored proto's real kind and size projected when it has
+/// them. Both addresses below are synthetic.
 #[tokio::test]
 async fn media_hits_are_newest_first_bounded_and_search_shaped() {
     let (chat_store, client) = test_session("media-jump-list").await;
@@ -1935,6 +1936,9 @@ async fn media_hits_are_newest_first_bounded_and_search_shaped() {
         constructed.image_message = MessageField::some({
             let mut constructed: wa::message::ImageMessage = Default::default();
             constructed.mimetype = Some("image/jpeg".into());
+            constructed.jpeg_thumbnail = Some(vec![1, 2, 3]);
+            constructed.width = Some(640);
+            constructed.height = Some(480);
             constructed
         });
         constructed
@@ -1986,6 +1990,15 @@ async fn media_hits_are_newest_first_bounded_and_search_shaped() {
     assert_eq!(hits[1].chat_jid, TEST_PEER);
     assert!(hits.iter().all(|hit| hit.has_media));
     assert_eq!(hits[0].snippet, "[image]", "the kind stands in for no text");
+    assert_eq!(hits[0].media_kind.as_deref(), Some("image"));
+    assert_eq!(hits[0].mime_type.as_deref(), Some("image/jpeg"));
+    assert_eq!(hits[0].width, Some(640));
+    assert_eq!(hits[0].height, Some(480));
+    assert!(
+        hits[0].has_stored_preview,
+        "thumbnail bytes are in the store"
+    );
+    assert!(!hits[0].fetchable, "no download envelope was stored here");
 
     // The same clamp as the other local listings: zero asks for one row.
     let one = wrapper

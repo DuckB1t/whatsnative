@@ -463,6 +463,16 @@ tokens! {
     /// remote control for a settings pane.
     preset_card_width = dense(184.0);
 
+    /// A card in the local media gallery.
+    ///
+    /// Its own token rather than the settings preset card: a gallery card
+    /// holds a thumbnail and two lines of metadata, and tying the two made a
+    /// change in appearance settings resize a gallery nobody was styling.
+    media_card_width = dense(176.0);
+
+    /// The square thumbnail in a media gallery card.
+    media_thumb = dense(72.0);
+
     /// The miniature window inside a preset card.
     ///
     /// Its own token rather than an avatar size: the preview is a picture of

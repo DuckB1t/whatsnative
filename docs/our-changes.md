@@ -667,7 +667,9 @@ set). Storage & media gains a short guidance note and an **Open media messages**
 button; the resulting overlay reuses the saved/pinned hit rows and jumps to the
 chosen message, closing the other panels. No `Destination::Media`, thumbnails,
 kind filters, cache-state claims or wire/CLI commands were added. Older peers
-cannot attach across the new version.
+cannot attach across the new version. Wave 1.4 keeps the same frame and version;
+it grows the hit with optional media facts and turns the panel into a gallery,
+see section 29.
 
 **Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
 (2686 passed, 44 ignored, 0 failed). Doctests, CLI 1,682,904 B (<2 MiB),
@@ -894,6 +896,55 @@ nextest). The xtask fmt, clippy and test gates are green (52 passed).
 this environment with a `gpui-pre-scheduler` async-io destructor panic
 (`SIGABRT`) before a final summary; CI uses nextest, which passed here. No em
 dashes or real identifiers are present in the new lines.
+
+### 29. Local media gallery from stored message facts (Wave 1.4)
+
+**Problem.** Protocol 59 gave Storage & media a bounded jump list, and that was
+it. The row carried only `has_media`, so the overlay could not say what kind of
+file it was, could not filter, and could not draw a preview without lying about
+where the bytes came from. A full cloud gallery is still not possible here:
+upstream exposes no gallery, cache accounting or thumbnail API.
+
+**Change.**
+- `MessageSearchHit` gains seven optional, serde-defaulted media facts: kind,
+  file name, MIME type, width, height, stored-preview-byte presence and
+  download-metadata presence. The first six say what the stored proto proves.
+  The last two are deliberately presence flags, not a promise that a decode or
+  a download will work. Old JSON still decodes and re-serializes to the old
+  line; no new frame or protocol bump was needed.
+- `search_hit_projection` is now the one place that turns a stored row into a
+  hit. It reads media from the stored proto only when the row is not revoked and
+  its content class carries media. A missing or undecodable proto keeps the old
+  shape instead of guessing a kind from a media flag.
+- Storage & media now opens a gallery over the same 50-row listing. Cards show
+  the stored facts, group by chat, and offer chips for all, images, videos,
+  audio, documents and stickers. The chips count and hide only rows this window
+  already has. A new metric pair sizes the cards and thumbnails, and the EN/PT
+  strings say the gallery is stored history with no server-wide total.
+- A thumbnail is collected from messages already loaded in this window and is
+  decoded only when the bytes are a still the local decoder understands.
+  Anything else gets a kind card. The overlay now blocks clicks behind it, so
+  opening a card cannot also select a chat under the scrim.
+- Synthetic tests cover the projection's real image facts, the old frame shape,
+  filter counts, chat grouping, a real local PNG thumbnail and click-through to
+  the stored message. The row keeps its `media-messages-hit` debug selector.
+
+**Not changed.** No server request, no media bytes over IPC, no bulk retry, no
+downloaded-only filter, no account-wide total and no new destination. Nothing
+was run against a paired account. Every address in the new fixtures is
+`.invalid`, and the synthetic image is a 1x1 PNG made in the test.
+
+**Gates.** `cargo +1.100.0 fmt --all -- --check`,
+`cargo +1.100.0 clippy --workspace --all-targets --all-features -- -D warnings`,
+`cargo +1.100.0 nextest run --workspace --all-features` (2728 passed, 35
+skipped), `cargo +1.100.0 nextest run -p oxidezap-gui --all-features` (768
+passed, 15 skipped) and `cargo +1.100.0 test --workspace --all-features --doc`
+are green. The xtask fmt, clippy and test gates are green (52 passed).
+`git diff --check` is clean. The full libtest GUI command still aborts in this
+environment with the `gpui-pre-scheduler` destructor panic, so the CI-aligned
+nextest result is the one recorded here. The publication audit found no em
+dashes, phone-shaped fixtures, real JID namespaces, account paths or secrets in
+the new lines.
 
 ## Planned (see plan file)
 

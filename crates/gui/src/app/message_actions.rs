@@ -1038,6 +1038,7 @@ mod tests {
                 sender_jid: None,
                 timestamp_ms: n as i64,
                 has_media: false,
+                ..Default::default()
             })
             .collect();
         cx.update(|_window, cx| {
@@ -1058,6 +1059,7 @@ mod tests {
                         sender_jid: None,
                         timestamp_ms: i64::MAX,
                         has_media: false,
+                        ..Default::default()
                     }],
                     cx,
                 );

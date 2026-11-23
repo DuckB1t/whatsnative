@@ -1330,9 +1330,10 @@ pub enum ClientRequest {
     /// List messages carrying media across every chat, newest first.
     ///
     /// A local read like the starred listing: the store owns the rows, so the
-    /// answer is [`DaemonMessage::MediaResults`]. This is a jump list only —
-    /// no thumbnails, no media kinds to filter by and no cache state — and the
-    /// rows are bounded by the same default as a search.
+    /// answer is [`DaemonMessage::MediaResults`]. Rows carry optional media
+    /// facts read from the stored proto, such as kind, name and size. No bytes
+    /// or server-wide totals cross the wire, and an older reader can ignore
+    /// the extra fields. The rows are bounded like a search.
     ListMediaMessages {
         #[serde(default = "default_search_limit")]
         limit: usize,
@@ -3617,6 +3618,7 @@ mod audio_played_tests {
                         sender_jid: None,
                         timestamp_ms: 1_700_000_000_000,
                         has_media: false,
+                        ..Default::default()
                     }],
                 },
                 r#"{"type":"search_results","query":"synthetic","results":[{"chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-1","snippet":"synthetic hit","timestamp_ms":1700000000000,"has_media":false}]}"#,
@@ -3713,6 +3715,7 @@ mod audio_played_tests {
                         sender_jid: None,
                         timestamp_ms: 1_700_000_000_000,
                         has_media: false,
+                        ..Default::default()
                     }],
                 },
                 r#"{"type":"starred_results","results":[{"chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-2","snippet":"a starred line","timestamp_ms":1700000000000,"has_media":false}]}"#,
@@ -3742,11 +3745,11 @@ mod audio_played_tests {
         );
     }
 
-    /// Protocol 59's media jump list is one more set of bytes the daemon and
+    /// Protocol 59's media gallery is one more set of bytes the daemon and
     /// every front end agree on. Literal JSON, so a field renamed or quietly
     /// made optional is a visible change. The address and id are synthetic.
     #[test]
-    fn protocol_59_media_jump_list_frames_put_the_same_bytes_on_the_wire() {
+    fn protocol_59_media_gallery_frames_put_the_same_bytes_on_the_wire() {
         let request = ClientRequest::ListMediaMessages { limit: 50 };
         let line = serde_json::to_string(&request).expect("a request serializes");
         assert_eq!(line, r#"{"request":"list_media_messages","limit":50}"#);
@@ -3758,22 +3761,53 @@ mod audio_played_tests {
 
         let answer = DaemonMessage::MediaResults {
             results: vec![MessageSearchHit {
-                chat_jid: "155555500001@g.us".into(),
+                chat_jid: "synthetic-media@example.invalid".into(),
                 message_id: "SYNTHETIC-MEDIA-1".into(),
                 snippet: "[image]".into(),
                 sender_jid: None,
                 timestamp_ms: 1_700_000_000_000,
                 has_media: true,
+                media_kind: Some("image".into()),
+                file_name: Some("synthetic.jpg".into()),
+                mime_type: Some("image/jpeg".into()),
+                width: Some(640),
+                height: Some(480),
+                has_stored_preview: true,
+                fetchable: true,
             }],
         };
         let line = serde_json::to_string(&answer).expect("an answer serializes");
         assert_eq!(
             line,
-            r#"{"type":"media_results","results":[{"chat_jid":"155555500001@g.us","message_id":"SYNTHETIC-MEDIA-1","snippet":"[image]","timestamp_ms":1700000000000,"has_media":true}]}"#
+            r#"{"type":"media_results","results":[{"chat_jid":"synthetic-media@example.invalid","message_id":"SYNTHETIC-MEDIA-1","snippet":"[image]","timestamp_ms":1700000000000,"has_media":true,"media_kind":"image","file_name":"synthetic.jpg","mime_type":"image/jpeg","width":640,"height":480,"has_stored_preview":true,"fetchable":true}]}"#
         );
         assert_eq!(
             serde_json::from_str::<DaemonMessage>(&line).expect("an answer parses"),
             answer
+        );
+
+        // A row from an older daemon has none of the gallery facts. It must
+        // still decode, and it must still serialize as the same old line.
+        // Otherwise "optional" is a lie and a mixed-version restart breaks.
+        let legacy = r#"{"type":"media_results","results":[{"chat_jid":"synthetic-media@example.invalid","message_id":"SYNTHETIC-MEDIA-1","snippet":"[image]","timestamp_ms":1700000000000,"has_media":true}]}"#;
+        let decoded =
+            serde_json::from_str::<DaemonMessage>(legacy).expect("a legacy answer parses");
+        let DaemonMessage::MediaResults { results } = decoded else {
+            panic!("a media result stays a media result");
+        };
+        let hit = &results[0];
+        assert!(hit.has_media);
+        assert_eq!(hit.media_kind, None);
+        assert_eq!(hit.file_name, None);
+        assert_eq!(hit.mime_type, None);
+        assert_eq!(hit.width, None);
+        assert_eq!(hit.height, None);
+        assert!(!hit.has_stored_preview);
+        assert!(!hit.fetchable);
+        assert_eq!(
+            serde_json::to_string(&DaemonMessage::MediaResults { results })
+                .expect("a legacy answer still serializes"),
+            legacy
         );
     }
 

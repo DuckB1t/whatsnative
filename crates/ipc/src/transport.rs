@@ -396,6 +396,11 @@ use std::path::PathBuf;
 /// no such frame to answer with, and older windows cannot decode the answer, so
 /// neither half may attach across this version. The wire and CLI `calls`
 /// request is unchanged.
+///
+/// Within 61, `MessageSearchHit` also carries optional media facts read from
+/// the local store. They serialize only when present and have serde defaults,
+/// so an older daemon's row still decodes in a newer window and an older
+/// window ignores the extra keys. No new frame or version bump is needed.
 pub const PROTOCOL_VERSION: u32 = 61;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.

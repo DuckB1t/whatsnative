@@ -1477,6 +1477,7 @@ mod tests {
                 sender_jid: None,
                 timestamp_ms: 1_700_000_000_000,
                 has_media: false,
+                ..Default::default()
             }],
         });
 
@@ -1511,6 +1512,7 @@ mod tests {
                 sender_jid: None,
                 timestamp_ms: 1_700_000_000_000,
                 has_media: true,
+                ..Default::default()
             }],
         });
 

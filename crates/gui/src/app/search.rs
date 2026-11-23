@@ -1019,6 +1019,7 @@ mod tests {
             sender_jid: None,
             timestamp_ms,
             has_media: false,
+            ..Default::default()
         }
     }
 

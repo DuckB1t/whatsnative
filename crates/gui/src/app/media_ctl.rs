@@ -1306,6 +1306,38 @@ impl WhatsAppApp {
     /// own file once it has been fetched, and nothing decodes those as one.
     /// Answered before the cache is touched, so an MP4 cannot take a slot
     /// from the pictures the cache exists for.
+    /// A gallery thumbnail, only from bytes this window already holds.
+    ///
+    /// The listing row may know a filename and a stored preview flag, but it
+    /// cannot carry picture bytes over the protocol. If the message is not in
+    /// this window's loaded history, or its payload is not a still, the card
+    /// draws a kind label instead of pretending it fetched something.
+    pub(super) fn gallery_thumb(
+        &self,
+        chat_jid: &str,
+        message_id: &str,
+        cx: &App,
+    ) -> Option<RetainedImage> {
+        let media = self
+            .chat_named(chat_jid)?
+            .messages
+            .iter()
+            .find(|message| message.id == message_id)?
+            .media
+            .as_ref()?;
+        if media.data.is_empty()
+            || !matches!(
+                media.media_type,
+                oxidezap_core::MediaType::Image
+                    | oxidezap_core::MediaType::Sticker
+                    | oxidezap_core::MediaType::Video
+            )
+        {
+            return None;
+        }
+        self.get_decoded_image(message_id, media, cx)
+    }
+
     pub fn get_decoded_image(
         &self,
         message_id: &str,

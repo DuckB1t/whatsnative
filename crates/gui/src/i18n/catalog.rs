@@ -638,13 +638,24 @@ catalog! {
     PinnedMessages => ("Pinned messages", "Mensagens fixadas");
     NoPinnedMessages => ("No pinned messages in loaded chats", "Nenhuma mensagem fixada nas conversas carregadas");
 
-    // Protocol 59's media jump list. It is a list of rows to open, not a
-    // gallery: no thumbnail, kind filter or cache-state promise.
-    MediaMessages => ("Media messages", "Mensagens com mídia");
-    OpenMediaMessages => ("Open media messages", "Abrir mensagens com mídia");
-    NoMediaMessages => ("No messages with media yet", "Nenhuma mensagem com mídia ainda");
+    // Protocol 59's local media listing, grown into an honest gallery in
+    // Wave 1.4. Every fact on a card comes from the stored row or from bytes
+    // this window already holds. No server total is promised.
+    MediaMessages => ("Media gallery", "Galeria de mídia");
+    OpenMediaMessages => ("Open media gallery", "Abrir galeria de mídia");
+    NoMediaMessages => ("No messages with media in stored history", "Nenhuma mensagem com mídia no histórico armazenado");
     CouldNotLoadMediaMessages => ("Could not load media messages", "Não foi possível carregar as mensagens com mídia");
-    MediaListGuidance => ("Browse messages with media from your stored history, newest first. No thumbnails or filters, open a row to see the message.", "Navegue pelas mensagens com mídia do histórico armazenado, mais recentes primeiro. Sem miniaturas ou filtros, abra uma linha para ver a mensagem.");
+    MediaListGuidance => ("Stored history only, newest first, grouped by chat. Previews appear when this window already has the bytes. No server-wide total.", "Apenas histórico armazenado, mais recente primeiro, agrupado por conversa. Prévias aparecem quando esta janela já tem os bytes. Sem total do servidor.");
+    MediaFilterAll => ("All", "Todos");
+    MediaFilterImages => ("Images", "Imagens");
+    MediaFilterVideos => ("Videos", "Vídeos");
+    MediaFilterAudio => ("Audio", "Áudio");
+    MediaFilterDocuments => ("Documents", "Documentos");
+    MediaFilterStickers => ("Stickers", "Figurinhas");
+    NoMediaMatches => ("No stored media of that kind", "Nenhuma mídia armazenada desse tipo");
+    MediaNoLocalPreview => ("No local preview", "Sem prévia local");
+    MediaPreviewInStore => ("Stored preview bytes, not loaded here", "Bytes de prévia armazenados, não carregados aqui");
+    MediaFetchable => ("Can be downloaded", "Pode ser baixado");
 
     // Protocol 54's chat-list management. "Mute" alone names the call's
     // microphone in this catalog, so these say which mute they mean.

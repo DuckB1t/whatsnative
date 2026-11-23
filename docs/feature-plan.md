@@ -24,23 +24,30 @@
 - [x] Wave 0, investigation and plan
 - [x] Wave 1.1, dedicated Calls destination and daemon call log
 - [x] Wave 1.2, chat info panel
-- [ ] Wave 1.3, new chat dialog
-- [ ] Wave 1.4, media gallery
+- [x] Wave 1.3, new chat dialog
+- [x] Wave 1.4, media gallery
 - [ ] Wave 1.5, local GIF and sticker search
 - [ ] Wave 2, message actions with real APIs
 - [ ] Wave 3, privacy and settings with real mutations
 - [ ] Wave 4, multi-account V2
 - [ ] MCP planning
 
-Waves 1.1 and 1.2 are implemented, reviewed, green and cleared for push after
-their waves. Neither is in v0.1.0. The call log is a daemon-lifetime ring,
-capped at 100, and the pane says that plainly. Chat info is a mirror of local
-state: identity, authoritative roster, loaded-history media count and working
-mute and archive controls. It does not invent profile facts. The coordinator
-reran format, clippy, the full workspace suite (2717 passed, 45 ignored), the
-xtask gates (52 passed), the example plugin workspaces and the plugin host's
-ignored wasm-loading tests, then checked the publication range for account
-leaks before pushing.
+Waves 1.1 through 1.4 are implemented, reviewed, green and cleared for push
+after their waves. None of it is in v0.1.0. The call log is a daemon-lifetime
+ring capped at 100, and the pane says that plainly. Chat info is a mirror of
+local state: identity, authoritative roster, loaded-history media count and
+working mute and archive controls. It does not invent profile facts. The new
+chat dialog filters loaded chats and uses the existing username lookup; it is
+not a contact directory. The media gallery is a bounded local view over the
+last 50 stored media rows. It shows real kind, filename, dimension and
+availability facts from the stored proto, groups what it has by chat and filters
+only those rows. A thumbnail is drawn only from bytes this window already holds
+and can decode. No server total, no downloaded-only claim and no fake fetch
+hides behind the chips. The coordinator reran format, clippy, the full nextest
+workspace suite (2728 passed, 35 skipped), doctests and the xtask gates (52
+passed), then checked the publication range for account leaks before pushing.
+The old full libtest GUI command still aborts in this environment with a GPUI
+scheduler destructor panic, so CI's nextest run is the honest gate here.
 
 ## What the deep investigation found
 
