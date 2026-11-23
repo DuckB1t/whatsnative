@@ -428,15 +428,15 @@ mod tests {
     fn a_wire_message_carries_the_hydrated_star_and_pin() {
         let mut message = ChatMessage::new_incoming(
             "star-synthetic-0".to_owned(),
-            "155500000001@example.invalid".to_owned(),
+            "saved-person@example.invalid".to_owned(),
             "a synthetic saved message".to_owned(),
         );
-        let plain = chat_message_to_dto("155500000001@example.invalid", message.clone());
+        let plain = chat_message_to_dto("saved-person@example.invalid", message.clone());
         assert!(!plain.is_starred);
         assert!(!plain.is_pinned);
         message.starred = true;
         message.pinned = true;
-        let marked = chat_message_to_dto("155500000001@example.invalid", message);
+        let marked = chat_message_to_dto("saved-person@example.invalid", message);
         assert!(marked.is_starred);
         assert!(marked.is_pinned);
     }

@@ -2010,6 +2010,71 @@ async fn media_hits_are_newest_first_bounded_and_search_shaped() {
     crate::exec::let_go(wrapper).await;
 }
 
+/// The pinned listing reads the durable flag, not this process's event memory:
+/// it is newest first, bounded and search-shaped exactly like the starred
+/// listing, and a row from a chat with no loaded timeline is still a row.
+#[tokio::test]
+async fn pinned_hits_are_newest_first_bounded_and_search_shaped() {
+    let (chat_store, client) = test_session("pinned-jump-list").await;
+    for (chat, id, ts) in [
+        (TEST_GROUP, "PIN-OLD", 1_700_000_000),
+        (TEST_PEER, "PIN-MID", 1_700_000_060),
+        (TEST_GROUP, "PIN-NEW", 1_700_000_120),
+    ] {
+        feed(
+            &chat_store,
+            incoming_in(chat, wa::Message::text("a synthetic pinned line"), id, ts),
+        )
+        .await;
+    }
+    let chat: Jid = TEST_GROUP.parse().expect("synthetic group address");
+    for id in ["PIN-OLD", "PIN-NEW"] {
+        chat_store
+            .set_pinned(&chat, id, true)
+            .await
+            .expect("pin a synthetic row");
+    }
+    let peer: Jid = TEST_PEER.parse().expect("synthetic peer address");
+    chat_store
+        .set_pinned(&peer, "PIN-MID", true)
+        .await
+        .expect("pin a synthetic row");
+
+    let live = Arc::new(super::Session {
+        client: client.clone(),
+        chat_store: chat_store.clone(),
+        names: Arc::new(book_with(&chat_store)),
+        resolve_chat_names: super::chat_names::ChatNameResolveSignal::new(),
+        stickers: Arc::new(super::sticker_sync::StickerSync::default()),
+    });
+    let wrapper = WhatsAppClient::new().expect("an executor");
+    *wrapper.session.lock().await = Some(live);
+
+    let hits = wrapper
+        .list_pinned_hits(2)
+        .await
+        .expect("the listing runs")
+        .expect("the store answers");
+    assert_eq!(hits.len(), 2, "the bound is carried to the store");
+    assert_eq!(
+        hits.iter()
+            .map(|hit| hit.message_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["PIN-NEW", "PIN-MID"],
+        "newest first, across chats"
+    );
+    assert_eq!(hits[0].chat_jid, TEST_GROUP);
+    assert_eq!(hits[0].snippet, "a synthetic pinned line");
+
+    let one = wrapper
+        .list_pinned_hits(0)
+        .await
+        .expect("the listing runs")
+        .expect("the store answers");
+    assert_eq!(one.len(), 1, "the same clamp as the other local listings");
+    crate::exec::let_go(wrapper).await;
+}
+
 async fn test_session(name: &str) -> (Arc<ChatStore>, Arc<Client>) {
     let (chat_store, bot) = test_bot(name).await;
     (chat_store, bot.client())

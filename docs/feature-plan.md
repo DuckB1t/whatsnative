@@ -27,13 +27,14 @@
 - [x] Wave 1.3, new chat dialog
 - [x] Wave 1.4, media gallery
 - [x] Wave 1.5, local GIF and sticker search
-- [ ] Wave 2, message actions with real APIs
+- [x] Wave 2, message actions with real APIs
 - [ ] Wave 3, privacy and settings with real mutations
 - [ ] Wave 4, multi-account V2
 - [ ] MCP planning
 
 Waves 1.1 through 1.5 are implemented, reviewed, green and cleared for push
-after their waves. None of it is in v0.1.0. The call log is a daemon-lifetime
+after their waves. Wave 2 is also implemented, reviewed and green: four slices,
+one protocol bump, one push at the end. None of it is in v0.1.0. The call log is a daemon-lifetime
 ring capped at 100, and the pane says that plainly. Chat info is a mirror of
 local state: identity, authoritative roster, loaded-history media count and
 working mute and archive controls. It does not invent profile facts. The new
@@ -195,6 +196,19 @@ workspace gates are green.
 Pinned and starred hydration gaps, forwarding target discovery where upstream
 allows, mention candidate completeness, full emoji reaction picker, attachment
 kind override and downscaling. Done only for items with a real API.
+
+Status: done in four slices, reviewed and gated, with one end-of-wave push and
+no release tag. Slice A put durable star and pin flags on `ChatMessage` and made
+the overlay tri-state. Slice B opened the full emoji picker and fixed mention
+candidates. Slice C added the send kind override and local photo downscaling.
+Slice D bumped protocol 62 for the store-backed pinned listing and local contact
+search. The full story and limits are in section 31 of `docs/our-changes.md`.
+
+Acceptance: each action reaches a real upstream or store API, uses synthetic
+fixtures only, says on screen what it can and cannot do, and adds no server-wide
+claim. Inbound `PinInChatMessage`, forever pins, cloud GIF search, sticker pack
+open/add and a server directory stay out because this tree has no honest path
+to them.
 
 ### Wave 3, privacy and settings
 

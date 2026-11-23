@@ -41,8 +41,8 @@ media and call machinery come from
 We did a deep audit of what a normal user notices and wrote it in
 [docs/feature-plan.md](docs/feature-plan.md). The audit found no Calls tab, no
 chat info panel, a disabled new chat button, a media jump list and a local-only
-GIF/sticker picker with no search. All five of those gaps are closed locally now.
-None of this is in v0.1.0.
+GIF/sticker picker with no search. Those five gaps are closed, and Wave 2's real
+message actions are in too. None of this is in v0.1.0.
 
 Progress snapshot, not a live counter:
 
@@ -50,11 +50,11 @@ Progress snapshot, not a live counter:
 | --- | --- |
 | Investigation and plan | 100% |
 | Wave 1, daily drivers | 100%, Calls, chat info, new chat, media gallery and local picker search done |
-| Wave 2, message actions | 0% |
+| Wave 2, message actions | 100%, A through D done with real APIs only |
 | Wave 3, privacy and settings | 0% |
 | Wave 4, multi-account | 0% |
 | MCP planning | 0% |
-| Whole program | about 33%, 0% released |
+| Whole program | about 50%, 0% released |
 
 Checklist:
 
@@ -64,7 +64,7 @@ Checklist:
 - [x] Wave 1: new chat dialog
 - [x] Wave 1: media gallery
 - [x] Wave 1: local GIF and sticker search
-- [ ] Wave 2: message actions with real APIs
+- [x] Wave 2: message actions with real APIs
 - [ ] Wave 3: privacy and settings with real mutations
 - [ ] Wave 4: multi-account V2
 - [ ] MCP planning
@@ -83,6 +83,20 @@ downloaded-only claim or fake fetch sits behind those chips. The picker searches
 only the tiles it already loaded: GIFs by chat, caption and file name, recent
 stickers by the chat they came from. Favorites carry no text and are honestly not
 searchable. Every surface says what it is on screen.
+
+Wave 2 closes the message-action gaps with real local APIs. Stars and pins set
+in an earlier session survive a reload because the durable row now reaches the
+timeline. A pin change seen after load beats that row, including an explicit
+unpin, so the window does not argue with the store. The reacted table opens from
+the quick strip for the emoji nobody thought to put in six buttons, and mention
+candidates stop quietly dropping after fifty names. The send sheet lets each
+pending file go as image, video or document without touching its bytes, and
+large outgoing photos get scaled down locally with the header describing what
+was actually sent. Protocol 62 adds a real pinned listing and a local contact
+search, so the pinned panel finds rows outside this window's loaded page and a
+forward can reach someone saved in the address book who is not a chat yet. There
+is no server-wide directory, no pin forever, no cloud GIF search and no real
+account was touched. `v0.1.0` is still the only release.
 
 UI target: familiar layout, original design. No copied proprietary assets or
 trade dress. The checklist gets updated after every wave.

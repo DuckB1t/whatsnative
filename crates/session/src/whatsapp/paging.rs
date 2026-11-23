@@ -295,6 +295,32 @@ impl WhatsAppClient {
         })
     }
 
+    /// Pinned messages across every chat as search-shaped hits.
+    ///
+    /// The pinned twin of [`Self::list_starred_hits`]: same store-owned rows,
+    /// same bound, same projection, same newest-first order from the store.
+    /// The window's old pinned panel could only name pins it had seen itself
+    /// and messages it had loaded; this reads the durable flag instead.
+    pub fn list_pinned_hits(&self, limit: i64) -> Task<Result<Vec<MessageSearchHit>, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let bound = limit.clamp(1, 100);
+            let rows = live
+                .chat_store
+                .pinned_messages(bound)
+                .await
+                .map_err(|e| format!("database query failed: {e}"))?;
+            let results = rows
+                .into_iter()
+                .map(|stored| search_hit_projection(&stored))
+                .collect();
+            Ok(results)
+        })
+    }
+
     /// Messages carrying media across every chat as search-shaped hits.
     ///
     /// The jump list reuses the hit projection and snippet exactly as the

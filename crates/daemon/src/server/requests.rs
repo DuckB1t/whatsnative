@@ -270,6 +270,41 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        ClientRequest::ListPinnedMessages { limit } => {
+            let id = match addressed(id, "a pinned listing needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::ListPinnedMessages {
+                    id,
+                    limit,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::SearchContacts { query, limit } => {
+            let id = match addressed(id, "a contact search needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::SearchContacts {
+                    id,
+                    query,
+                    limit,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::ListMediaMessages { limit } => {
             let id = match addressed(id, "a media listing needs an id to answer under") {
                 Ok(id) => id,

@@ -640,7 +640,8 @@ catalog! {
     NoSavedMessages => ("No saved messages yet", "Nenhuma mensagem salva ainda");
     CouldNotLoadSavedMessages => ("Could not load saved messages", "Não foi possível carregar as mensagens salvas");
     PinnedMessages => ("Pinned messages", "Mensagens fixadas");
-    NoPinnedMessages => ("No pinned messages in loaded chats", "Nenhuma mensagem fixada nas conversas carregadas");
+    NoPinnedMessages => ("No pinned messages in stored history", "Nenhuma mensagem fixada no histórico armazenado");
+    CouldNotLoadPinnedMessages => ("Could not load pinned messages", "Não foi possível carregar as mensagens fixadas");
 
     // Protocol 59's local media listing, grown into an honest gallery in
     // Wave 1.4. Every fact on a card comes from the stored row or from bytes

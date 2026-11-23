@@ -104,6 +104,21 @@ pub enum Action {
         limit: usize,
         answer_to: Outbox,
     },
+    /// Pinned messages across every chat, answered with `PinnedResults` on the
+    /// asking outbox. A local store read like the starred listing.
+    ListPinnedMessages {
+        id: RequestId,
+        limit: usize,
+        answer_to: Outbox,
+    },
+    /// Address-book rows matching a local query, answered with `ContactResults`
+    /// on the asking outbox. A local store read, not a directory lookup.
+    SearchContacts {
+        id: RequestId,
+        query: String,
+        limit: usize,
+        answer_to: Outbox,
+    },
     /// Messages carrying media across every chat, answered with `MediaResults`
     /// on the asking outbox. Another bounded local-store read like a search.
     ListMediaMessages {
@@ -471,6 +486,8 @@ impl Action {
                     | Self::LoadChats { .. }
                     | Self::SearchMessages { .. }
                     | Self::ListStarredMessages { .. }
+                    | Self::ListPinnedMessages { .. }
+                    | Self::SearchContacts { .. }
                     | Self::ListMediaMessages { .. }
                     | Self::RefreshAvatars
                     | Self::Download { .. }

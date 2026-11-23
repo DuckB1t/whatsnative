@@ -28,6 +28,10 @@ pub(super) struct ForwardDraft {
 
 impl WhatsAppApp {
     /// Open the chat picker for one message.
+    ///
+    /// Alongside the loaded conversations, ask the store for the address book:
+    /// a person saved here but not yet a loaded chat is still a real forward
+    /// destination, and upstream forwards by address, not by an existing chat.
     pub(super) fn begin_forward(
         &mut self,
         chat_jid: &str,
@@ -38,7 +42,55 @@ impl WhatsAppApp {
             chat_jid: chat_jid.into(),
             message_id: message_id.into(),
         });
+        self.request_contacts(cx);
         cx.notify();
+    }
+
+    /// Ask for the first bounded page of the local address book. An empty
+    /// query is a listing, not a search the reader has to type first; a hit in
+    /// the book that is already a loaded chat is skipped when rows are built.
+    fn request_contacts(&mut self, cx: &mut Context<Self>) {
+        let Some(waiting) = self
+            .client
+            .as_ref()
+            .map(|client| client.search_contacts("", super::saved_messages::LIST_LIMIT))
+        else {
+            return;
+        };
+        // The rows arrive as `FromDaemon::ContactResults`, not in the ack.
+        // Nothing needs saying here if the read failed: the picker still has
+        // the loaded conversations, which were always honest targets.
+        cx.spawn(async move |_entity, _cx| {
+            let _ = waiting.await;
+        })
+        .detach();
+    }
+
+    /// Destinations for the forward picker: loaded chats first, then address-
+    /// book rows the store knows that are not already in that list. Names come
+    /// from whatever each source holds; neither is invented from the other.
+    pub(super) fn forward_targets(&self) -> Vec<(SharedString, SharedString)> {
+        let mut seen = std::collections::HashSet::new();
+        let mut rows: Vec<(SharedString, SharedString)> = Vec::new();
+        for chat in &self.chats {
+            let jid: SharedString = chat.jid.clone().into();
+            seen.insert(jid.to_string());
+            rows.push((chat.name.clone().into(), jid));
+        }
+        for hit in &self.contact_hits {
+            if !seen.insert(hit.jid.clone()) {
+                continue;
+            }
+            let name = hit
+                .name
+                .as_ref()
+                .or(hit.alias.as_ref())
+                .or(hit.push_name.as_ref())
+                .or(hit.phone.as_ref())
+                .unwrap_or(&hit.jid);
+            rows.push((name.clone().into(), hit.jid.clone().into()));
+        }
+        rows
     }
 
     pub(super) fn cancel_forward(&mut self, cx: &mut Context<Self>) -> bool {
@@ -206,6 +258,12 @@ impl WhatsAppApp {
         let chat_jid = chat_jid.to_string();
         let key = (chat_jid.clone(), message_id.to_string());
         self.pinned_messages.insert(key.clone(), pinned);
+        if !pinned {
+            // The panel reads store rows now, not this overlay. An unpin must
+            // drop the row here too or it sits there after the mutation.
+            self.pinned_results
+                .retain(|hit| hit.chat_jid != chat_jid || hit.message_id != message_id);
+        }
         self.invalidate_message_cache(&chat_jid, cx);
         cx.notify();
         let Some(waiting) = self
@@ -257,11 +315,20 @@ impl WhatsAppApp {
         cx: &mut Context<Self>,
     ) {
         let key = (chat_jid.to_string(), message_id.to_string());
-        if self.pinned_messages.insert(key, pinned) == Some(pinned) {
-            return;
+        let changed = self.pinned_messages.insert(key, pinned) != Some(pinned);
+        let rows_before = self.pinned_results.len();
+        if !pinned {
+            // A front end can unpin a row this window never had an overlay for.
+            // The listing is the panel's source now, so drop it there too.
+            self.pinned_results
+                .retain(|hit| hit.chat_jid != chat_jid || hit.message_id != message_id);
         }
-        self.invalidate_message_cache(chat_jid, cx);
-        cx.notify();
+        if changed {
+            self.invalidate_message_cache(chat_jid, cx);
+        }
+        if changed || self.pinned_results.len() != rows_before {
+            cx.notify();
+        }
     }
 
     /// Whether a row should draw its pin, asked while the timeline is built.
@@ -289,6 +356,35 @@ impl WhatsAppApp {
         cx.notify();
     }
 
+    /// Keep the pinned panel's rows after a store-wide listing.
+    ///
+    /// The answer is broadcast without a request id, so the newest listing
+    /// replaces the old rows exactly as a starred listing does.
+    pub(super) fn adopt_pinned_results(
+        &mut self,
+        results: Vec<oxidezap_ipc::MessageSearchHit>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut results = results;
+        results.sort_unstable_by_key(|hit| std::cmp::Reverse(hit.timestamp_ms));
+        results.truncate(super::saved_messages::LIST_LIMIT);
+        self.pinned_results = results;
+        cx.notify();
+    }
+
+    /// Keep the address-book rows from the latest local contact search.
+    ///
+    /// Broadcast like the other listing answers, with no request id to compare
+    /// against, so a newer answer replaces the older one wholesale.
+    pub(super) fn adopt_contact_results(
+        &mut self,
+        results: Vec<oxidezap_ipc::ContactHit>,
+        cx: &mut Context<Self>,
+    ) {
+        self.contact_hits = results;
+        cx.notify();
+    }
+
     /// Keep the media panel's rows after a store-wide listing.
     ///
     /// The answer is broadcast without a request id, so the newest listing
@@ -306,8 +402,9 @@ impl WhatsAppApp {
     }
 }
 
-/// The native chat picker a forward opens. It lists the conversations this
-/// window already knows — no directory lookup, and no fabricated destination.
+/// The native chat picker a forward opens. It lists loaded conversations and
+/// address-book rows from the local store, deduplicated by address: no server
+/// directory, and no fabricated destination.
 pub(super) fn render_forward_picker(
     focus: &FocusHandle,
     chats: Vec<(SharedString, SharedString)>,
@@ -1079,6 +1176,110 @@ mod tests {
 
                 app.adopt_star_changed("peer@example.invalid", "STAR-9", false, cx);
                 assert!(app.saved_messages.is_empty());
+            });
+        });
+    }
+
+    /// The pinned listing follows the same newest-first, bounded, newest-answer
+    /// wins rules as the saved listing, and does not lose rows just because
+    /// this window never loaded the chat they belong to.
+    #[gpui::test]
+    fn pinned_results_are_newest_first_bounded_and_replace_each_other(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (mut cx, app) = delete_fixture(cx);
+        let limit = super::super::saved_messages::LIST_LIMIT;
+        let hits: Vec<_> = (0..limit + 2)
+            .map(|n| oxidezap_ipc::MessageSearchHit {
+                chat_jid: "unloaded@example.invalid".into(),
+                message_id: format!("PIN-{n}"),
+                snippet: "a synthetic pinned message".into(),
+                sender_jid: None,
+                timestamp_ms: n as i64,
+                has_media: false,
+                ..Default::default()
+            })
+            .collect();
+        cx.update(|_window, cx| {
+            app.update(cx, |app, cx| {
+                app.adopt_pinned_results(hits, cx);
+                assert_eq!(app.pinned_results.len(), limit);
+                assert_eq!(
+                    app.pinned_results[0].message_id,
+                    format!("PIN-{}", limit + 1)
+                );
+                assert_eq!(app.pinned_results.last().unwrap().message_id, "PIN-2");
+                assert_eq!(app.pinned_rows().len(), limit, "no row needs a loaded chat");
+
+                app.adopt_pinned_results(
+                    vec![oxidezap_ipc::MessageSearchHit {
+                        chat_jid: "unloaded@example.invalid".into(),
+                        message_id: "PIN-NEW".into(),
+                        snippet: "a newer listing".into(),
+                        sender_jid: None,
+                        timestamp_ms: i64::MAX,
+                        has_media: false,
+                        ..Default::default()
+                    }],
+                    cx,
+                );
+                assert_eq!(app.pinned_results.len(), 1);
+                assert_eq!(app.pinned_rows()[0].message_id, "PIN-NEW");
+
+                // Removing a pin drops the row even when this window had no
+                // overlay bit for it. The overlay still beats the hydrated flag.
+                app.adopt_pin_changed("unloaded@example.invalid", "PIN-NEW", false, cx);
+                assert!(app.pinned_results.is_empty());
+                assert!(!app.is_pinned("unloaded@example.invalid", "PIN-NEW", true));
+            });
+        });
+    }
+
+    /// A forward can target a saved person who is not a loaded conversation.
+    /// Loaded chats come first, an address already in that list is not repeated,
+    /// and a nameless address-book row is named by the address itself.
+    #[gpui::test]
+    fn forward_targets_include_unloaded_contacts_without_duplicates(cx: &mut gpui::TestAppContext) {
+        let (mut cx, app) = delete_fixture(cx);
+        cx.update(|_window, cx| {
+            app.update(cx, |app, _| {
+                app.contact_hits = vec![
+                    oxidezap_ipc::ContactHit {
+                        jid: "peer@example.invalid".into(),
+                        name: Some("Duplicate".into()),
+                        ..Default::default()
+                    },
+                    oxidezap_ipc::ContactHit {
+                        jid: "saved@example.invalid".into(),
+                        name: Some("Saved person".into()),
+                        ..Default::default()
+                    },
+                    oxidezap_ipc::ContactHit {
+                        jid: "unnamed@example.invalid".into(),
+                        ..Default::default()
+                    },
+                ];
+                let targets = app.forward_targets();
+                assert!(targets.len() >= 4, "two chats plus two new contacts");
+                let addresses: Vec<_> = targets.iter().map(|(_, jid)| jid.to_string()).collect();
+                assert_eq!(
+                    addresses
+                        .iter()
+                        .filter(|jid| **jid == "peer@example.invalid")
+                        .count(),
+                    1,
+                    "a loaded chat is not listed twice"
+                );
+                let saved = targets
+                    .iter()
+                    .find(|(_, jid)| jid.as_ref() == "saved@example.invalid")
+                    .expect("the saved contact is a target");
+                assert_eq!(saved.0.as_ref(), "Saved person");
+                let unnamed = targets
+                    .iter()
+                    .find(|(_, jid)| jid.as_ref() == "unnamed@example.invalid")
+                    .expect("the nameless contact is a target");
+                assert_eq!(unnamed.0.as_ref(), "unnamed@example.invalid");
             });
         });
     }

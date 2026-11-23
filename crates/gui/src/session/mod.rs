@@ -284,6 +284,17 @@ pub enum FromDaemon {
     StarredResults {
         results: Vec<oxidezap_ipc::MessageSearchHit>,
     },
+    /// Pinned messages across every chat, answering the pinned listing. Like
+    /// the starred answer it has no request id: the window asks when it opens
+    /// the pinned panel and keeps the newest answer it has seen.
+    PinnedResults {
+        results: Vec<oxidezap_ipc::MessageSearchHit>,
+    },
+    /// Address-book rows from a local contact search. No request id, like the
+    /// other listing answers: the window keeps the newest answer it has seen.
+    ContactResults {
+        results: Vec<oxidezap_ipc::ContactHit>,
+    },
     /// Messages carrying media across every chat, answering the media listing
     /// opened from Storage & media settings. Like a starred listing it has no
     /// request id: the window keeps the newest answer it has seen.
@@ -1454,6 +1465,41 @@ impl SessionHandle {
         let (tx, rx) = oneshot::channel();
         self.ask(
             ClientRequest::ListStarredMessages { limit },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// List the account's pinned messages, newest first.
+    ///
+    /// The ack says the read ran; the rows arrive separately as
+    /// [`FromDaemon::PinnedResults`], without a request id, because the daemon
+    /// answers every front end that can use them.
+    pub fn list_pinned_messages(&self, limit: usize) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::ListPinnedMessages { limit },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Search the account's local address book. An empty query lists the first
+    /// bounded page, which is what a destination picker asks for on open.
+    ///
+    /// The ack says the read ran; the rows arrive separately as
+    /// [`FromDaemon::ContactResults`], without a request id.
+    pub fn search_contacts(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::SearchContacts {
+                query: query.to_string(),
+                limit,
+            },
             Awaiting::Mutation(tx),
         );
         rx

@@ -403,11 +403,13 @@
   7 days and 30 days only, the mutation always uses the 30-day maximum, so
   the Web "pin forever" feature cannot be claimed. The saved panel is filled
   by a store-wide listing with no request id, so the newest answer replaces
-  the rows. There is no `ListPinnedMessages` request: the pinned panel is
-  derived from `PinChanged` events this window has seen plus messages it has
-  loaded, so pins made before the window attached, or rows outside the loaded
-  page, do not appear there. Both panels reuse the global search's hit rows,
-  and neither has been live-validated.
+  the rows. Protocol 62 added `ListPinnedMessages`, answered by `PinnedResults`:
+  the pinned panel now reads the store's durable flag, so a pin made before
+  this window attached, or a row outside the loaded page, is a row there too.
+  Both panels reuse the global search's hit rows, and neither has been
+  live-validated. The local contact search added in the same protocol lets a
+  forward find an address-book person who is not yet a loaded chat; there is
+  still no server-wide directory and no "pin forever".
 - **Chat folders are a filter plus four mutations, not a full folder model.**
   Protocol 54 gives the window a Pinned filter beside All/Unread/Groups/Archived
   and a right-click menu for mark-unread, pin/unpin, mute/unmute and
@@ -422,16 +424,20 @@
   has been live-validated.
 - **Four everyday message actions are now in the native window, with a few
   honest horizons.** Protocol 52 carries forward, star/unstar, `@mention` JIDs
-  on `SendText`, and account-wide FTS5 search. The forward picker lists only
-  chats this window already knows; it does not open a directory. `ChatMessage`
-  has no starred field, so each front end keeps a display overlay fed by its
-  own optimistic mark and the account-wide `StarChanged` event, a window
-  opened after the mutation starts with an empty overlay until the next star
-  change, because hydration has no starred snapshot. Search hits carry the
-  query rather than a request id, so late answers to a query the box has
-  replaced are dropped. Mention candidates come from chats, the name cache
-  and group rosters; a name without a JID is never offered. All four paths
-  are synthetic-test-green, not live-validated.
+  on `SendText`, and account-wide FTS5 search. The forward picker starts with
+  loaded chats and adds the first page of the local address book through
+  protocol 62, deduplicated by address. That is a book already on disk, not a
+  server directory. `ChatMessage` now carries the durable starred and pinned
+  flags from hydration, while each front end keeps a tri-state overlay for
+  changes since it connected. An explicit false beats the stored true, so
+  unpinning after reload is drawn as unpinned; an absent key falls back to the
+  row. Search hits carry the query rather than a request id, so late answers to
+  a query the box has replaced are dropped. Mention candidates come from chats,
+  the name cache and group rosters, are no longer cut off at fifty, and use a
+  member's JID local part as the handle when no name was stored. The quick
+  reaction strip now opens the full searchable emoji table in an app-level
+  modal, because a virtualised timeline cannot hold an anchor for a popover.
+  All four paths are synthetic-test-green, not live-validated.
 - **A call link can be previewed and joined, but neither has been live-validated.** The native modal resolves metadata, requires explicit consent and hands the pasted token to the library's link builder without ever treating it as a JID or a chat. What has not been exercised is the real admission path, waiting rooms, media attach and a live group roster, because joining a link on the paired account needs explicit consent. The same operation is not yet in the CLI/wire surface: protocol 51 is a GUI/IPC addition, so a terminal still has no `call-link` command.
 - **Group calls are routed and drawn, but not live-validated.** The library's
   transaction-ordered roster snapshots now reach `call_card/video.rs`, and a
@@ -696,8 +702,9 @@
   address shows only the fields the lookup supplied and gets an Open chat
   action only when that address is already a loaded chat. The GUI still has no
   create-chat-by-JID request, so an unknown address cannot become a new
-  conversation here. There is no server-backed profile fetch, no address book
-  and no new protocol version.
+  conversation here. There is no server-backed profile fetch. Protocol 62 reads
+  the local address book for the forward picker only; the start-chat dialog
+  stays as described and still makes no server-wide directory claim.
 
 Clickable `div`s that remain are deliberate: a chat row and a media thumbnail
 are surfaces, not commands, and have no semantic component to compose from.

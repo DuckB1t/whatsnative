@@ -1233,6 +1233,13 @@ pub struct WhatsAppApp {
     /// Rows from the latest store-wide starred listing, newest first. Kept
     /// while the saved panel is closed so reopening it is not briefly empty.
     saved_messages: Vec<oxidezap_ipc::MessageSearchHit>,
+    /// Rows from the latest store-wide pinned listing, newest first. Kept while
+    /// the panel is closed, like the saved rows, and always read from the
+    /// store: a pin from another front end is a row here too.
+    pinned_results: Vec<oxidezap_ipc::MessageSearchHit>,
+    /// Address-book rows from the latest local contact search. Used by the
+    /// forward picker to name destinations that are not loaded conversations.
+    contact_hits: Vec<oxidezap_ipc::ContactHit>,
     /// Rows from the latest store-wide media listing, newest first. Like the
     /// saved rows, these are kept while the panel is closed. Optional media
     /// facts on a row come from the stored proto, never from a server query.
@@ -1674,6 +1681,16 @@ impl WhatsAppApp {
                     FromDaemon::StarredResults { results } => entity.update(cx, |app, cx| {
                         app.adopt_starred_results(results, cx);
                     }),
+                    // The store's answer to the pinned listing. No request id
+                    // either, so the newest answer wins here too.
+                    FromDaemon::PinnedResults { results } => entity.update(cx, |app, cx| {
+                        app.adopt_pinned_results(results, cx);
+                    }),
+                    // Address-book rows from a local contact search. Kept for
+                    // the forward picker, newest answer winning.
+                    FromDaemon::ContactResults { results } => entity.update(cx, |app, cx| {
+                        app.adopt_contact_results(results, cx);
+                    }),
                     // The store's answer to the media jump list. No request id
                     // on the frame either, so the newest answer wins here too.
                     FromDaemon::MediaResults { results } => entity.update(cx, |app, cx| {
@@ -1867,6 +1884,8 @@ impl WhatsAppApp {
             starred_messages: HashMap::new(),
             pinned_messages: HashMap::new(),
             saved_messages: Vec::new(),
+            pinned_results: Vec::new(),
+            contact_hits: Vec::new(),
             media_messages: Vec::new(),
             saved_messages_panel: false,
             pinned_messages_panel: false,
@@ -2762,6 +2781,8 @@ impl WhatsAppApp {
         self.starred_messages.clear();
         self.pinned_messages.clear();
         self.saved_messages.clear();
+        self.pinned_results.clear();
+        self.contact_hits.clear();
         self.media_messages.clear();
         self.saved_messages_panel = false;
         self.pinned_messages_panel = false;
@@ -5244,14 +5265,11 @@ impl Render for WhatsAppApp {
 
         // A forward's destination picker, over the body but under notices too.
         let forward_picker = self.forward_picker.as_ref().map(|_draft| {
-            let chats: Vec<_> = self
-                .chats
-                .iter()
-                .map(|chat| (chat.name.clone().into(), chat.jid.clone().into()))
-                .collect();
+            // Loaded conversations plus address-book rows the store knows.
+            // Both are real destinations; neither is a fabricated contact.
             message_actions::render_forward_picker(
                 &self.forward_picker_focus,
-                chats,
+                self.forward_targets(),
                 &cx.entity(),
                 cx,
             )

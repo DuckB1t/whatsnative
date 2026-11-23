@@ -456,9 +456,10 @@ exposes is 30 days.
   `secondary-shift-p`, and Pin/Unpin plus a pinned marker on the bubble. Both
   panels reuse the global search's hit rows and close when a hit is opened.
   The saved panel is filled by a store-wide listing with no request id, so the
-  newest answer replaces its rows. There is no `ListPinnedMessages` IPC: the
-  pinned panel is derived from `PinChanged` events this window has seen and
-  the messages it has loaded, so older pins or unloaded rows are absent.
+  newest answer replaces its rows. At this point there was no
+  `ListPinnedMessages` IPC: the pinned panel was derived from `PinChanged`
+  events this window had seen and the messages it had loaded, so older pins or
+  unloaded rows were absent. Wave 2 fixed that with a real listing (section 31).
   EN/PT catalog entries carry the 30-day wording, nothing promises "forever".
 
 **Gates.** fmt, clippy (`-D warnings`) and the full workspace suite green
@@ -995,6 +996,73 @@ environment with the `gpui-pre-scheduler` destructor panic, so the CI-aligned
 nextest result is the one recorded here. The publication audit found no em
 dashes, phone-shaped fixtures, real JID namespaces, account paths or secrets in
 the new lines.
+
+### 31. Message actions that actually do things (Wave 2)
+
+**Problem.** Wave 1 left the cute parts of a messenger half wired. Stars showed
+false after a reload because the GUI hardcoded it. Pins only existed in this
+window's memory. The reaction strip had six emojis and no way to reach the rest.
+Mentions quit after fifty names and dropped members with no saved name. The send
+sheet pretended a file's extension decided what it was, and a big photo went up
+with the full byte count. Forwarding only saw chats already loaded in this
+window. None of that is a design choice worth defending.
+
+**Change, slice A.** `ChatMessage` now carries the durable starred and pinned
+flags from the stored row. The wire DTO gained a serde-defaulted `is_pinned` and
+stopped lying about `is_starred`. The timeline uses a tri-state overlay: a value
+in the map, including an explicit false, beats the hydrated row; a missing key
+falls back to the row. That means unpin after reload draws as unpinned instead
+of arguing with the store. Both fields are additive with defaults, so old JSON
+still reads and no protocol bump was needed. The dead hardcoded `false` in the
+event converter is gone.
+
+**Change, slice B.** The reaction strip has a real route to the full searchable
+emoji table. It opens as an app-level modal because the timeline is virtualised
+and a bubble-anchored popover would lose its anchor the moment the list recycles.
+The target is captured when the overlay opens, the picked emoji goes through the
+same toggle path as a quick tap, and Escape or the close button gets rid of it.
+Mention candidates no longer stop at fifty, and a group member with no stored
+name is addressed by the local part of their JID instead of being thrown away.
+The composer still only shows six at once, which is a layout choice, not a
+hidden cap.
+
+**Change, slice C.** Each pending attachment can be sent as image, video or
+document. The override changes what the recipient gets, not the bytes or the
+file name on disk. Switching a document back to an image rebuilds its preview
+from the real bytes. Outgoing photos longer than 1600 pixels on an edge are
+scaled down and re-encoded as JPEG, with the message header describing the bytes
+actually uploaded. Sending that file as a document keeps the original bytes,
+because that is the whole point of the choice.
+
+**Change, slice D.** Protocol 62 adds two local reads to the legacy IPC plane.
+`ListPinnedMessages` gets a bounded `PinnedResults` answer from the store, so
+the pinned panel can show an older pin or a row outside this window's loaded
+page. `SearchContacts` gets a `ContactResults` answer made of new `ContactHit`
+rows from the account's address book. The forward picker merges those rows with
+loaded chats and dedupes by address; an empty query is a first-page listing, so
+the picker has targets the moment it opens. Both answers are account-wide
+broadcasts with no request id, and each request gets its own ack, matching the
+other jump lists. Pin changes also drop stale rows from the store-backed pinned
+panel. There is still no server directory behind this. If a person is not in the
+local book, the honest answer is no hit.
+
+**Not changed.** No inbound `PinInChatMessage` history snapshot, so a pin seen
+only in an incoming event still has no stored row to list. No "pin forever",
+because upstream only offers 24 hours, 7 days and 30 days and this code uses the
+30-day maximum. No cloud GIF search, no sticker pack open or add, no server-wide
+contact search, no real message, reaction, call or account touched during
+validation. Every fixture address is `.invalid`. No copied artwork or trade
+dress. No new release: `v0.1.0` is still the only tag.
+
+**Gates.** Full Wave 2 publication gates were run from `1de783d` after all four
+slices and all docs: fmt, clippy with `-D warnings`, full workspace nextest
+(2746 passed, 35 skipped, one pre-existing leaky daemon launch test), doctests
+(1 passed, 10 ignored) and the xtask fmt, clippy and test gates (52 passed).
+`git diff --check` is clean. The no-dash audit found no em or en dashes on added
+lines, and the no-account-leak audit found no phone-shaped fixtures, real JID
+namespaces, account paths or secrets in the publication range. The CI-aligned
+nextest gate is the one that counts here; the old full libtest GUI command can
+still abort in this environment with the `gpui-pre-scheduler` destructor panic.
 
 ## Planned (see plan file)
 

@@ -1,6 +1,5 @@
 //! Messages exchanged over the socket.
 
-pub use oxidezap_core::MessageSearchHit;
 use oxidezap_core::{
     AccountId, BlockedContact, CallState, CallVideoFrame, ChannelPollCreated, ChannelPollDraft,
     ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
@@ -9,6 +8,7 @@ use oxidezap_core::{
     PluginSurface, PrivacyReadReceipts, QuotedMessage, StatusStyle, SubgroupDraft, UiEvent,
     UnlinkSubgroupsRequest, UsernameLookupResult,
 };
+pub use oxidezap_core::{ContactHit, MessageSearchHit};
 use serde::{Deserialize, Serialize};
 
 fn is_false(value: &bool) -> bool {
@@ -543,6 +543,24 @@ pub enum DaemonMessage {
     /// Like [`DaemonMessage::SearchResults`] it is signalled account-wide and
     /// the request itself gets an ordinary ack.
     StarredResults { results: Vec<MessageSearchHit> },
+    /// Pinned messages across every chat, answering
+    /// [`ClientRequest::ListPinnedMessages`].
+    ///
+    /// Another bounded "here are rows to jump to" answer reusing the search
+    /// hit shape. Unlike the window's old pinned panel, which could only name
+    /// pins it had seen and messages it had loaded, this comes from the store:
+    /// a pin made by another front end or a message outside the loaded page is
+    /// still a row. Like a search answer it is signalled account-wide with no
+    /// request id; the request itself gets an ordinary ack.
+    PinnedResults { results: Vec<MessageSearchHit> },
+    /// Address-book rows matching a local contact search, answering
+    /// [`ClientRequest::SearchContacts`].
+    ///
+    /// A local read like the other jump lists: the store owns the rows, so the
+    /// answer is signalled account-wide without a request id and the request
+    /// gets an ordinary ack. No server directory is consulted and no total is
+    /// claimed; every row is a person already on disk.
+    ContactResults { results: Vec<ContactHit> },
     /// Messages carrying media across every chat, answering
     /// [`ClientRequest::ListMediaMessages`].
     ///
@@ -823,6 +841,8 @@ impl ClientRequest {
                 | Self::PreviewCallLink(_)
                 | Self::SearchMessages { .. }
                 | Self::ListStarredMessages { .. }
+                | Self::ListPinnedMessages { .. }
+                | Self::SearchContacts { .. }
                 | Self::ListMediaMessages { .. }
                 | Self::LoadMessages(_)
                 | Self::LoadChats(_)
@@ -1324,6 +1344,27 @@ pub enum ClientRequest {
     /// A local read like [`ClientRequest::SearchMessages`]: the store owns the
     /// rows, so the answer is [`DaemonMessage::StarredResults`].
     ListStarredMessages {
+        #[serde(default = "default_search_limit")]
+        limit: usize,
+    },
+    /// List pinned messages across every chat, newest first.
+    ///
+    /// A local read like the starred listing: the store owns the rows, so the
+    /// answer is [`DaemonMessage::PinnedResults`]. It is the honest source for
+    /// the pinned panel, which used to be pieced together from this window's
+    /// own pin events and loaded messages only.
+    ListPinnedMessages {
+        #[serde(default = "default_search_limit")]
+        limit: usize,
+    },
+    /// Search the account's local address book by name, phone or address.
+    ///
+    /// A local read: the store owns the rows, so the answer is
+    /// [`DaemonMessage::ContactResults`]. An empty query lists the first bounded
+    /// page, which is what a destination picker asks for when it opens. There
+    /// is no server directory behind this, so a miss means "not in this book".
+    SearchContacts {
+        query: String,
         #[serde(default = "default_search_limit")]
         limit: usize,
     },
@@ -3809,6 +3850,83 @@ mod audio_played_tests {
                 .expect("a legacy answer still serializes"),
             legacy
         );
+    }
+
+    /// Protocol 62's pinned listing and contact search are one more set of
+    /// bytes the daemon and every front end agree on. Literal JSON, so a field
+    /// renamed or quietly made required is a visible change. Every address and
+    /// name here is synthetic.
+    #[test]
+    fn protocol_62_pinned_and_contact_frames_put_the_same_bytes_on_the_wire() {
+        let requests = [
+            (
+                ClientRequest::ListPinnedMessages { limit: 50 },
+                r#"{"request":"list_pinned_messages","limit":50}"#,
+            ),
+            (
+                ClientRequest::SearchContacts {
+                    query: "ana".into(),
+                    limit: 50,
+                },
+                r#"{"request":"search_contacts","query":"ana","limit":50}"#,
+            ),
+        ];
+        for (frame, expected) in requests {
+            let line = serde_json::to_string(&frame).expect("a request serializes");
+            assert_eq!(line, expected);
+            assert_eq!(
+                serde_json::from_str::<ClientRequest>(&line).expect("a request parses"),
+                frame
+            );
+            assert!(frame.is_read(), "both new reads are local reads");
+        }
+
+        let answers = [
+            (
+                DaemonMessage::PinnedResults {
+                    results: vec![MessageSearchHit {
+                        chat_jid: "synthetic-pinned@example.invalid".into(),
+                        message_id: "SYNTHETIC-PINNED-1".into(),
+                        snippet: "a pinned line".into(),
+                        sender_jid: None,
+                        timestamp_ms: 1_700_000_000_000,
+                        has_media: false,
+                        ..Default::default()
+                    }],
+                },
+                r#"{"type":"pinned_results","results":[{"chat_jid":"synthetic-pinned@example.invalid","message_id":"SYNTHETIC-PINNED-1","snippet":"a pinned line","timestamp_ms":1700000000000,"has_media":false}]}"#,
+            ),
+            (
+                DaemonMessage::ContactResults {
+                    results: vec![ContactHit {
+                        jid: "synthetic-contact@example.invalid".into(),
+                        name: Some("Ana".into()),
+                        ..Default::default()
+                    }],
+                },
+                r#"{"type":"contact_results","results":[{"jid":"synthetic-contact@example.invalid","name":"Ana"}]}"#,
+            ),
+        ];
+        for (frame, expected) in answers {
+            let line = serde_json::to_string(&frame).expect("an answer serializes");
+            assert_eq!(line, expected);
+            assert_eq!(
+                serde_json::from_str::<DaemonMessage>(&line).expect("an answer parses"),
+                frame
+            );
+        }
+
+        // A sparse contact row from an older reader still decodes: the labels
+        // are optional and omitted when absent, so adding fields is honest.
+        let sparse =
+            r#"{"type":"contact_results","results":[{"jid":"synthetic-contact@example.invalid"}]}"#;
+        let decoded =
+            serde_json::from_str::<DaemonMessage>(sparse).expect("a sparse answer parses");
+        let DaemonMessage::ContactResults { results } = decoded else {
+            panic!("a contact result stays a contact result");
+        };
+        assert_eq!(results[0].name, None);
+        assert!(results[0].tags.is_empty());
     }
 
     /// Protocol 54's chat-list mutations are one more set of bytes the daemon

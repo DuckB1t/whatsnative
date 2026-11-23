@@ -70,7 +70,7 @@ pub use calls::{ActiveCall, Admission, CallState, Ending, Stage, WaitingCall};
 pub use channel::{ChannelPollCreated, ChannelPollDraft, ChannelReact, ChannelVotePoll};
 pub use chat::STATUS_BROADCAST_JID;
 pub use chat::{
-    Chat, ChatMessage, DownloadableMedia, GroupHierarchy, MediaContent, MediaType,
+    Chat, ChatMessage, ContactHit, DownloadableMedia, GroupHierarchy, MediaContent, MediaType,
     MessageSearchHit, OutgoingMedia, PickerSticker, PollContent, ReleasedMedia, Resend,
     SubgroupKind,
 };

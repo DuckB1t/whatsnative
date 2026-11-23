@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use oxidezap_core::{CallLinkMedia, CallOutcome, CommunityOperationResult};
 use oxidezap_ipc::{
-    CallAction, ChatSummary, DaemonEvent, DaemonMessage, PageCursor, ProtocolError, RequestId,
+    CallAction, ChatSummary, ContactHit, DaemonEvent, DaemonMessage, PageCursor, ProtocolError,
+    RequestId,
 };
 use oxidezap_session::{EventDraft, ReadBoundary, WhatsAppClient};
 use tokio::sync::OwnedSemaphorePermit;
@@ -1102,6 +1103,80 @@ impl Bridge {
                         Err(error) => Err(ProtocolError::NoSession {
                             detail: format!(
                                 "the session stopped before the starred listing arrived: {error}"
+                            ),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::ListPinnedMessages {
+                id,
+                limit,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.list_pinned_hits(i64::try_from(limit).unwrap_or(50));
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // The rows are an account-wide signal like a search
+                    // answer; the id gets its own ack, or its own error.
+                    let answer = match task.await {
+                        Ok(Ok(results)) => {
+                            hub.signal(&DaemonMessage::PinnedResults { results });
+                            Ok(DaemonMessage::Accepted { id: Some(id) })
+                        }
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(error) => Err(ProtocolError::NoSession {
+                            detail: format!(
+                                "the session stopped before the pinned listing arrived: {error}"
+                            ),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::SearchContacts {
+                id,
+                query,
+                limit,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task =
+                    client.list_contact_views(Some(query), i64::try_from(limit).unwrap_or(50));
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // A local address-book read. Rows are signalled to every
+                    // front end without a request id; the id gets its own ack.
+                    let answer = match task.await {
+                        Ok(Ok(contacts)) => {
+                            let results: Vec<ContactHit> =
+                                contacts.into_iter().map(contact_to_hit).collect();
+                            hub.signal(&DaemonMessage::ContactResults { results });
+                            Ok(DaemonMessage::Accepted { id: Some(id) })
+                        }
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(error) => Err(ProtocolError::NoSession {
+                            detail: format!(
+                                "the session stopped before the contact search arrived: {error}"
                             ),
                         }),
                     };
@@ -2404,6 +2479,8 @@ impl Bridge {
             | Action::MuteChat { .. }
             | Action::ArchiveChat { .. }
             | Action::ListStarredMessages { .. }
+            | Action::ListPinnedMessages { .. }
+            | Action::SearchContacts { .. }
             | Action::ListMediaMessages { .. }
             | Action::FetchPrivacySettings { .. }
             | Action::SetReadReceipts { .. }
@@ -3403,6 +3480,23 @@ fn run_wire_opt<T>(
 /// A session contact view as the protocol's contact.
 fn contact_to_dto(contact: oxidezap_session::ContactView) -> ContactDto {
     ContactDto {
+        jid: contact.jid,
+        name: contact.name,
+        push_name: contact.push_name,
+        phone: contact.phone,
+        is_business: contact.is_business,
+        alias: contact.alias,
+        tags: contact.tags,
+    }
+}
+
+/// The same address-book view as a legacy GUI contact hit.
+///
+/// The fields are identical to the wire DTO by design: both are projections of
+/// the store's contact row, but they belong to different protocol planes and
+/// must not be coupled through one type.
+fn contact_to_hit(contact: oxidezap_session::ContactView) -> ContactHit {
+    ContactHit {
         jid: contact.jid,
         name: contact.name,
         push_name: contact.push_name,

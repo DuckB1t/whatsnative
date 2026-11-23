@@ -618,6 +618,15 @@ impl<'a> Frames<'a> {
             DaemonMessage::StarredResults { results } => {
                 self.publish(FromDaemon::StarredResults { results })?;
             }
+            // A pinned listing answers a local read the same way: account-wide
+            // rows with no request id, so they need an explicit arm too.
+            DaemonMessage::PinnedResults { results } => {
+                self.publish(FromDaemon::PinnedResults { results })?;
+            }
+            // A contact search is another local read with account-wide rows.
+            DaemonMessage::ContactResults { results } => {
+                self.publish(FromDaemon::ContactResults { results })?;
+            }
             // The media jump list answers a local read the same way: rows
             // without a request id, so an explicit arm is needed or the
             // catch-all below would silently drop them.
@@ -1522,6 +1531,47 @@ mod tests {
                 if results.len() == 1
                     && results[0].message_id == "SYNTHETIC-MEDIA-1"
                     && results[0].has_media
+        ));
+    }
+
+    /// Both protocol 62 answers are account-wide rows with no request id. The
+    /// catch-all would swallow them and leave the pinned panel empty and the
+    /// forward picker blind to the address book, with no failure said.
+    #[test]
+    fn pinned_and_contact_results_are_published_not_dropped() {
+        let (sink, mut events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+
+        let _ = frames.apply(DaemonMessage::PinnedResults {
+            results: vec![oxidezap_ipc::MessageSearchHit {
+                chat_jid: "synthetic-pinned-chat@example.invalid".into(),
+                message_id: "SYNTHETIC-PINNED-1".into(),
+                snippet: "a pinned line".into(),
+                sender_jid: None,
+                timestamp_ms: 1_700_000_000_000,
+                has_media: false,
+                ..Default::default()
+            }],
+        });
+        let _ = frames.apply(DaemonMessage::ContactResults {
+            results: vec![oxidezap_ipc::ContactHit {
+                jid: "synthetic-contact@example.invalid".into(),
+                name: Some("Ana".into()),
+                ..Default::default()
+            }],
+        });
+
+        assert!(matches!(
+            events.try_recv(),
+            Ok(FromDaemon::PinnedResults { results })
+                if results.len() == 1 && results[0].message_id == "SYNTHETIC-PINNED-1"
+        ));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(FromDaemon::ContactResults { results })
+                if results.len() == 1 && results[0].name.as_deref() == Some("Ana")
         ));
     }
 

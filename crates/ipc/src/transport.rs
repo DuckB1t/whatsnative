@@ -401,7 +401,21 @@ use std::path::PathBuf;
 /// the local store. They serialize only when present and have serde defaults,
 /// so an older daemon's row still decodes in a newer window and an older
 /// window ignores the extra keys. No new frame or version bump is needed.
-pub const PROTOCOL_VERSION: u32 = 61;
+///
+/// 62 adds two local reads to the legacy IPC/GUI plane. `ClientRequest::ListPinnedMessages`
+/// is answered with `DaemonMessage::PinnedResults`, a bounded store listing of
+/// pinned messages reusing the search-hit shape: the pinned panel no longer has
+/// to piece rows together from this window's own pin events and loaded messages,
+/// so a pin from another front end or a message outside the loaded page is
+/// still a row. `ClientRequest::SearchContacts` is answered with
+/// `DaemonMessage::ContactResults`, carrying new `ContactHit` rows over the
+/// account's local address book so a destination picker can find a person by
+/// name, phone or address. Neither reaches a server directory and neither
+/// claims a total. An older daemon knows neither frame and an older window
+/// cannot decode either answer, so neither half may attach across this version.
+/// Both are legacy IPC/GUI parity only, with no wire request and no new CLI
+/// command.
+pub const PROTOCOL_VERSION: u32 = 62;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

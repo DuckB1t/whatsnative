@@ -6,6 +6,7 @@
 //! folding arriving traffic and hydrated history into a timeline, and in
 //! [`retain`] what a conversation lets go of when it is holding too much.
 
+mod contact;
 mod group_hierarchy;
 mod media;
 mod merge;
@@ -14,6 +15,7 @@ mod reactions;
 mod retain;
 mod search;
 
+pub use contact::ContactHit;
 pub use group_hierarchy::{GroupHierarchy, SubgroupKind};
 pub use media::{DownloadableMedia, MediaContent, MediaType, OutgoingMedia, PickerSticker};
 pub use message::{ChatMessage, PollContent, Resend};

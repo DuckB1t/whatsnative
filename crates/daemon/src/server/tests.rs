@@ -829,6 +829,82 @@ async fn a_media_listing_dispatches_without_a_live_connection() {
     }
 }
 
+/// The pinned listing and the contact search are local reads too: they route
+/// to the session bridge with no connection and neither action demands one.
+/// Every id and query here is synthetic.
+#[tokio::test]
+async fn pinned_and_contact_reads_dispatch_without_a_live_connection() {
+    let hub = StateHub::new();
+    let (commands, taken) = bridge(CommandOutcome::Accepted);
+    let answer = handle_request(
+        Request {
+            id: Some(78),
+            request: ClientRequest::ListPinnedMessages { limit: 12 },
+        },
+        &hub,
+        &no_plugins(),
+        &commands,
+        &outbox(),
+    )
+    .await;
+    assert!(answer.frame.is_none());
+    assert!(!answer.shutdown);
+    match taken.await.unwrap().expect("a command was dispatched") {
+        Action::ListPinnedMessages { id, limit, .. } => {
+            assert_eq!(id, 78);
+            assert_eq!(limit, 12);
+            assert!(
+                !Action::ListPinnedMessages {
+                    id,
+                    limit,
+                    answer_to: outbox()
+                }
+                .needs_network(),
+                "a store read needs no connection"
+            );
+        }
+        other => panic!("expected Action::ListPinnedMessages, got {other:?}"),
+    }
+
+    let (commands, taken) = bridge(CommandOutcome::Accepted);
+    let answer = handle_request(
+        Request {
+            id: Some(79),
+            request: ClientRequest::SearchContacts {
+                query: "ana".into(),
+                limit: 9,
+            },
+        },
+        &hub,
+        &no_plugins(),
+        &commands,
+        &outbox(),
+    )
+    .await;
+    assert!(answer.frame.is_none());
+    assert!(!answer.shutdown);
+    match taken.await.unwrap().expect("a command was dispatched") {
+        Action::SearchContacts {
+            id, query, limit, ..
+        } => {
+            assert_eq!(id, 79);
+            assert_eq!(query, "ana");
+            assert_eq!(limit, 9);
+            assert!(
+                !Action::SearchContacts {
+                    id,
+                    query,
+                    limit,
+                    answer_to: outbox()
+                }
+                .needs_network(),
+                "an address-book read needs no connection"
+            );
+        }
+        other => panic!("expected Action::SearchContacts, got {other:?}"),
+    }
+}
+
 /// Both halves of the read-receipts control reach the session as addressed
 /// work. The read publishes its answer account-wide and is acked later; the
 /// mutation gets a typed result later. Neither may be answered here, or a

@@ -9,10 +9,12 @@
 //! window already holds its bytes. There is no server total here and no
 //! pretend preview fetched behind the reader's back.
 //!
-//! There is no listing request for pins yet, so the pinned panel is derived
-//! from the `PinChanged` events this window has seen and the messages it has
-//! loaded: a pin from a different front end or a message outside the loaded
-//! page has no row here.
+//! The pinned panel used to be derived from the `PinChanged` events this
+//! window had seen and the messages it had loaded, which left a pin from a
+//! different front end or a message outside the loaded page invisible. It now
+//! reads the store through `ListPinnedMessages`, exactly like the saved and
+//! media panels: the local flag is the source of truth, not this window's
+//! event history.
 
 use gpui::{
     App, Context, Entity, FocusHandle, ObjectFit, Styled, StyledImage as _, div, img, prelude::*,
@@ -213,7 +215,7 @@ impl WhatsAppApp {
         true
     }
 
-    /// Open the pinned panel from the marks this window has observed.
+    /// Open the pinned panel and ask the store for the current rows.
     pub(super) fn open_pinned_messages(&mut self, cx: &mut Context<Self>) {
         self.close_global_search(cx);
         self.close_saved_messages(cx);
@@ -221,6 +223,7 @@ impl WhatsAppApp {
         self.pinned_messages_panel = true;
         self.keyboard_owner = Some(KeyboardOwner::PinnedMessages);
         cx.notify();
+        self.request_pinned(cx);
     }
 
     pub(super) fn close_pinned_messages(&mut self, cx: &mut Context<Self>) -> bool {
@@ -285,6 +288,46 @@ impl WhatsAppApp {
                 if let Some(failure) = failure {
                     app.notify_user(
                         what_went_wrong(crate::tr!(CouldNotLoadSavedMessages), &failure),
+                        super::notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The pinned listing is a local read: the ack only says it ran. The rows
+    /// arrive separately as `FromDaemon::PinnedResults`, like a search answer,
+    /// so a pin made by another front end turns up here too.
+    fn request_pinned(&mut self, cx: &mut Context<Self>) {
+        let Some(waiting) = self
+            .client
+            .as_ref()
+            .map(|client| client.list_pinned_messages(LIST_LIMIT))
+        else {
+            self.notify_user(
+                what_went_wrong(
+                    crate::tr!(CouldNotLoadPinnedMessages),
+                    &super::Failure::worth_retrying(crate::tr!(DaemonDisconnectedBeforeAnswer)),
+                ),
+                super::notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        cx.spawn(async move |entity, cx| {
+            let failure = match waiting.await {
+                Ok(Ok(())) => None,
+                Ok(Err(failure)) => Some(failure),
+                Err(_) => Some(super::Failure::worth_retrying(crate::tr!(
+                    DaemonDisconnectedBeforeAnswer
+                ))),
+            };
+            let _ = entity.update(cx, |app, cx| {
+                if let Some(failure) = failure {
+                    app.notify_user(
+                        what_went_wrong(crate::tr!(CouldNotLoadPinnedMessages), &failure),
                         super::notices::Tone::Problem,
                         cx,
                     );
@@ -409,34 +452,11 @@ impl WhatsAppApp {
             .collect()
     }
 
-    /// Rows for the pinned panel, newest first. Only chats and messages this
-    /// window has loaded can be named here; see the module note.
+    /// Rows for the pinned panel, newest first, straight from the store's
+    /// listing. A chat not yet loaded appears by its address rather than being
+    /// dropped, which is the whole point of asking the store.
     pub(super) fn pinned_rows(&self) -> Vec<search::SearchResultRow> {
-        let hits: Vec<MessageSearchHit> = self
-            .pinned_messages
-            .iter()
-            .filter(|(_, pinned)| **pinned)
-            .filter_map(|((chat_jid, message_id), _)| {
-                let message = self
-                    .chat_named(chat_jid)?
-                    .messages
-                    .iter()
-                    .find(|message| &message.id == message_id)?;
-                Some(MessageSearchHit {
-                    chat_jid: chat_jid.clone(),
-                    message_id: message_id.clone(),
-                    snippet: message.preview_text(),
-                    sender_jid: None,
-                    timestamp_ms: message.timestamp.timestamp_millis(),
-                    has_media: message.media.is_some(),
-                    ..Default::default()
-                })
-            })
-            .collect();
-        let mut rows = self.rows_for_hits(hits.iter());
-        rows.sort_unstable_by_key(|row| std::cmp::Reverse(row.timestamp_ms));
-        rows.truncate(LIST_LIMIT);
-        rows
+        self.rows_for_hits(self.pinned_results.iter())
     }
 }
 
@@ -834,7 +854,7 @@ mod tests {
                     cx
                 ));
                 app.adopt_starred_results(vec![saved_hit("SAVED-1", 1_700_000_000_000)], cx);
-                app.adopt_pin_changed(CHAT, "PINNED-1", true, cx);
+                app.adopt_pinned_results(vec![saved_hit("PINNED-1", 1_700_000_001_000)], cx);
                 app.open_saved_messages(cx);
             });
         });
