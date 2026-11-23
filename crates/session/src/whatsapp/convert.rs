@@ -156,6 +156,11 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
         quoted,
         revoked: stored.revoked,
         edited: stored.edited_at.is_some(),
+        // The durable row is the source of truth for these two. A front end's
+        // overlay records what happened since it connected; hydration must not
+        // forget a mark set in an earlier session.
+        starred: stored.starred,
+        pinned: stored.pinned,
         system,
         poll,
         business,
@@ -330,6 +335,18 @@ mod tests {
         let revoked = stored_to_chat_message(row);
         assert_eq!(revoked.content, "[Message deleted]");
         assert!(revoked.quoted.is_none());
+    }
+
+    #[test]
+    fn a_hydrated_row_carries_the_durable_star_and_pin() {
+        let mut row = stored_poll_creation();
+        assert!(!stored_to_chat_message(row.clone()).starred);
+        assert!(!stored_to_chat_message(row.clone()).pinned);
+        row.starred = true;
+        row.pinned = true;
+        let message = stored_to_chat_message(row);
+        assert!(message.starred);
+        assert!(message.pinned);
     }
 
     #[test]

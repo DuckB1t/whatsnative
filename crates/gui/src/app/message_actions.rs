@@ -93,9 +93,10 @@ impl WhatsAppApp {
 
     /// Mark a message optimistically and ask the account to make it true.
     ///
-    /// `ChatMessage` carries no starred flag, so the flag lives in this
-    /// window's overlay. A refusal takes the mark back and says why; an
-    /// acknowledgement leaves it until the account-wide `StarChanged` arrives.
+    /// The row already carries the durable star from hydration. This overlay
+    /// only records changes since the window connected, so an explicit false
+    /// can beat a hydrated true when the reader removes a star after reload.
+    /// A refusal takes the mark back and says why.
     pub(super) fn toggle_starred(
         &mut self,
         chat_jid: &str,
@@ -105,10 +106,8 @@ impl WhatsAppApp {
     ) {
         let chat_jid = chat_jid.to_string();
         let key = (chat_jid.clone(), message_id.to_string());
-        if starred {
-            self.starred_messages.insert(key.clone());
-        } else {
-            self.starred_messages.remove(&key);
+        self.starred_messages.insert(key.clone(), starred);
+        if !starred {
             self.saved_messages
                 .retain(|hit| hit.chat_jid != chat_jid || hit.message_id != message_id);
         }
@@ -119,7 +118,7 @@ impl WhatsAppApp {
             .as_ref()
             .map(|client| client.set_starred(&chat_jid, message_id, starred))
         else {
-            self.starred_messages.remove(&key);
+            self.starred_messages.insert(key, !starred);
             self.invalidate_message_cache(&chat_jid, cx);
             self.notify_user(
                 what_went_wrong(
@@ -141,11 +140,7 @@ impl WhatsAppApp {
             };
             let _ = entity.update(cx, |app, cx| {
                 if let Some(failure) = failure {
-                    if starred {
-                        app.starred_messages.remove(&key);
-                    } else {
-                        app.starred_messages.insert(key);
-                    }
+                    app.starred_messages.insert(key, !starred);
                     app.invalidate_message_cache(&chat_jid, cx);
                     app.notify_user(
                         what_went_wrong(crate::tr!(CouldNotStarMessage), &failure),
@@ -167,14 +162,11 @@ impl WhatsAppApp {
         cx: &mut Context<Self>,
     ) {
         let key = (chat_jid.to_string(), message_id.to_string());
-        let changed = self.starred_messages.contains(&key) != starred;
+        let changed = self.starred_messages.insert(key, starred) != Some(starred);
         let rows_before = self.saved_messages.len();
-        if starred {
-            self.starred_messages.insert(key);
-        } else {
-            self.starred_messages.remove(&key);
+        if !starred {
             // The listing can still hold a row even when this window never
-            // drew the star — a front end that opened after the star was set
+            // drew the star: a front end that opened after the star was set
             // has the rows but no overlay bit to flip.
             self.saved_messages
                 .retain(|hit| hit.chat_jid != chat_jid || hit.message_id != message_id);
@@ -188,17 +180,22 @@ impl WhatsAppApp {
     }
 
     /// Whether a row should draw its star, asked while the timeline is built.
-    pub(crate) fn is_starred(&self, chat_jid: &str, message_id: &str) -> bool {
+    ///
+    /// The hydrated flag is the fallback; an explicit overlay value, including
+    /// false, wins so a recent change beats the row loaded before it.
+    pub(crate) fn is_starred(&self, chat_jid: &str, message_id: &str, from_store: bool) -> bool {
         self.starred_messages
-            .contains(&(chat_jid.to_string(), message_id.to_string()))
+            .get(&(chat_jid.to_string(), message_id.to_string()))
+            .copied()
+            .unwrap_or(from_store)
     }
 
     /// Mark a message optimistically and ask the account to pin it.
     ///
     /// The library's longest pin is 30 days, so the label and the request both
-    /// say "pin" rather than promising a permanent place. Like a star, the
-    /// flag is this window's overlay: a refusal takes it back, while the
-    /// account-wide `PinChanged` leaves the authoritative mark in place.
+    /// say "pin" rather than promising a permanent place. Like a star, the row
+    /// already carries the durable pin from hydration and this overlay only
+    /// holds changes seen since. A refusal takes the mark back and says why.
     pub(super) fn toggle_pinned(
         &mut self,
         chat_jid: &str,
@@ -208,11 +205,7 @@ impl WhatsAppApp {
     ) {
         let chat_jid = chat_jid.to_string();
         let key = (chat_jid.clone(), message_id.to_string());
-        if pinned {
-            self.pinned_messages.insert(key.clone());
-        } else {
-            self.pinned_messages.remove(&key);
-        }
+        self.pinned_messages.insert(key.clone(), pinned);
         self.invalidate_message_cache(&chat_jid, cx);
         cx.notify();
         let Some(waiting) = self
@@ -220,11 +213,7 @@ impl WhatsAppApp {
             .as_ref()
             .map(|client| client.set_message_pinned(&chat_jid, message_id, pinned))
         else {
-            if pinned {
-                self.pinned_messages.remove(&key);
-            } else {
-                self.pinned_messages.insert(key);
-            }
+            self.pinned_messages.insert(key, !pinned);
             self.invalidate_message_cache(&chat_jid, cx);
             self.notify_user(
                 what_went_wrong(
@@ -246,11 +235,7 @@ impl WhatsAppApp {
             };
             let _ = entity.update(cx, |app, cx| {
                 if let Some(failure) = failure {
-                    if pinned {
-                        app.pinned_messages.remove(&key);
-                    } else {
-                        app.pinned_messages.insert(key);
-                    }
+                    app.pinned_messages.insert(key, !pinned);
                     app.invalidate_message_cache(&chat_jid, cx);
                     app.notify_user(
                         what_went_wrong(crate::tr!(CouldNotPinMessage), &failure),
@@ -272,22 +257,20 @@ impl WhatsAppApp {
         cx: &mut Context<Self>,
     ) {
         let key = (chat_jid.to_string(), message_id.to_string());
-        if self.pinned_messages.contains(&key) == pinned {
+        if self.pinned_messages.insert(key, pinned) == Some(pinned) {
             return;
-        }
-        if pinned {
-            self.pinned_messages.insert(key);
-        } else {
-            self.pinned_messages.remove(&key);
         }
         self.invalidate_message_cache(chat_jid, cx);
         cx.notify();
     }
 
     /// Whether a row should draw its pin, asked while the timeline is built.
-    pub(crate) fn is_pinned(&self, chat_jid: &str, message_id: &str) -> bool {
+    /// An explicit overlay value, including false, beats the hydrated row.
+    pub(crate) fn is_pinned(&self, chat_jid: &str, message_id: &str, from_store: bool) -> bool {
         self.pinned_messages
-            .contains(&(chat_jid.to_string(), message_id.to_string()))
+            .get(&(chat_jid.to_string(), message_id.to_string()))
+            .copied()
+            .unwrap_or(from_store)
     }
 
     /// Keep the saved panel's rows after a store-wide listing.
@@ -788,6 +771,35 @@ mod tests {
         message
     }
 
+    /// The overlay is deliberately tri-state: an absent key falls back to the
+    /// hydrated row, while an explicit false beats a hydrated true. Without
+    /// that, removing a star after reload would keep drawing it.
+    #[gpui::test]
+    fn star_and_pin_overlays_beat_the_hydrated_row(cx: &mut gpui::TestAppContext) {
+        let (mut cx, app) = delete_fixture(cx);
+        cx.update(|_window, cx| {
+            app.update(cx, |app, cx| {
+                // Nothing seen since connect: the durable row answers.
+                let chat = "peer@example.invalid";
+                assert!(!app.is_starred(chat, "SENT-1", false));
+                assert!(app.is_starred(chat, "SENT-1", true));
+                assert!(!app.is_pinned(chat, "SENT-1", false));
+                assert!(app.is_pinned(chat, "SENT-1", true));
+
+                // An observed change wins in both directions, false included.
+                app.adopt_star_changed(chat, "SENT-1", false, cx);
+                assert!(!app.is_starred(chat, "SENT-1", true));
+                app.adopt_star_changed(chat, "SENT-1", true, cx);
+                assert!(app.is_starred(chat, "SENT-1", false));
+
+                app.adopt_pin_changed(chat, "SENT-1", false, cx);
+                assert!(!app.is_pinned(chat, "SENT-1", true));
+                app.adopt_pin_changed(chat, "SENT-1", true, cx);
+                assert!(app.is_pinned(chat, "SENT-1", false));
+            });
+        });
+    }
+
     #[gpui::test]
     fn delete_confirmation_identifies_target_and_cancel_never_attempts_revoke(
         cx: &mut gpui::TestAppContext,
@@ -982,7 +994,7 @@ mod tests {
         cx.update(|_window, cx| {
             app.update(cx, |app, cx| {
                 app.adopt_pin_changed("peer@example.invalid", "SENT-1", true, cx);
-                assert!(app.is_pinned("peer@example.invalid", "SENT-1"));
+                assert!(app.is_pinned("peer@example.invalid", "SENT-1", false));
                 assert_eq!(app.pinned_messages.len(), 1);
 
                 // A repeated broadcast cannot turn one pin into two.
@@ -990,11 +1002,11 @@ mod tests {
                 assert_eq!(app.pinned_messages.len(), 1);
 
                 app.adopt_pin_changed("other@example.invalid", "SENT-2", true, cx);
-                assert!(app.is_pinned("other@example.invalid", "SENT-2"));
+                assert!(app.is_pinned("other@example.invalid", "SENT-2", false));
 
                 app.adopt_pin_changed("peer@example.invalid", "SENT-1", false, cx);
-                assert!(!app.is_pinned("peer@example.invalid", "SENT-1"));
-                assert!(app.is_pinned("other@example.invalid", "SENT-2"));
+                assert!(!app.is_pinned("peer@example.invalid", "SENT-1", false));
+                assert!(app.is_pinned("other@example.invalid", "SENT-2", false));
             });
         });
     }
@@ -1008,7 +1020,7 @@ mod tests {
         cx.update(|_window, cx| {
             app.update(cx, |app, cx| {
                 app.toggle_pinned("peer@example.invalid", "SENT-1", true, cx);
-                assert!(!app.is_pinned("peer@example.invalid", "SENT-1"));
+                assert!(!app.is_pinned("peer@example.invalid", "SENT-1", false));
                 assert!(
                     app.notices()
                         .read(cx)
@@ -1017,7 +1029,7 @@ mod tests {
 
                 app.adopt_pin_changed("peer@example.invalid", "SENT-2", true, cx);
                 app.toggle_pinned("peer@example.invalid", "SENT-2", false, cx);
-                assert!(app.is_pinned("peer@example.invalid", "SENT-2"));
+                assert!(app.is_pinned("peer@example.invalid", "SENT-2", false));
             });
         });
     }

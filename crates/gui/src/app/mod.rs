@@ -1207,13 +1207,15 @@ pub struct WhatsAppApp {
     /// the reader types again or closes the overlay, so an old keystroke
     /// cannot send a question the box no longer holds.
     global_search_debounce: Option<Task<()>>,
-    /// Starred flags this window has drawn, whether they came from its own
-    /// optimistic mark or from an account-wide `StarChanged`. `ChatMessage`
-    /// carries no starred field, so the display state belongs here.
-    starred_messages: HashSet<(String, String)>,
-    /// Pinned flags from this window's actions and account-wide `PinChanged`
-    /// events. The same display overlay as stars: the row has no pin field.
-    pinned_messages: HashSet<(String, String)>,
+    /// Starred flags this window has seen change, from its own optimistic mark
+    /// or an account-wide `StarChanged`. Presence with a bool means we know the
+    /// state; absence means fall back to the hydrated `ChatMessage::starred`.
+    /// The explicit false matters: a star removed after reload must beat the
+    /// true still sitting in the row it loaded from.
+    starred_messages: HashMap<(String, String), bool>,
+    /// Same tri-state overlay as stars, but for message pins. Chat pinning is
+    /// a different field on the conversation and does not live here.
+    pinned_messages: HashMap<(String, String), bool>,
     /// Rows from the latest store-wide starred listing, newest first. Kept
     /// while the saved panel is closed so reopening it is not briefly empty.
     saved_messages: Vec<oxidezap_ipc::MessageSearchHit>,
@@ -1845,8 +1847,8 @@ impl WhatsAppApp {
             delete_confirmation: None,
             forward_picker: None,
             global_search_debounce: None,
-            starred_messages: HashSet::new(),
-            pinned_messages: HashSet::new(),
+            starred_messages: HashMap::new(),
+            pinned_messages: HashMap::new(),
             saved_messages: Vec::new(),
             media_messages: Vec::new(),
             saved_messages_panel: false,

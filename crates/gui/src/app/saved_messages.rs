@@ -415,7 +415,8 @@ impl WhatsAppApp {
         let hits: Vec<MessageSearchHit> = self
             .pinned_messages
             .iter()
-            .filter_map(|(chat_jid, message_id)| {
+            .filter(|(_, pinned)| **pinned)
+            .filter_map(|((chat_jid, message_id), _)| {
                 let message = self
                     .chat_named(chat_jid)?
                     .messages

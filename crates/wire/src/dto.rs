@@ -50,6 +50,11 @@ pub struct MessageDto {
     /// "pending", "sent", "delivered", "read", "failed"
     pub status: String,
     pub is_starred: bool,
+    /// Message-level pin, distinct from `ChatDto::is_pinned` (which pins a
+    /// conversation). Defaults so an older daemon's frame still decodes; no
+    /// protocol bump, same rule as the optional media facts on a search hit.
+    #[serde(default)]
+    pub is_pinned: bool,
     pub reply_to_id: Option<String>,
     pub media: Option<MediaDto>,
     pub reactions: Vec<ReactionDto>,
@@ -559,7 +564,22 @@ pub struct PostToChannel {
 
 #[cfg(test)]
 mod tests {
-    use super::CallEventDto;
+    use super::{CallEventDto, MessageDto};
+
+    #[test]
+    fn a_message_from_an_older_daemon_needs_no_pin_field() {
+        // The star flag has always been on the frame. The pin flag is new and
+        // serde-defaulted, so an older daemon's line still decodes as unpinned.
+        let json = r#"{
+            "id":"m1","chat_jid":"a@example.invalid","sender_jid":"b@example.invalid",
+            "from_me":false,"timestamp_ms":1,"text":"hello","kind":"text",
+            "status":"sent","is_starred":true,"reply_to_id":null,"media":null,
+            "reactions":[]
+        }"#;
+        let message: MessageDto = serde_json::from_str(json).expect("old frame still reads");
+        assert!(message.is_starred);
+        assert!(!message.is_pinned);
+    }
 
     #[test]
     fn a_call_from_an_older_daemon_needs_no_group_fields() {

@@ -56,6 +56,16 @@ pub struct ChatMessage {
     /// The store has accepted at least one edit to this message.
     #[serde(default, skip_serializing_if = "is_false")]
     pub edited: bool,
+    /// Whether this message is starred in the store. Hydrated from the durable
+    /// row so a bubble drawn on reload carries the same mark as one drawn from
+    /// a live `StarChanged`. A front end may still keep an explicit overlay
+    /// for changes this window has seen; this is the fallback, not that log.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub starred: bool,
+    /// Whether this message is pinned in the store. Same rule as [`Self::starred`]:
+    /// the durable fact, not the window's record of recent pin actions.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pinned: bool,
     /// Set when nobody typed this: a call record, a group change. Such a row
     /// has no author and no ticks, and renders centred rather than as a bubble.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -133,6 +143,8 @@ impl ChatMessage {
             quoted: None,
             revoked: false,
             edited: false,
+            starred: false,
+            pinned: false,
             system: None,
             poll: None,
             business: None,
@@ -167,6 +179,8 @@ impl ChatMessage {
             quoted: None,
             revoked: false,
             edited: false,
+            starred: false,
+            pinned: false,
             system: None,
             poll: None,
             business: None,
