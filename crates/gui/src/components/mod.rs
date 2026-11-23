@@ -9,6 +9,8 @@ mod chat_item;
 mod chat_list;
 mod conversation_search;
 mod emoji_picker;
+
+pub(crate) use emoji_picker::{EmojiPicked, EmojiPicker};
 mod empty_state;
 mod icons;
 mod input_area_view;

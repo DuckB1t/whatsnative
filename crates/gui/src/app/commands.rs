@@ -365,6 +365,9 @@ impl WhatsAppApp {
             self.decline_waiting_call(cx);
             return;
         }
+        if self.close_full_reaction_picker(cx) {
+            return;
+        }
         if self.cancel_forward(cx) {
             return;
         }

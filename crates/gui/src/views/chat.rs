@@ -306,6 +306,7 @@ pub fn render_connected_view(
         saved_messages: false,
         pinned_messages: false,
         media_messages: false,
+        reaction_picker: false,
         // The card floats above this view rather than inside it, so the root
         // is what knows whether one was drawn. See `WhatsAppApp::render`.
         call_card: false,

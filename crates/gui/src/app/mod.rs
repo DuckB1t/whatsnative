@@ -168,6 +168,9 @@ enum KeyboardOwner {
     PastePreview,
     /// The fullscreen viewer, which owns the arrow keys while it is up.
     Viewer,
+    /// The searchable emoji table opened from a message's react strip. Its
+    /// own search box owns the keyboard until an emoji is picked or it closes.
+    ReactionPicker,
     /// A screen with its own controls — Settings. It is handed the window's
     /// own handle rather than any control of its own: the way *out* of
     /// Settings is Escape, which is a window-level action, and the first
@@ -209,6 +212,8 @@ pub struct KeyboardSurfaces {
     pub pinned_messages: bool,
     /// The media messages jump list, over the same body.
     pub media_messages: bool,
+    /// The searchable emoji table reacting to a message.
+    pub reaction_picker: bool,
     /// The call card, which only the connected screens float.
     pub call_card: bool,
 }
@@ -491,8 +496,8 @@ pub struct PinMessage {
 }
 
 use crate::components::{
-    AccountSummary, InputAreaEvent, InputAreaView, MentionCandidate, PastePreviewProps, ReplyDraft,
-    new_timeline_state, render_paste_preview,
+    AccountSummary, EmojiPicked, EmojiPicker, InputAreaEvent, InputAreaView, MentionCandidate,
+    PastePreviewProps, ReplyDraft, new_timeline_state, render_paste_preview,
 };
 use crate::retained_image::RetainedImage;
 use log::{debug, error, info, warn};
@@ -867,6 +872,8 @@ pub struct WhatsAppApp {
     message_delete_focus: FocusHandle,
     /// Focus target for the chat picker a forward opens.
     forward_picker_focus: FocusHandle,
+    /// Focus target for the full emoji table opened from a react strip.
+    reaction_picker_focus: FocusHandle,
     /// Focus target for the new chat dialog, which takes the keyboard on its
     /// own so Escape closes this surface and not the one underneath it.
     new_chat_focus: FocusHandle,
@@ -1199,6 +1206,13 @@ pub struct WhatsAppApp {
     /// the strip is drawn inline under its bubble, and two open strips would
     /// each move the timeline the other measured against.
     reaction_picker_for: Option<String>,
+    /// The message the full emoji picker is reacting to. Separate from the
+    /// quick strip: opening the big picker closes the strip but keeps the
+    /// target, and picking an emoji must not touch some other row.
+    reaction_picker_full_target: Option<String>,
+    /// Created on first use, because `EmojiPicker` needs a window for its
+    /// search field and the application is built without one.
+    reaction_emoji_picker: Option<Entity<EmojiPicker>>,
     delete_confirmation: Option<message_actions::DeleteConfirmation>,
     /// A forward waiting for its destination chat. Holds the source and id so
     /// the picker itself never needs to reach back into a timeline.
@@ -1735,6 +1749,7 @@ impl WhatsAppApp {
             paste_preview_focus: cx.focus_handle(),
             message_delete_focus: cx.focus_handle(),
             forward_picker_focus: cx.focus_handle(),
+            reaction_picker_focus: cx.focus_handle(),
             new_chat_focus: cx.focus_handle(),
             global_search_focus: cx.focus_handle(),
             saved_messages_focus: cx.focus_handle(),
@@ -1844,6 +1859,8 @@ impl WhatsAppApp {
             edit_generation: 0,
             pending_edits: std::collections::HashSet::new(),
             reaction_picker_for: None,
+            reaction_picker_full_target: None,
+            reaction_emoji_picker: None,
             delete_confirmation: None,
             forward_picker: None,
             global_search_debounce: None,
@@ -2980,9 +2997,17 @@ impl WhatsAppApp {
             }
             for roster in self.group_rosters.values() {
                 for member in &roster.members {
-                    if let Some(name) = &member.name {
-                        add(name, &member.jid);
-                    }
+                    // A nameless member still has an address, and mentioning
+                    // them is about the address. Fall back to the JID's local
+                    // part rather than dropping them from the list entirely:
+                    // a name may never arrive, but the mention must remain
+                    // possible. The renderer can show the raw local part until
+                    // a name shows up; inventing one would be worse.
+                    let handle = member
+                        .name
+                        .as_deref()
+                        .unwrap_or_else(|| member.jid.split('@').next().unwrap_or(&member.jid));
+                    add(handle, &member.jid);
                 }
             }
         }
@@ -2992,7 +3017,9 @@ impl WhatsAppApp {
                 .cmp(&b.handle.to_lowercase())
                 .then_with(|| a.jid.cmp(&b.jid))
         });
-        candidates.truncate(50);
+        // No truncation here. The input area filters by the typed fragment and
+        // takes six matches, so a hard 50 here would silently hide people in a
+        // large roster from anyone whose name sorted late. Let the filter decide.
         candidates
     }
 
@@ -4982,8 +5009,8 @@ impl Render for WhatsAppApp {
             .on_action(cx.listener(|app, retry: &RetryMessage, window, cx| {
                 app.retry_send(&retry.id, window, cx);
             }))
-            .on_action(cx.listener(|app, react: &ReactToMessage, window, cx| {
-                app.toggle_reaction(&react.id, &react.emoji, window, cx);
+            .on_action(cx.listener(|app, react: &ReactToMessage, _, cx| {
+                app.toggle_reaction(&react.id, &react.emoji, cx);
             }))
             .on_action(cx.listener(|app, delete: &DeleteSentMessage, _window, cx| {
                 app.begin_message_delete(&delete.jid, &delete.id, delete.for_everyone, cx);
@@ -5232,6 +5259,24 @@ impl Render for WhatsAppApp {
         });
         let forward_picker_open = forward_picker.is_some();
 
+        // The full emoji table for a reaction, built on first open because its
+        // search field needs a live window. It shares the modal layer with the
+        // forward picker and the confirmation dialogs.
+        let reaction_picker = self
+            .full_reaction_target()
+            .and(self.reaction_emoji_picker.as_ref())
+            .map(|picker| {
+                timeline_ctl::render_full_reaction_picker(
+                    picker,
+                    &cx.entity(),
+                    &self.reaction_picker_focus,
+                    window,
+                    cx,
+                )
+                .into_any_element()
+            });
+        let reaction_picker_open = reaction_picker.is_some();
+
         // Outside the Settings-versus-conversation branch on purpose. The
         // card and the focus it takes were built by the conversation view
         // alone, so a call arriving while Settings was open rang at the far
@@ -5262,7 +5307,8 @@ impl Render for WhatsAppApp {
             || saved_messages_open
             || pinned_messages_open
             || media_messages_open
-            || forward_picker_open;
+            || forward_picker_open
+            || reaction_picker_open;
         let call_overlay = (connected && !modal_open)
             .then(|| render_call_overlay(self, window, cx))
             .flatten();
@@ -5318,6 +5364,7 @@ impl Render for WhatsAppApp {
         .children(pinned_messages)
         .children(media_messages)
         .children(forward_picker)
+        .children(reaction_picker)
         .children(call_overlay)
         .child(self.notices().clone())
         // Cached views report their surfaces in prepaint. Move focus after
@@ -5339,6 +5386,7 @@ impl Render for WhatsAppApp {
                         app.keyboard_surfaces.pinned_messages = pinned_messages_open;
                         app.keyboard_surfaces.media_messages = media_messages_open;
                         app.keyboard_surfaces.forward_picker = forward_picker_open;
+                        app.keyboard_surfaces.reaction_picker = reaction_picker_open;
                         app.keyboard_surfaces.new_chat_dialog = new_chat_dialog_open;
                     });
                     let entity = entity.downgrade();
@@ -7135,5 +7183,59 @@ mod screenshot_preview {
                 app.update(cx, |app, cx| app.open_shortcuts(window, cx));
             },
         );
+    }
+
+    /// A large roster must not be cut at fifty, and a member who never had a
+    /// name still has to be mentionable by their address.
+    #[gpui::test]
+    fn mention_candidates_keep_late_names_and_nameless_members(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::init(cx);
+        });
+        let app = cx.update(|cx| cx.new(WhatsAppApp::new));
+        app.update(cx, |app, _| {
+            use oxidezap_core::{GroupMember, GroupRoster};
+            let members = (0..60)
+                .map(|n| GroupMember {
+                    jid: format!("user{n:03}@example.invalid"),
+                    name: Some(format!("Zed {n:03}")),
+                    is_self: false,
+                })
+                .collect();
+            app.group_rosters.insert(
+                "group@example.invalid".into(),
+                GroupRoster {
+                    jid: "group@example.invalid".into(),
+                    members,
+                },
+            );
+            // A nameless member with an unusual address; the local part is
+            // still a usable handle, and dropping them would make them
+            // unmentionable in this window.
+            let roster = app
+                .group_rosters
+                .get_mut("group@example.invalid")
+                .expect("roster just inserted");
+            roster.members.push(GroupMember {
+                jid: "9898_ABC@example.invalid".into(),
+                name: None,
+                is_self: false,
+            });
+        });
+        app.update(cx, |app, _| {
+            let candidates = app.mention_candidates();
+            assert_eq!(candidates.len(), 61, "no silent truncation at fifty");
+            assert!(
+                candidates.iter().any(|c| c.handle == "Zed 059"),
+                "the last name alphabetically is still present"
+            );
+            assert!(
+                candidates
+                    .iter()
+                    .any(|c| c.jid == "9898_ABC@example.invalid" && c.handle == "9898_ABC"),
+                "a nameless member is addressed by their JID's local part"
+            );
+        });
     }
 }

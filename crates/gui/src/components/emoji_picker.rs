@@ -26,9 +26,9 @@ const TONES: [SkinTone; 6] = [
     SkinTone::Dark,
 ];
 
-pub(super) struct EmojiPicked(pub &'static str);
+pub(crate) struct EmojiPicked(pub &'static str);
 
-pub(super) struct EmojiPicker {
+pub(crate) struct EmojiPicker {
     columns: usize,
     rows: f32,
     /// The side of one emoji cell, when the popover has chosen one.

@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 
 use gpui::{
-    App, Entity, IntoElement, ParentElement, SharedString, Styled, div, prelude::FluentBuilder as _,
+    App, Entity, InteractiveElement as _, IntoElement, ParentElement, SharedString, Styled, div,
+    prelude::FluentBuilder as _,
 };
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::ButtonVariants as _;
@@ -111,12 +112,34 @@ pub fn render_reaction_picker(
             .xsmall()
             .label(emoji)
             .tooltip(crate::tr!(react_emoji, emoji))
-            .on_click(move |_, window, cx| {
+            .on_click(move |_, _, cx| {
                 picker_entity.update(cx, |app, cx| {
-                    app.toggle_reaction(&picker_id, &picker_emoji, window, cx)
+                    app.toggle_reaction(&picker_id, &picker_emoji, cx)
                 });
             })
         }))
+        // The six common ones cover a tap. This is the route to the full
+        // searchable table for the emoji nobody thought to put in the strip;
+        // it opens an app-level overlay because a uniform list inside the
+        // virtualised timeline has no stable viewport to measure against.
+        .child({
+            let more_entity = entity.clone();
+            let selector_id = message_id.to_string();
+            let more_id = message_id.to_string();
+            gpui_component::button::Button::new(SharedString::from(format!(
+                "react-more-{message_id}"
+            )))
+            .debug_selector(move || format!("react-more-{selector_id}"))
+            .ghost()
+            .xsmall()
+            .label(crate::tr!(More))
+            .tooltip(crate::tr!(ChooseEmoji))
+            .on_click(move |_, window, cx| {
+                more_entity.update(cx, |app, cx| {
+                    app.open_full_reaction_picker(&more_id, window, cx)
+                });
+            })
+        })
 }
 
 /// React, reply and copy, revealed on hover.

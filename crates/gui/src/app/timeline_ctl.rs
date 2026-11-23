@@ -1,6 +1,10 @@
 //! Acting on a message: replying, retrying, reacting, jumping to a quote.
 
 use super::*;
+use gpui::InteractiveElement as _;
+use gpui_component::ActiveTheme as _;
+use gpui_component::Sizable as _;
+use gpui_component::button::ButtonVariants as _;
 use oxidezap_core::{ChannelReact, ChannelVotePoll};
 
 /// [`Resend`] with the message let go of.
@@ -319,12 +323,65 @@ impl WhatsAppApp {
     pub fn toggle_reaction_picker(&mut self, message_id: &str, cx: &mut Context<Self>) {
         let open = self.reaction_picker_for.as_deref() == Some(message_id);
         self.reaction_picker_for = (!open).then(|| message_id.to_string());
+        self.reaction_picker_full_target = None;
         // The strip moves every row below it, so the cached measurements the
         // list laid out against are laid out against a timeline without it.
         if let Some(jid) = self.selected_chat_jid() {
             self.invalidate_message_cache(&jid, cx);
         }
         cx.notify();
+    }
+
+    /// Build the full picker on first use. Its search field needs a window,
+    /// which the application constructor does not have, so this is called
+    /// from the click that opens the overlay instead.
+    fn ensure_reaction_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.reaction_emoji_picker.is_some() {
+            return;
+        }
+        let picker = cx.new(|cx| EmojiPicker::new(window, cx));
+        cx.subscribe(&picker, |this, _, event: &EmojiPicked, cx| {
+            // A target means the overlay is still open. Picking sends through
+            // the same path as the quick strip, then closes the overlay.
+            let Some(target) = this.reaction_picker_full_target.take() else {
+                return;
+            };
+            this.toggle_reaction(&target, event.0, cx);
+        })
+        .detach();
+        self.reaction_emoji_picker = Some(picker);
+    }
+
+    /// Replace the six-button strip with the searchable emoji table for one
+    /// message. The target is captured here, not read from the picker, so a
+    /// pick can never land on whichever bubble happens to be selected later.
+    pub fn open_full_reaction_picker(
+        &mut self,
+        message_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure_reaction_picker(window, cx);
+        self.reaction_picker_for = None;
+        self.reaction_picker_full_target = Some(message_id.to_string());
+        if let Some(jid) = self.selected_chat_jid() {
+            self.invalidate_message_cache(&jid, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn close_full_reaction_picker(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.reaction_picker_full_target.take().is_some() {
+            self.reaction_picker_for = None;
+            cx.notify();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn full_reaction_target(&self) -> Option<&str> {
+        self.reaction_picker_full_target.as_deref()
     }
 
     /// Send `emoji` as our reaction to `message_id`, or take ours back when
@@ -335,14 +392,7 @@ impl WhatsAppApp {
     /// own sender is the LID first, which is the canonical form the echo
     /// carries — stamping the phone number beside it would draw one person
     /// as two until the next history load.
-    pub fn toggle_reaction(
-        &mut self,
-        message_id: &str,
-        emoji: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let _ = window;
+    pub fn toggle_reaction(&mut self, message_id: &str, emoji: &str, cx: &mut Context<Self>) {
         // Same rule as the composer: in the offline state the history is
         // readable and nothing else, and a tap that silently went nowhere
         // would leave the optimistic row as a lie.
@@ -434,8 +484,88 @@ impl WhatsAppApp {
             self.invalidate_message_cache(&chat_jid, cx);
         }
         self.reaction_picker_for = None;
+        self.reaction_picker_full_target = None;
         cx.notify();
     }
+}
+
+/// The full emoji table as a modal over the conversation. Sits at the app
+/// level rather than under the bubble because the timeline virtualises rows:
+/// a popover anchored to one would lose its anchor the moment the list moved.
+pub(super) fn render_full_reaction_picker(
+    picker: &Entity<EmojiPicker>,
+    app: &Entity<WhatsAppApp>,
+    focus: &FocusHandle,
+    window: &mut Window,
+    cx: &mut Context<WhatsAppApp>,
+) -> impl IntoElement {
+    let metrics = cx.product().metrics;
+    // Eleven across, like the composer's own picker, sized to the viewport so
+    // the grid is usable on a phone and does not swallow a whole desktop.
+    const EMOJI_ACROSS: usize = 11;
+    let viewport = window.viewport_size();
+    let width = (viewport.width * 0.5)
+        .clamp(metrics.icon_button() * 14.0, metrics.icon_button() * 34.0)
+        .min(viewport.width - metrics.space_xl());
+    let height = (viewport.height * 0.6)
+        .max(metrics.icon_button() * 11.0)
+        .min(viewport.height - metrics.space_xl());
+    let emoji_cell = width / EMOJI_ACROSS as f32;
+    picker.update(cx, |table, cx| {
+        if table.fit(
+            EMOJI_ACROSS,
+            ((height - metrics.icon_button() * 5.0) / emoji_cell).floor(),
+            emoji_cell,
+        ) {
+            cx.notify();
+        }
+    });
+    let close_app = app.clone();
+
+    div()
+        .id("full-reaction-picker")
+        .debug_selector(|| "full-reaction-picker".into())
+        .track_focus(focus)
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p(metrics.space_xl())
+        .bg(crate::components::parts::scrim(cx).opacity(0.82))
+        .on_scroll(|_, _, cx| cx.stop_propagation())
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(
+            div()
+                .w(width)
+                .h(height)
+                .p(metrics.space_md())
+                .rounded(metrics.radius_lg())
+                .bg(cx.theme().background)
+                .flex()
+                .flex_col()
+                .gap(metrics.space_sm())
+                .child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .items_center()
+                        .child(crate::tr!(ChooseEmoji))
+                        .child(
+                            gpui_component::button::Button::new("full-reaction-close")
+                                .debug_selector(|| "full-reaction-close".into())
+                                .ghost()
+                                .xsmall()
+                                .icon(gpui_component::IconName::Close)
+                                .on_click(move |_, _, cx| {
+                                    close_app.update(cx, |app, cx| {
+                                        app.close_full_reaction_picker(cx);
+                                    });
+                                }),
+                        ),
+                )
+                .child(picker.clone().into_any_element()),
+        )
 }
 
 #[cfg(test)]
@@ -449,5 +579,24 @@ mod tests {
         assert!(!is_channel_jid("155555500001@s.whatsapp.net"));
         assert!(!is_channel_jid("status@broadcast"));
         assert!(!is_channel_jid("not a jid"));
+    }
+
+    /// The full picker's target is taken only on close, so a pick cannot land
+    /// on a different message than the one whose strip opened the table.
+    #[gpui::test]
+    fn full_reaction_picker_closes_once_and_clears_its_target(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::init(cx);
+        });
+        let app = cx.update(|cx| cx.new(WhatsAppApp::new));
+        app.update(cx, |app, cx| {
+            assert!(!app.close_full_reaction_picker(cx));
+            app.reaction_picker_full_target = Some("MSG-1".into());
+            assert_eq!(app.full_reaction_target(), Some("MSG-1"));
+            assert!(app.close_full_reaction_picker(cx));
+            assert_eq!(app.full_reaction_target(), None);
+            assert!(!app.close_full_reaction_picker(cx));
+        });
     }
 }

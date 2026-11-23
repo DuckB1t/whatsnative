@@ -1349,6 +1349,16 @@ impl WhatsAppApp {
                 let handle = self.viewer.read(cx).focus().clone();
                 window.focus(&handle, cx)
             }
+            KeyboardOwner::ReactionPicker => {
+                // The picker's search box is the focus target; the outer
+                // handle is only the fallback when no window built the picker.
+                if let Some(picker) = self.reaction_emoji_picker.as_ref() {
+                    let handle = picker.read(cx).focus_handle(cx);
+                    window.focus(&handle, cx);
+                } else {
+                    window.focus(&self.reaction_picker_focus, cx);
+                }
+            }
             KeyboardOwner::ChatList => window.focus(&self.chat_list_focus, cx),
             // Escape is the way out of Settings and Escape is the window's,
             // not the screen's: see the variant.
@@ -1470,6 +1480,7 @@ fn keyboard_owner_for(
         None if surfaces.message_edit => KeyboardOwner::MessageEdit,
         None if surfaces.paste_preview => KeyboardOwner::PastePreview,
         None if surfaces.viewer => KeyboardOwner::Viewer,
+        None if surfaces.reaction_picker => KeyboardOwner::ReactionPicker,
         None if showing_settings => KeyboardOwner::Screen,
         // Where both are drawn, the gesture decides. A chat opened to be
         // talked to hands the caret over; one opened to be looked at leaves
@@ -1551,6 +1562,7 @@ mod keyboard_owner_tests {
         saved_messages: false,
         pinned_messages: false,
         media_messages: false,
+        reaction_picker: false,
         call_card: false,
     };
 
@@ -1581,6 +1593,7 @@ mod keyboard_owner_tests {
             saved_messages: false,
             pinned_messages: false,
             media_messages: false,
+            reaction_picker: false,
             call_card: true,
         };
         assert_eq!(
