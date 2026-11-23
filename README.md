@@ -41,7 +41,7 @@ media and call machinery come from
 We did a deep audit of what a normal user notices and wrote it in
 [docs/feature-plan.md](docs/feature-plan.md). The audit found no Calls tab, no
 chat info panel, a disabled new chat button, a media jump list and a local-only
-GIF/sticker picker with no search. Four of those gaps are closed locally now.
+GIF/sticker picker with no search. All five of those gaps are closed locally now.
 None of this is in v0.1.0.
 
 Progress snapshot, not a live counter:
@@ -49,12 +49,12 @@ Progress snapshot, not a live counter:
 | Area | Progress |
 | --- | --- |
 | Investigation and plan | 100% |
-| Wave 1, daily drivers | 80%, Calls, chat info, new chat and media gallery done, one slice left |
+| Wave 1, daily drivers | 100%, Calls, chat info, new chat, media gallery and local picker search done |
 | Wave 2, message actions | 0% |
 | Wave 3, privacy and settings | 0% |
 | Wave 4, multi-account | 0% |
 | MCP planning | 0% |
-| Whole program | about 31%, 0% released |
+| Whole program | about 33%, 0% released |
 
 Checklist:
 
@@ -63,24 +63,26 @@ Checklist:
 - [x] Wave 1: chat info panel
 - [x] Wave 1: new chat dialog
 - [x] Wave 1: media gallery
-- [ ] Wave 1: local GIF and sticker search
+- [x] Wave 1: local GIF and sticker search
 - [ ] Wave 2: message actions with real APIs
 - [ ] Wave 3: privacy and settings with real mutations
 - [ ] Wave 4: multi-account V2
 - [ ] MCP planning
 
-Calls, chat info, new chat and the media gallery are implemented and green
-locally. None of it is in v0.1.0. The log shows only finalized calls from this
-daemon start, capped at 100, and the pane says so on screen. Chat info is a
-mirror of local state: name, raw JID, authoritative roster, loaded-history media
-count and working mute and archive controls. It does not invent About text, last
-seen, phone labels or a server-wide media total. The gallery is bounded to the
-last 50 stored media rows. It shows the kind, filename, dimensions and
-availability facts the stored proto actually carries, groups those rows by chat
-and filters only what is already in hand. A thumbnail appears only when this
-window already holds decodable bytes. No server-wide total, downloaded-only
-claim or fake fetch sits behind those chips. Every surface says what it is on
-screen.
+Calls, chat info, new chat, the media gallery and local picker search are
+implemented and green locally. None of it is in v0.1.0. The log shows only
+finalized calls from this daemon start, capped at 100, and the pane says so on
+screen. Chat info is a mirror of local state: name, raw JID, authoritative
+roster, loaded-history media count and working mute and archive controls. It does
+not invent About text, last seen, phone labels or a server-wide media total. The
+gallery is bounded to the last 50 stored media rows. It shows the kind, filename,
+dimensions and availability facts the stored proto actually carries, groups those
+rows by chat and filters only what is already in hand. A thumbnail appears only
+when this window already holds decodable bytes. No server-wide total,
+downloaded-only claim or fake fetch sits behind those chips. The picker searches
+only the tiles it already loaded: GIFs by chat, caption and file name, recent
+stickers by the chat they came from. Favorites carry no text and are honestly not
+searchable. Every surface says what it is on screen.
 
 UI target: familiar layout, original design. No copied proprietary assets or
 trade dress. The checklist gets updated after every wave.

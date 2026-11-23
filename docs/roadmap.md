@@ -668,6 +668,15 @@
   Storage totals and the cache-clear action were already complete and did not
   change.
 
+- **The picker search hides loaded tiles, it does not fetch anything.** The
+  composer popover searches only what this window already holds: recent GIFs by
+  chat name, caption and file name, recent stickers by the chat they came from.
+  Favorites carry no text and pack metadata is not projected, so there is no
+  search box there and no invented match behind one. The query is recomputed on
+  change, never on a paint pass, and is thrown away when the picker closes. Upstream
+  exposes no cloud GIF search or sticker-pack lookup, so there is no trending
+  list, no pack open or add and no server-wide claim to make here.
+
 - **The chat detail sheet is a mirror of local state, not a profile.** It opens
   from the header identity, the labelled info action, the overflow menu or a
   chat row's context menu. On desktop it sits beside the timeline inside the

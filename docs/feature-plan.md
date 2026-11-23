@@ -26,13 +26,13 @@
 - [x] Wave 1.2, chat info panel
 - [x] Wave 1.3, new chat dialog
 - [x] Wave 1.4, media gallery
-- [ ] Wave 1.5, local GIF and sticker search
+- [x] Wave 1.5, local GIF and sticker search
 - [ ] Wave 2, message actions with real APIs
 - [ ] Wave 3, privacy and settings with real mutations
 - [ ] Wave 4, multi-account V2
 - [ ] MCP planning
 
-Waves 1.1 through 1.4 are implemented, reviewed, green and cleared for push
+Waves 1.1 through 1.5 are implemented, reviewed, green and cleared for push
 after their waves. None of it is in v0.1.0. The call log is a daemon-lifetime
 ring capped at 100, and the pane says that plainly. Chat info is a mirror of
 local state: identity, authoritative roster, loaded-history media count and
@@ -43,11 +43,18 @@ last 50 stored media rows. It shows real kind, filename, dimension and
 availability facts from the stored proto, groups what it has by chat and filters
 only those rows. A thumbnail is drawn only from bytes this window already holds
 and can decode. No server total, no downloaded-only claim and no fake fetch
-hides behind the chips. The coordinator reran format, clippy, the full nextest
-workspace suite (2728 passed, 35 skipped), doctests and the xtask gates (52
-passed), then checked the publication range for account leaks before pushing.
-The old full libtest GUI command still aborts in this environment with a GPUI
-scheduler destructor panic, so CI's nextest run is the honest gate here.
+hides behind the chips. The picker search filters only the tiles already loaded:
+GIFs by chat name, caption and file name, recent stickers by the chat they came
+from. Favorites carry no text and pack metadata never reaches this window, so
+they are honestly not searchable rather than matched on invented words. It is a
+local hide, not a fetch, and the query dies when the picker closes. The
+coordinator reran format, clippy, the full nextest workspace suite (2732 passed,
+35 skipped), the GUI nextest suite (772 passed, 15 skipped), doctests and the
+xtask gates (52 passed), then checked the publication range for account leaks
+before pushing. One pre-existing daemon launch test reports as leaky under
+nextest; it is unrelated to these waves. The old full libtest GUI command still
+aborts in this environment with a GPUI scheduler destructor panic, so CI's
+nextest run is the honest gate here.
 
 ## What the deep investigation found
 
@@ -143,8 +150,10 @@ scheduler destructor panic, so CI's nextest run is the honest gate here.
 4. Real media gallery. Upgrade the jump list to a gallery with thumbnails,
    filters by image, video, audio and document, grouped by chat, reusing the
    existing media cache. Still local only.
-5. Local GIF and sticker search. Filter the existing recent items and favorites
-   by message text, chat name or pack metadata. No cloud claims.
+5. Local GIF and sticker search. Filter the existing recent GIFs by chat name,
+   caption and file name, and recent stickers by the chat they came from. No
+   cloud claims. Favorites carry no text and pack metadata is not projected, so
+   they stay unsearchable rather than matched on invented words.
 6. Attachment editing improvements that need no new codec: kind override and
    downscaling with the image crate. Cropping stays open if the picker gives us
    no crop rectangle.

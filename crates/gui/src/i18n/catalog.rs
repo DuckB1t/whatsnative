@@ -65,6 +65,8 @@ catalog! {
     Gif => ("GIF", "GIF");
     Stickers => ("Stickers", "Figurinhas");
     Gifs => ("GIFs", "GIFs");
+    SearchLoadedMedia => ("Search the loaded stickers and GIFs", "Buscar nas figurinhas e GIFs carregados");
+    NoPickerMediaMatches => ("Nothing loaded matches that search.", "Nada carregado corresponde a essa busca.");
     AddStatus => ("Add status", "Adicionar status");
     WriteAStatus => ("Write a status", "Escreva um status");
     ChooseStatusAudience => ("Shared with everyone your WhatsApp status privacy allows, usually all your contacts. Select people only to share with just them.", "Compartilhado com todos que a privacidade de status do WhatsApp permite, normalmente todos os seus contatos. Selecione pessoas apenas para compartilhar somente com elas.");

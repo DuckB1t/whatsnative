@@ -78,6 +78,18 @@ impl WhatsAppApp {
                     target: target.to_owned(),
                     generation: self.document_state_generation,
                 };
+                // The real text this GIF can be found by: the chat it came
+                // from, its caption and its file name. Only what is loaded;
+                // the search hides rows already in hand, never fetches more.
+                let mut search_text = source.name.clone();
+                if let Some(caption) = &media.caption {
+                    search_text.push(' ');
+                    search_text.push_str(caption);
+                }
+                if let Some(file_name) = &media.file_name {
+                    search_text.push(' ');
+                    search_text.push_str(file_name);
+                }
                 Some(PickerItem {
                     request,
                     description: format!(
@@ -89,6 +101,7 @@ impl WhatsAppApp {
                         .then(|| self.get_decoded_image(&message.id, media, cx))
                         .flatten(),
                     decode_as_sticker: false,
+                    search_text,
                 })
             })
             .take(12)
@@ -163,6 +176,15 @@ impl WhatsAppApp {
                         (request, item.media)
                     })
                     .collect();
+                // A recent sticker's only loaded text is the chat it was last
+                // used in; resolve that name from the chats this window holds.
+                // Favorites carry no origin and no text, so they stay
+                // unsearchable rather than inventing a match.
+                let chat_names: std::collections::HashMap<&str, &str> = app
+                    .chats
+                    .iter()
+                    .map(|chat| (chat.jid.as_str(), chat.name.as_str()))
+                    .collect();
                 input.update(cx, |view, cx| {
                     view.set_picker_items(
                         tab,
@@ -178,6 +200,12 @@ impl WhatsAppApp {
                                     crate::tr!(RecentStickers)
                                 }
                                 .into(),
+                                search_text: request
+                                    .source
+                                    .as_deref()
+                                    .and_then(|jid| chat_names.get(jid))
+                                    .map(|name| (*name).to_owned())
+                                    .unwrap_or_default(),
                             })
                             .collect(),
                         cx,

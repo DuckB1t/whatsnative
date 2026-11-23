@@ -14,7 +14,7 @@ use gpui::{
 use gpui_component::{
     ActiveTheme, Disableable as _, Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants},
-    input::{Enter, InputEvent, Paste, Textarea, TextareaState},
+    input::{Enter, Input, InputEvent, InputState, Paste, Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 
@@ -161,6 +161,16 @@ pub struct InputAreaView {
     picker_tab: PickerTab,
     picker_status: Option<String>,
     picker_items: Vec<PickerItem>,
+    /// Local search over the tiles this picker already loaded. The query is
+    /// the filtering source of truth; the field's text is reset through a
+    /// pending flag consumed on the next paint, because clearing an
+    /// `InputState` needs a window and several close paths do not have one.
+    picker_search: Entity<InputState>,
+    picker_query: String,
+    /// Indices into `picker_items` that match `picker_query`, recomputed on
+    /// change rather than on a paint pass.
+    picker_visible: Vec<usize>,
+    picker_search_pending_clear: bool,
     /// When the current recording started, for the elapsed counter.
     recording_started_at: Option<Instant>,
     /// Most recent input level, 0..=1, for the live meter.
@@ -234,6 +244,25 @@ impl InputAreaView {
         )
         .detach();
 
+        // The media search filters only what the picker already holds; it
+        // never asks the daemon for anything. Recompute on change, not paint.
+        let picker_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(crate::tr!(SearchLoadedMedia)));
+        cx.subscribe(&picker_search, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.picker_query = this
+                    .picker_search
+                    .read(cx)
+                    .text()
+                    .to_string()
+                    .trim()
+                    .to_lowercase();
+                this.refilter_picker();
+                cx.notify();
+            }
+        })
+        .detach();
+
         Self {
             input,
             emoji_picker,
@@ -245,6 +274,10 @@ impl InputAreaView {
             picker_tab: PickerTab::Emoji,
             picker_status: None,
             picker_items: Vec::new(),
+            picker_search,
+            picker_query: String::new(),
+            picker_visible: Vec::new(),
+            picker_search_pending_clear: false,
             recording_started_at: None,
             level: 0.0,
             reply: None,
@@ -620,6 +653,9 @@ impl Render for InputAreaView {
             self.language = language;
             self.input.update(cx, |input, cx| {
                 input.set_placeholder(crate::tr!(TypeAMessage), window, cx)
+            });
+            self.picker_search.update(cx, |input, cx| {
+                input.set_placeholder(crate::tr!(SearchLoadedMedia), window, cx)
             });
         }
         let is_recording = self.is_recording;

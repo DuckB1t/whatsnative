@@ -59,6 +59,23 @@ pub struct PickerItem {
     pub preview: Option<RetainedImage>,
     pub decode_as_sticker: bool,
     pub description: String,
+    /// The real text this tile can be searched by: chat name, message text,
+    /// caption and file name where the window actually holds them. GUI-only;
+    /// it never crosses the wire and is never invented for a tile whose text
+    /// is not loaded.
+    pub search_text: String,
+}
+
+/// Whether a tile's loaded text contains every word of the query. The query
+/// words arrive lowercased; the text is folded here. A tile whose text is not
+/// loaded matches no query, which is the honest answer for favorites rather
+/// than an invented match.
+fn tile_matches(text: &str, words: &[&str]) -> bool {
+    if words.is_empty() {
+        return true;
+    }
+    let text = text.to_lowercase();
+    words.iter().all(|word| text.contains(word))
 }
 
 impl InputAreaView {
@@ -71,6 +88,7 @@ impl InputAreaView {
         if self.picker_tab == tab {
             self.picker_status = None;
             self.picker_items = items;
+            self.refilter_picker();
             cx.notify();
         }
     }
@@ -102,6 +120,35 @@ impl InputAreaView {
         self.picker_items.clear();
         self.picker_status = None;
         self.picker_tab = PickerTab::Emoji;
+        self.reset_picker_search();
+    }
+
+    /// Forget the media query and schedule the field's text to be cleared on
+    /// the next paint. Clearing an `InputState` needs a window, which the
+    /// close paths do not all hold, so the text reset is deferred to the
+    /// render pass rather than threaded through every caller.
+    fn reset_picker_search(&mut self) {
+        self.picker_query.clear();
+        self.picker_search_pending_clear = true;
+        self.refilter_picker();
+    }
+
+    /// Recompute which loaded tiles match the query. Runs on change, never on
+    /// a paint pass. An empty query shows everything the picker holds; the
+    /// filter only ever hides rows already in hand, never asks for more.
+    pub(super) fn refilter_picker(&mut self) {
+        if self.picker_query.is_empty() {
+            self.picker_visible = (0..self.picker_items.len()).collect();
+            return;
+        }
+        let words: Vec<&str> = self.picker_query.split_whitespace().collect();
+        self.picker_visible = self
+            .picker_items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| tile_matches(&item.search_text, &words))
+            .map(|(index, _)| index)
+            .collect();
     }
 
     /// A tile whose picture cannot be had — the media has expired on
@@ -110,6 +157,7 @@ impl InputAreaView {
         let before = self.picker_items.len();
         self.picker_items.retain(|item| &item.request != request);
         if self.picker_items.len() != before {
+            self.refilter_picker();
             cx.notify();
         }
     }
@@ -165,11 +213,25 @@ impl InputAreaView {
             })
             .content(move |_, window, cx| {
                 let popover = cx.entity();
+                // A close or tab switch scheduled the search text to be
+                // cleared; do it here where a window is in hand, before the
+                // view is read for the paint.
+                if composer.read(cx).picker_search_pending_clear {
+                    let search = composer.read(cx).picker_search.clone();
+                    search.update(cx, |input, cx| input.set_value("", window, cx));
+                    composer.update(cx, |view, _| view.picker_search_pending_clear = false);
+                }
                 let view = composer.read(cx);
                 let tab = view.picker_tab;
                 let editing = view.editing;
-                let items = view.picker_items.clone();
+                let query_active = !view.picker_query.is_empty();
+                let items: Vec<PickerItem> = view
+                    .picker_visible
+                    .iter()
+                    .filter_map(|&index| view.picker_items.get(index).cloned())
+                    .collect();
                 let status = view.picker_status.clone();
+                let search = view.picker_search.clone();
                 let metrics = cx.product().metrics;
                 // As large as the window is: a fixed size is right at one
                 // resolution and a postage stamp at the next. Two fifths of the
@@ -248,6 +310,7 @@ impl InputAreaView {
                                             view.picker_tab = choice;
                                             view.picker_items.clear();
                                             view.picker_status = None;
+                                            view.reset_picker_search();
                                             if choice != PickerTab::Emoji {
                                                 cx.emit(InputAreaEvent::LoadPickerMedia(choice));
                                             }
@@ -257,19 +320,31 @@ impl InputAreaView {
                             }),
                         ),
                     )
+                    .children(
+                        matches!(tab, PickerTab::Stickers | PickerTab::Gifs).then(|| {
+                            div()
+                                .id("picker-search")
+                                .debug_selector(|| "picker-search".into())
+                                .child(Input::new(&search).w_full())
+                        }),
+                    )
                     .children(title.map(|title| div().child(title)))
                     .child(if tab == PickerTab::Emoji {
                         emoji_picker.clone().into_any_element()
                     } else if items.is_empty() {
                         div()
-                            .child(status.unwrap_or_else(|| {
-                                match tab {
-                                    PickerTab::Favorites => crate::tr!(NoStickerFavorites),
-                                    PickerTab::Gifs => crate::tr!(NoRecentGifs),
-                                    _ => crate::tr!(NoRecentStickers),
-                                }
-                                .to_owned()
-                            }))
+                            .child(if query_active {
+                                crate::tr!(NoPickerMediaMatches).to_owned()
+                            } else {
+                                status.unwrap_or_else(|| {
+                                    match tab {
+                                        PickerTab::Favorites => crate::tr!(NoStickerFavorites),
+                                        PickerTab::Gifs => crate::tr!(NoRecentGifs),
+                                        _ => crate::tr!(NoRecentStickers),
+                                    }
+                                    .to_owned()
+                                })
+                            })
                             .into_any_element()
                     } else {
                         let edge =
@@ -406,6 +481,7 @@ mod tests {
                                         preview: None,
                                         decode_as_sticker: false,
                                         description: "Test chat".into(),
+                                        search_text: "Test chat".into(),
                                     }
                                 })
                                 .collect(),
@@ -476,6 +552,233 @@ mod tests {
                 PickerTab::Gifs.id()
             ]
         );
+        drop(events);
+    }
+
+    #[test]
+    fn tile_matching_is_case_insensitive_and_requires_every_word() {
+        // Every word must be present; order does not matter.
+        assert!(tile_matches("Birthday Cat Party", &["cat", "birthday"]));
+        assert!(tile_matches("Birthday Cat Party", &["party"]));
+        // Case is folded on the text; the words arrive lowercased.
+        assert!(tile_matches("CAT meme", &["cat"]));
+        // A missing word hides the tile.
+        assert!(!tile_matches("Birthday party", &["cat"]));
+        assert!(!tile_matches("Cat meme", &["cat", "dog"]));
+        // A tile with no loaded text matches no query: the honest favorites
+        // answer, not an invented match.
+        assert!(!tile_matches("", &["cat"]));
+        // No words is the empty query: everything shows.
+        assert!(tile_matches("", &[]));
+        assert!(tile_matches("anything", &[]));
+    }
+
+    /// Open the picker on the stickers tab with three tiles of distinct text.
+    /// Returns the subscription handle so the caller can drop it.
+    fn open_stickers_with_three_tiles(
+        cx: &mut VisualTestContext,
+        input: &Entity<InputAreaView>,
+    ) -> gpui::Subscription {
+        let events = cx.update(|_, cx| {
+            let input_view = input.clone();
+            cx.subscribe(input, move |_, event: &InputAreaEvent, cx| {
+                if let InputAreaEvent::LoadPickerMedia(PickerTab::Stickers) = event {
+                    let texts = ["Birthday party", "Cat meme", "birthday cat"];
+                    let items = texts
+                        .iter()
+                        .enumerate()
+                        .map(|(index, text)| PickerItem {
+                            request: PickerRequest {
+                                source: Some("15550001111@s.whatsapp.net".into()),
+                                message_id: format!("tile-{index}"),
+                                target: "15550002222@s.whatsapp.net".into(),
+                                generation: 1,
+                            },
+                            preview: None,
+                            decode_as_sticker: false,
+                            description: (*text).into(),
+                            search_text: (*text).into(),
+                        })
+                        .collect();
+                    input_view.update(cx, |view, cx| {
+                        view.set_picker_items(PickerTab::Stickers, items, cx)
+                    });
+                }
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        for selector in ["emoji-trigger", "picker-tab-stickers"] {
+            let bounds = cx.debug_bounds(selector).expect(selector);
+            cx.simulate_click(bounds.center(), Modifiers::default());
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        events
+    }
+
+    #[gpui::test]
+    fn picker_search_filters_loaded_tiles_as_you_type(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::init(cx);
+        });
+        struct Harness(Entity<InputAreaView>);
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .child(self.0.clone())
+            }
+        }
+        let mut input = None;
+        let window = cx.open_window(size(px(640.), px(400.)), |window, cx| {
+            let view = cx.new(|cx| InputAreaView::new(window, cx));
+            input = Some(view.clone());
+            Harness(view)
+        });
+        let input = input.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let events = open_stickers_with_three_tiles(&mut cx, &input);
+
+        assert!(cx.debug_bounds("picker-search").is_some());
+        assert!(cx.debug_bounds("picker-media-grid").is_some());
+        assert_eq!(cx.update(|_, cx| input.read(cx).picker_visible.len()), 3);
+
+        // Focus the search field and type; the subscription refilters on
+        // change, never on a paint pass.
+        cx.update(|window, cx| {
+            let handle = input.read(cx).picker_search.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        });
+        cx.simulate_input("cat");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let (query, visible) = cx.update(|_, cx| {
+            let view = input.read(cx);
+            (view.picker_query.clone(), view.picker_visible.clone())
+        });
+        assert_eq!(query, "cat");
+        // "Cat meme" and "birthday cat" match; "Birthday party" does not.
+        assert_eq!(visible, vec![1, 2]);
+        assert!(cx.debug_bounds("picker-media-grid").is_some());
+
+        // A query nothing loaded matches is an honest empty state, not a fetch.
+        cx.simulate_input("zzz");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let visible = cx.update(|_, cx| input.read(cx).picker_visible.clone());
+        assert!(visible.is_empty());
+        assert!(cx.debug_bounds("picker-media-grid").is_none());
+        drop(events);
+    }
+
+    #[gpui::test]
+    fn picker_search_only_offers_on_stickers_and_gifs(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::init(cx);
+        });
+        struct Harness(Entity<InputAreaView>);
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .child(self.0.clone())
+            }
+        }
+        let mut input = None;
+        let window = cx.open_window(size(px(640.), px(400.)), |window, cx| {
+            let view = cx.new(|cx| InputAreaView::new(window, cx));
+            input = Some(view.clone());
+            Harness(view)
+        });
+        let input = input.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let bounds = cx.debug_bounds("emoji-trigger").expect("emoji-trigger");
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // Emoji has its own search; the media box is not drawn there.
+        assert!(cx.debug_bounds("picker-search").is_none());
+        // Favorites carry no text source, so offering a search would lie.
+        let bounds = cx.debug_bounds("picker-tab-favorites").expect("favorites");
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("picker-search").is_none());
+        // GIFs do have loaded text, so the box is there.
+        let bounds = cx.debug_bounds("picker-tab-gifs").expect("gifs");
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("picker-search").is_some());
+        drop(input);
+    }
+
+    #[gpui::test]
+    fn closing_the_picker_forgets_the_media_query(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::init(cx);
+        });
+        struct Harness(Entity<InputAreaView>);
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .child(self.0.clone())
+            }
+        }
+        let mut input = None;
+        let window = cx.open_window(size(px(640.), px(400.)), |window, cx| {
+            let view = cx.new(|cx| InputAreaView::new(window, cx));
+            input = Some(view.clone());
+            Harness(view)
+        });
+        let input = input.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let events = open_stickers_with_three_tiles(&mut cx, &input);
+        cx.update(|window, cx| {
+            let handle = input.read(cx).picker_search.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        });
+        cx.simulate_input("cat");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            cx.update(|_, cx| input.read(cx).picker_query.clone()),
+            "cat"
+        );
+
+        // Close by clicking outside the popover; the query is forgotten at
+        // once and the field's text is scheduled to clear on the next paint.
+        cx.simulate_click(gpui::point(px(10.), px(10.)), Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let (query, pending) = cx.update(|_, cx| {
+            let view = input.read(cx);
+            (view.picker_query.clone(), view.picker_search_pending_clear)
+        });
+        assert!(query.is_empty());
+        assert!(pending);
+
+        // Reopen: the deferred clear runs on paint and the field is empty.
+        let bounds = cx.debug_bounds("emoji-trigger").expect("emoji-trigger");
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let text = cx.update(|_, cx| input.read(cx).picker_search.read(cx).text().to_string());
+        assert!(text.is_empty());
+        assert!(!cx.update(|_, cx| input.read(cx).picker_search_pending_clear));
         drop(events);
     }
 }

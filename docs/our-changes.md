@@ -946,6 +946,56 @@ nextest result is the one recorded here. The publication audit found no em
 dashes, phone-shaped fixtures, real JID namespaces, account paths or secrets in
 the new lines.
 
+### 30. Local picker search over loaded tiles (Wave 1.5, client only)
+
+**Problem.** The emoji, sticker and GIF popover had tabs but no search. It drew
+the dozen most recent GIFs and the recent and favorite stickers with no way to
+find one by chat or caption. The obvious fix, asking the daemon for a search,
+would have been a lie here: there is no cloud GIF search, the favorites rows
+carry no text or pack metadata, and the pack tables are not projected to this
+window. Inventing matches from that would be worse than saying nothing.
+
+**Change.**
+- `PickerItem` carries a GUI-only `search_text` built from what the tile really
+  holds: for a GIF, the source chat name plus its caption and file name; for a
+  recent sticker, the chat it was last used in, resolved through the loaded
+  chats; for a favorite, nothing at all. No new wire field, no protocol bump and
+  no daemon call. The GIF text is built before the twelve-tile cap, so the cap
+  still decides what the picker holds and the search only hides rows in hand.
+- `InputAreaView` owns an `InputState` for the query and a `picker_visible` index
+  list. An `InputEvent::Change` subscription recomputes the list on change, never
+  on a paint pass. Matching folds case and requires every whitespace-separated
+  word. An empty query shows every loaded tile; a query nothing holds shows an
+  honest empty state. The search box is drawn only on the Stickers and GIF tabs;
+  Emoji has its own search and Favorites has no text to search.
+- Closing the picker or switching tabs clears the query and the visible list.
+  Clearing the field's text needs a window that the close paths do not hold, so
+  it is deferred on a pending flag and consumed by the next paint. A late answer
+  still cannot repopulate a closed picker because the generation and tab guards
+  stay where they were.
+- Two new EN/PT strings say what the box is and that nothing loaded matched. Two
+  visual tests drive the real input, one pure test covers the matching rule, and
+  one test checks the box is absent where there is no text. All fixtures reuse
+  the synthetic `1555...` addresses already in this file.
+
+**Not changed.** No server request, no cloud trending or search, no pack open or
+add, no favorites search, no new frame and no protocol version. Favorites stay
+unsearchable on purpose. Nothing ran against a paired account.
+
+**Gates.** `cargo +1.100.0 fmt --all -- --check`,
+`cargo +1.100.0 clippy --workspace --all-targets --all-features -- -D warnings`,
+`cargo +1.100.0 nextest run --workspace --all-features` (2732 passed, 35
+skipped), `cargo +1.100.0 nextest run -p oxidezap-gui --all-features` (772
+passed, 15 skipped) and `cargo +1.100.0 test --workspace --all-features --doc`
+are green. The xtask fmt, clippy and test gates are green (52 passed).
+`git diff --check` is clean. One pre-existing daemon launch test reports as
+leaky under nextest (`a_request_nobody_can_answer_starts_a_front_end`); it is
+unrelated to this wave. The full libtest GUI command still aborts in this
+environment with the `gpui-pre-scheduler` destructor panic, so the CI-aligned
+nextest result is the one recorded here. The publication audit found no em
+dashes, phone-shaped fixtures, real JID namespaces, account paths or secrets in
+the new lines.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).
