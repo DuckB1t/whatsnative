@@ -676,6 +676,17 @@
   privacy fact or store-wide media count to fetch here; those would need
   upstream APIs this stack does not expose.
 
+- **Starting a chat is a search over loaded chats plus one username lookup,
+  not a contact directory.** The Chats `+` opens a dialog that filters
+  conversations this window already holds by displayed name and raw JID, then
+  offers the existing username lookup for an address the protocol can resolve.
+  A known row opens its chat through the normal selection path. A resolved
+  address shows only the fields the lookup supplied and gets an Open chat
+  action only when that address is already a loaded chat. The GUI still has no
+  create-chat-by-JID request, so an unknown address cannot become a new
+  conversation here. There is no server-backed profile fetch, no address book
+  and no new protocol version.
+
 Clickable `div`s that remain are deliberate: a chat row and a media thumbnail
 are surfaces, not commands, and have no semantic component to compose from.
 Anything that *is* a command (call accept/decline, back) is a `Button`.

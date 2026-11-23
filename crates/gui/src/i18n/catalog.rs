@@ -336,6 +336,16 @@ catalog! {
     UsernameLabel => ("Username", "Usuário");
     DisplayName => ("Name", "Nome");
     VerifiedNameLabel => ("Verified name", "Nome verificado");
+    NewChat => ("New chat", "Nova conversa");
+    NewChatFilter => ("Filter loaded chats", "Filtrar conversas carregadas");
+    NewChatKnownTitle => ("LOADED CHATS", "CONVERSAS CARREGADAS");
+    NewChatKnownHint => ("Search conversations already loaded in this window. Nothing here creates a contact or a chat.", "Pesquise conversas já carregadas nesta janela. Nada aqui cria um contato ou uma conversa.");
+    NewChatNoMatches => ("No loaded chat matches.", "Nenhuma conversa carregada corresponde.");
+    NewChatLookupHint => ("Resolve a username with the existing lookup. A resolved address can be opened only when this window already has that chat.", "Resolva um usuário com a busca existente. Um endereço resolvido só pode ser aberto quando esta janela já tem essa conversa.");
+    NewChatFound => ("Username resolved.", "Usuário resolvido.");
+    NewChatResolvedOnly => ("This address is not one of the loaded chats, so there is nothing to open here.", "Este endereço não está entre as conversas carregadas, então não há nada para abrir aqui.");
+    NewChatOpenChat => ("Open chat", "Abrir conversa");
+    NewChatLookupFailed => ("The lookup did not answer.", "A busca não respondeu.");
     StartOver => ("START OVER", "RECOMEÇAR");
     ClearDataAndPairAgain => ("Clear data and pair again", "Apagar dados e vincular novamente");
     OnDisk => ("ON DISK", "NO DISCO");

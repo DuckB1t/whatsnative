@@ -1318,6 +1318,14 @@ impl WhatsAppApp {
             KeyboardOwner::MediaMessages => window.focus(&self.media_messages_focus, cx),
             KeyboardOwner::MessageDelete => window.focus(&self.message_delete_focus, cx),
             KeyboardOwner::ForwardPicker => window.focus(&self.forward_picker_focus, cx),
+            KeyboardOwner::NewChatDialog => {
+                if let Some(dialog) = self.new_chat_dialog.as_ref() {
+                    let handle = dialog.query.read(cx).focus_handle(cx);
+                    window.focus(&handle, cx);
+                } else {
+                    window.focus(&self.new_chat_focus, cx);
+                }
+            }
             KeyboardOwner::MessageEdit => {
                 if let Some(input) = self.input_area.as_ref() {
                     window.focus(&input.read(cx).focus_handle(cx), cx);
@@ -1457,6 +1465,7 @@ fn keyboard_owner_for(
         None if surfaces.pinned_messages => KeyboardOwner::PinnedMessages,
         None if surfaces.media_messages => KeyboardOwner::MediaMessages,
         None if surfaces.forward_picker => KeyboardOwner::ForwardPicker,
+        None if surfaces.new_chat_dialog => KeyboardOwner::NewChatDialog,
         None if surfaces.message_delete => KeyboardOwner::MessageDelete,
         None if surfaces.message_edit => KeyboardOwner::MessageEdit,
         None if surfaces.paste_preview => KeyboardOwner::PastePreview,
@@ -1537,6 +1546,7 @@ mod keyboard_owner_tests {
         message_edit: false,
         message_delete: false,
         forward_picker: false,
+        new_chat_dialog: false,
         global_search: false,
         saved_messages: false,
         pinned_messages: false,
@@ -1566,6 +1576,7 @@ mod keyboard_owner_tests {
             message_edit: false,
             message_delete: false,
             forward_picker: false,
+            new_chat_dialog: false,
             global_search: false,
             saved_messages: false,
             pinned_messages: false,
@@ -1620,6 +1631,26 @@ mod keyboard_owner_tests {
         assert_eq!(
             owner(KeyboardSurfaces {
                 media_messages: false,
+                ..surfaces
+            }),
+            KeyboardOwner::Composer
+        );
+    }
+
+    /// The new chat dialog is a modal over the list and the composer, so it
+    /// takes the keyboard while it is drawn and gives it back when it closes.
+    #[test]
+    fn the_new_chat_dialog_takes_the_keyboard_only_while_drawn() {
+        let surfaces = KeyboardSurfaces {
+            new_chat_dialog: true,
+            composer: true,
+            chat_list: true,
+            ..NOTHING
+        };
+        assert_eq!(owner(surfaces), KeyboardOwner::NewChatDialog);
+        assert_eq!(
+            owner(KeyboardSurfaces {
+                new_chat_dialog: false,
                 ..surfaces
             }),
             KeyboardOwner::Composer

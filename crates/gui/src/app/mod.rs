@@ -33,6 +33,7 @@ mod media_materialization;
 pub(crate) mod member_label_dialog;
 mod message_actions;
 mod messages;
+mod new_chat_dialog;
 pub mod notices;
 mod paging;
 mod plugins_ctl;
@@ -159,6 +160,9 @@ enum KeyboardOwner {
     /// The chat picker for a forward, which owns the keyboard until a
     /// destination is chosen.
     ForwardPicker,
+    /// The new chat dialog, whose own query and username boxes own the
+    /// keyboard until it closes.
+    NewChatDialog,
     /// Files pasted or dropped into the composer, waiting for explicit
     /// confirmation before anything is uploaded.
     PastePreview,
@@ -196,6 +200,8 @@ pub struct KeyboardSurfaces {
     pub message_edit: bool,
     pub message_delete: bool,
     pub forward_picker: bool,
+    /// The new chat dialog over the sidebar.
+    pub new_chat_dialog: bool,
     /// The account-wide search overlay over everything else.
     pub global_search: bool,
     /// The saved and pinned message panels, over the same body.
@@ -861,6 +867,9 @@ pub struct WhatsAppApp {
     message_delete_focus: FocusHandle,
     /// Focus target for the chat picker a forward opens.
     forward_picker_focus: FocusHandle,
+    /// Focus target for the new chat dialog, which takes the keyboard on its
+    /// own so Escape closes this surface and not the one underneath it.
+    new_chat_focus: FocusHandle,
     /// Focus target for the account-wide search overlay. Its own handle keeps
     /// the keyboard from being handed back to the composer mid-query.
     global_search_focus: FocusHandle,
@@ -1011,6 +1020,13 @@ pub struct WhatsAppApp {
     /// Mutually exclusive with the other modal surfaces, so they share a focus
     /// handle.
     community_dialog: Option<community_dialog::CommunityDialog>,
+    /// The new chat dialog, which filters loaded chats and resolves usernames
+    /// without creating either.
+    new_chat_dialog: Option<new_chat_dialog::NewChatDialog>,
+    /// Which surface the one in-flight username lookup belongs to. The daemon
+    /// answer carries no request id, so this keeps a dialog answer from
+    /// landing in Settings and drops an answer for a dialog already closed.
+    lookup_owner: username_lookup::LookupOwner,
     /// Where both paged lists continue, and whether either is asking. See
     /// [`paging`].
     pages: Entity<paging::Pages>,
@@ -1713,6 +1729,7 @@ impl WhatsAppApp {
             paste_preview_focus: cx.focus_handle(),
             message_delete_focus: cx.focus_handle(),
             forward_picker_focus: cx.focus_handle(),
+            new_chat_focus: cx.focus_handle(),
             global_search_focus: cx.focus_handle(),
             saved_messages_focus: cx.focus_handle(),
             pinned_messages_focus: cx.focus_handle(),
@@ -1748,6 +1765,8 @@ impl WhatsAppApp {
             event_dialog: None,
             channel_poll_dialog: None,
             community_dialog: None,
+            new_chat_dialog: None,
+            lookup_owner: username_lookup::LookupOwner::Settings,
             pages: cx.new(|_| paging::Pages::new()),
             watched_status: std::collections::HashSet::new(),
             viewer: cx.new(viewer::Viewer::new),
@@ -2749,6 +2768,9 @@ impl WhatsAppApp {
             });
         }
         self.delete_confirmation = None;
+        // The dialog and any lookup it still has out belong to the connection
+        // that is ending. A late answer must not reach the next account.
+        self.new_chat_dialog = None;
         // An unanswered invite preview belongs to the connection going away.
         // Left alone it would reappear over the next account's conversation
         // with a token from the old one still in its input.
@@ -5068,6 +5090,30 @@ impl Render for WhatsAppApp {
             .into_any_element()
         });
 
+        let new_chat_dialog = self.new_chat_dialog.as_ref().map(|dialog| {
+            let query = dialog.query.read(cx).value().to_string();
+            let model = new_chat_dialog::NewChatModel::build(
+                self,
+                &query,
+                dialog.result.as_ref(),
+                dialog.busy,
+                dialog.failed,
+            );
+            new_chat_dialog::render_new_chat_dialog(
+                new_chat_dialog::NewChatProps {
+                    model,
+                    query: dialog.query.clone(),
+                    username: dialog.username.clone(),
+                    key: dialog.key.clone(),
+                    entity: cx.entity().clone(),
+                    metrics: cx.product().metrics,
+                },
+                &self.new_chat_focus,
+                cx,
+            )
+            .into_any_element()
+        });
+
         // The account-wide search floats above the body but below the notices,
         // so a failure from the query that opened it stays readable on top.
         let global_state = self.search.read(cx).global().cloned();
@@ -5183,6 +5229,7 @@ impl Render for WhatsAppApp {
         let community_dialog_open = community_dialog.is_some();
         let call_link_dialog_open = call_link_dialog.is_some();
         let member_label_dialog_open = member_label_dialog.is_some();
+        let new_chat_dialog_open = new_chat_dialog.is_some();
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
         let modal_open = paste_preview_open
             || message_delete_open
@@ -5191,6 +5238,7 @@ impl Render for WhatsAppApp {
             || community_dialog_open
             || call_link_dialog_open
             || member_label_dialog_open
+            || new_chat_dialog_open
             || media_viewer_open
             || global_search_open
             || saved_messages_open
@@ -5246,6 +5294,7 @@ impl Render for WhatsAppApp {
         .children(community_dialog)
         .children(call_link_dialog)
         .children(member_label_dialog)
+        .children(new_chat_dialog)
         .children(global_search)
         .children(saved_messages)
         .children(pinned_messages)
@@ -5272,6 +5321,7 @@ impl Render for WhatsAppApp {
                         app.keyboard_surfaces.pinned_messages = pinned_messages_open;
                         app.keyboard_surfaces.media_messages = media_messages_open;
                         app.keyboard_surfaces.forward_picker = forward_picker_open;
+                        app.keyboard_surfaces.new_chat_dialog = new_chat_dialog_open;
                     });
                     let entity = entity.downgrade();
                     window.defer(cx, move |window, cx| {

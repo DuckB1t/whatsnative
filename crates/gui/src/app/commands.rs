@@ -368,6 +368,9 @@ impl WhatsAppApp {
         if self.cancel_forward(cx) {
             return;
         }
+        if self.cancel_new_chat_dialog(cx) {
+            return;
+        }
         if self.close_global_search(cx) {
             return;
         }

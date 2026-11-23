@@ -301,6 +301,7 @@ pub fn render_connected_view(
         message_edit: false,
         message_delete: false,
         forward_picker: false,
+        new_chat_dialog: false,
         global_search: false,
         saved_messages: false,
         pinned_messages: false,

@@ -847,6 +847,54 @@ no-account-leak audit on the full publication range found no em dashes,
 phone-shaped fixtures, real JID namespaces, account paths or secrets. No real
 identifiers are present in the new lines.
 
+### 28. New chat dialog from loaded chats and username lookup (client only)
+
+**Problem.** The Chats sidebar had a `+` button that was disabled with a
+tooltip saying starting a conversation was unavailable. The only username
+lookup lived in Settings and described an account; it did not offer a way to
+reach a conversation. The GUI protocol has no create-chat-by-JID request, so a
+dialog that claimed to start any address would have invented a capability.
+
+**Change.** The Chats `+` now opens a dedicated modal. Communities keep their
+existing creation form, and the other destinations keep the disabled button.
+The dialog lists only conversations already in `WhatsAppApp.chats`, filtered
+case-insensitively by `chat_row::display_name` and the raw JID. A row calls
+`has_chat` before `select_chat(..., ChatOpen::ToCompose, ...)` and closes the
+dialog. No row is fabricated for an address the window does not hold.
+
+The second section reuses `ClientRequest::LookupUsername` and
+`normalize_username`. It keeps its own query, username, key, result, loading and
+error state rather than borrowing the Settings fields. Found, KeyRequired,
+NotFound, InvalidUsername, loading and lookup failure each have their own
+sentence. A Found answer shows the JID and only the phone JID, username, display
+name and verified name the protocol supplied. It gets an Open chat action only
+when `has_chat` matches that address; otherwise it stays protocol data with a
+plain explanation and no send affordance.
+
+The dialog has its own `KeyboardOwner` and `KeyboardSurfaces` entry, so one
+Escape closes this surface and leaves a chat info sheet or anything underneath
+alone. Closing it, clearing the account or losing the session drops the dialog
+and marks any outstanding lookup answer as unwanted, so a late reply cannot
+appear in Settings or the next account.
+
+**Limitation.** This is not a contact directory and it cannot create a chat.
+There is no address-book request, no create-chat mutation, no server-backed
+profile fetch and no protocol version change. A username that resolves to an
+address this window has not loaded can be read but not opened here. Nothing was
+exercised against a paired account; the tests use invented `.invalid` addresses
+and no real lookup, message, pairing or account change.
+
+**Gates.** `cargo +1.100.0 fmt --all -- --check`,
+`cargo +1.100.0 clippy --workspace --all-targets --all-features -- -D warnings`,
+`cargo +1.100.0 nextest run --workspace --all-features`, and
+`cargo +1.100.0 test --workspace --all-features --doc` are green
+(2727 passed, 35 skipped in nextest; 767 passed, 15 skipped in oxidezap-gui
+nextest). The xtask fmt, clippy and test gates are green (52 passed).
+`git diff --check` is clean. The libtest full GUI single-command run aborted in
+this environment with a `gpui-pre-scheduler` async-io destructor panic
+(`SIGABRT`) before a final summary; CI uses nextest, which passed here. No em
+dashes or real identifiers are present in the new lines.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

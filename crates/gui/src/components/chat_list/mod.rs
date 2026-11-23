@@ -163,7 +163,8 @@ fn render_title_bar(
     cx: &App,
 ) -> impl IntoElement + use<> {
     let settings_entity = entity.clone();
-    let community_entity = entity;
+    let community_entity = entity.clone();
+    let new_chat_entity = entity;
 
     div()
         .flex_shrink_0()
@@ -185,9 +186,10 @@ fn render_title_bar(
                 .flex()
                 .gap(metrics.space_xxs())
                 .child(
-                    // Communities have a real creation flow behind them; the
-                    // other destinations keep the honest, disabled button
-                    // rather than one that answers a click with nothing.
+                    // Communities have a real creation flow behind them, and
+                    // Chats has the loaded-chat and username dialog. The other
+                    // destinations keep the honest, disabled button rather
+                    // than one that answers a click with nothing.
                     if destination == Destination::Communities {
                         Button::new("new-community")
                             .icon(IconName::Plus)
@@ -198,6 +200,19 @@ fn render_title_bar(
                             .on_click(move |_, window, cx| {
                                 community_entity.update(cx, |app, cx| {
                                     app.begin_community_dialog(window, cx);
+                                });
+                            })
+                            .into_any_element()
+                    } else if destination == Destination::Chats {
+                        Button::new("new-chat")
+                            .icon(IconName::Plus)
+                            .ghost()
+                            .small()
+                            .tooltip(crate::tr!(NewChat))
+                            .cursor_pointer()
+                            .on_click(move |_, window, cx| {
+                                new_chat_entity.update(cx, |app, cx| {
+                                    app.begin_new_chat_dialog(window, cx);
                                 });
                             })
                             .into_any_element()

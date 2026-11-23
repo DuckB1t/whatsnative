@@ -49,7 +49,7 @@ Progress snapshot, not a live counter:
 | Area | Progress |
 | --- | --- |
 | Investigation and plan | 100% |
-| Wave 1, daily drivers | 40%, Calls and chat info done, three slices left |
+| Wave 1, daily drivers | 47%, Calls, chat info and new chat done, two slices left |
 | Wave 2, message actions | 0% |
 | Wave 3, privacy and settings | 0% |
 | Wave 4, multi-account | 0% |
@@ -61,7 +61,7 @@ Checklist:
 - [x] Investigation and plan
 - [x] Wave 1: Calls destination and call log view
 - [x] Wave 1: chat info panel
-- [ ] Wave 1: new chat dialog
+- [x] Wave 1: new chat dialog
 - [ ] Wave 1: media gallery
 - [ ] Wave 1: local GIF and sticker search
 - [ ] Wave 2: message actions with real APIs

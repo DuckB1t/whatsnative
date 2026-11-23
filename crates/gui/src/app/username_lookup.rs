@@ -15,6 +15,23 @@ use oxidezap_core::{
 use super::WhatsAppApp;
 use crate::app::notices::Tone;
 
+/// Which surface the one in-flight username answer belongs to.
+///
+/// The daemon answer carries no request id, so the surface that asked is
+/// remembered beside the request. This keeps an answer asked for by the new
+/// chat dialog from becoming a Settings result, and drops an answer whose
+/// dialog has already closed rather than showing it anywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum LookupOwner {
+    /// The Settings Contacts pane, which also owns the idle case.
+    #[default]
+    Settings,
+    /// The new chat dialog, while it is still open.
+    NewChat,
+    /// A dialog that closed before its answer came back. Drop the answer.
+    Abandoned,
+}
+
 #[derive(Default)]
 pub(super) struct UsernameLookupState {
     result: Option<UsernameLookupResult>,
@@ -78,7 +95,7 @@ impl WhatsAppApp {
     /// IQ is sent. The key stays in its field so a `KeyRequired` answer can be
     /// acted on with a second press.
     pub(crate) fn lookup_username(&mut self, cx: &mut Context<Self>) {
-        if self.username_lookup.busy {
+        if self.username_lookup.busy || self.lookup_owner != LookupOwner::Settings {
             return;
         }
         let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
@@ -112,6 +129,21 @@ impl WhatsAppApp {
         result: UsernameLookupResult,
         cx: &mut Context<Self>,
     ) {
+        match self.lookup_owner {
+            LookupOwner::NewChat => {
+                self.lookup_owner = LookupOwner::Settings;
+                self.adopt_new_chat_lookup(result, cx);
+                return;
+            }
+            LookupOwner::Abandoned => {
+                // The dialog that asked is gone, so there is no surface that
+                // should show this answer. Drop it rather than hand it to
+                // Settings, which never asked.
+                self.lookup_owner = LookupOwner::Settings;
+                return;
+            }
+            LookupOwner::Settings => {}
+        }
         match &result {
             UsernameLookupResult::KeyRequired { .. } => {
                 self.notify_user(crate::tr!(UsernameKeyRequired), Tone::Info, cx);
@@ -134,6 +166,18 @@ impl WhatsAppApp {
 
     /// Release the in-flight request and say why there is no answer.
     pub(crate) fn username_lookup_failed(&mut self, detail: &str, cx: &mut Context<Self>) {
+        match self.lookup_owner {
+            LookupOwner::NewChat => {
+                self.lookup_owner = LookupOwner::Settings;
+                self.new_chat_lookup_failed(cx);
+                return;
+            }
+            LookupOwner::Abandoned => {
+                self.lookup_owner = LookupOwner::Settings;
+                return;
+            }
+            LookupOwner::Settings => {}
+        }
         self.username_lookup.failed();
         self.notify_user(
             crate::tr!(username_lookup_failed, detail),
@@ -145,6 +189,9 @@ impl WhatsAppApp {
 
     /// Forget an answer when the account it described goes away.
     pub(crate) fn reset_username_lookup(&mut self) {
+        // Anything still in flight belonged to the departing account, so no
+        // later answer should be adopted as the next account's Settings result.
+        self.lookup_owner = LookupOwner::Settings;
         self.username_lookup.reset();
     }
 }
