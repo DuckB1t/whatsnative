@@ -42,7 +42,7 @@ We did a deep audit of what a normal user notices and wrote it in
 [docs/feature-plan.md](docs/feature-plan.md). The audit found no Calls tab, no
 chat info panel, a disabled new chat button, a media jump list and a local-only
 GIF/sticker picker with no search. Those five gaps are closed, and Wave 2's real
-message actions are in too. None of this is in v0.1.0.
+message actions are in too. None of this was in v0.1.0. It is in v0.2.0.
 
 Progress snapshot, not a live counter:
 
@@ -54,7 +54,7 @@ Progress snapshot, not a live counter:
 | Wave 3, privacy and settings | 0% |
 | Wave 4, multi-account | 0% |
 | MCP planning | 0% |
-| Whole program | about 50%, 0% released |
+| Whole program | about 50%, Waves 1.1 through 2 released in v0.2.0 |
 
 Checklist:
 
@@ -70,7 +70,7 @@ Checklist:
 - [ ] MCP planning
 
 Calls, chat info, new chat, the media gallery and local picker search are
-implemented and green locally. None of it is in v0.1.0. The log shows only
+implemented and green locally. None of it was in v0.1.0. v0.2.0 carries it. The log shows only
 finalized calls from this daemon start, capped at 100, and the pane says so on
 screen. Chat info is a mirror of local state: name, raw JID, authoritative
 roster, loaded-history media count and working mute and archive controls. It does
@@ -96,7 +96,7 @@ was actually sent. Protocol 62 adds a real pinned listing and a local contact
 search, so the pinned panel finds rows outside this window's loaded page and a
 forward can reach someone saved in the address book who is not a chat yet. There
 is no server-wide directory, no pin forever, no cloud GIF search and no real
-account was touched. `v0.1.0` is still the only release.
+account was touched. `v0.2.0` is the current release; `v0.1.0` is the old one.
 
 UI target: familiar layout, original design. No copied proprietary assets or
 trade dress. The checklist gets updated after every wave.

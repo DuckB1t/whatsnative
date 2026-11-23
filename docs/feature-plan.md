@@ -34,7 +34,7 @@
 
 Waves 1.1 through 1.5 are implemented, reviewed, green and cleared for push
 after their waves. Wave 2 is also implemented, reviewed and green: four slices,
-one protocol bump, one push at the end. None of it is in v0.1.0. The call log is a daemon-lifetime
+one protocol bump, one push at the end. None of it was in v0.1.0. v0.2.0 carries it. The call log is a daemon-lifetime
 ring capped at 100, and the pane says that plainly. Chat info is a mirror of
 local state: identity, authoritative roster, loaded-history media count and
 working mute and archive controls. It does not invent profile facts. The new
@@ -198,7 +198,7 @@ allows, mention candidate completeness, full emoji reaction picker, attachment
 kind override and downscaling. Done only for items with a real API.
 
 Status: done in four slices, reviewed and gated, with one end-of-wave push and
-no release tag. Slice A put durable star and pin flags on `ChatMessage` and made
+then the v0.2.0 release. Slice A put durable star and pin flags on `ChatMessage` and made
 the overlay tri-state. Slice B opened the full emoji picker and fixed mention
 candidates. Slice C added the send kind override and local photo downscaling.
 Slice D bumped protocol 62 for the store-backed pinned listing and local contact

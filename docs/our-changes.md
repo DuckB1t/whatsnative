@@ -1052,7 +1052,7 @@ because upstream only offers 24 hours, 7 days and 30 days and this code uses the
 30-day maximum. No cloud GIF search, no sticker pack open or add, no server-wide
 contact search, no real message, reaction, call or account touched during
 validation. Every fixture address is `.invalid`. No copied artwork or trade
-dress. No new release: `v0.1.0` is still the only tag.
+dress. At push time there was no new tag; v0.2.0 now carries this work.
 
 **Gates.** Full Wave 2 publication gates were run from `1de783d` after all four
 slices and all docs: fmt, clippy with `-D warnings`, full workspace nextest
