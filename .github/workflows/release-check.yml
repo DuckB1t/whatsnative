@@ -31,10 +31,8 @@ jobs:
           VERSION: pr-${{ github.event.number }}
         run: |
           set -euo pipefail
-          for platform in linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64; do
-            suffix=tar.gz
-            if [ "$platform" = windows-x86_64 ]; then suffix=zip; fi
-            python3 .github/scripts/check-release.py "artifacts/oxidezap-$VERSION-$platform.$suffix" "$VERSION" "$platform"
+          for platform in linux-x86_64 linux-aarch64; do
+            python3 .github/scripts/check-release.py "artifacts/oxidezap-$VERSION-$platform.tar.gz" "$VERSION" "$platform"
           done
           # The Linux packages from packaging/linux/package.sh, four per architecture.
           for arch in x86_64 aarch64; do
@@ -58,5 +56,5 @@ jobs:
                       assert module.read(8) == b"\0asm\x01\0\0\0", name
               assert archive.testzip() is None
           PYTHON
-          test "$(find artifacts -type f | wc -l)" -eq 13
+          test "$(find artifacts -type f | wc -l)" -eq 11
           (cd artifacts && sha256sum oxidezap-* > checksums.sha256 && sha256sum -c checksums.sha256)

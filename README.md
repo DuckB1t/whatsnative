@@ -12,7 +12,7 @@ Rust, GPUI, one daemon, zero browser engines hiding in the background.
 <a href="https://github.com/DuckB1t/whatsnative/actions/workflows/ci.yml"><img src="https://github.com/DuckB1t/whatsnative/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 <a href="https://github.com/DuckB1t/whatsnative/actions/workflows/build.yml"><img src="https://github.com/DuckB1t/whatsnative/actions/workflows/build.yml/badge.svg" alt="Build"></a>
 <img src="https://img.shields.io/badge/rust-1.100%2B-orange" alt="Rust 1.100+">
-<img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue" alt="Linux, macOS, Windows">
+<img src="https://img.shields.io/badge/platform-Linux-blue" alt="Linux">
 <img src="https://img.shields.io/badge/electron-none-brightgreen" alt="No Electron">
 <a href="https://github.com/DuckB1t/whatsnative/stargazers"><img src="https://img.shields.io/github/stars/DuckB1t/whatsnative?style=social" alt="Stars"></a>
 
@@ -97,6 +97,7 @@ search, so the pinned panel finds rows outside this window's loaded page and a
 forward can reach someone saved in the address book who is not a chat yet. There
 is no server-wide directory, no pin forever, no cloud GIF search and no real
 account was touched. `v0.2.0` is the current release; `v0.1.0` is the old one.
+Releases are Linux only. No macOS or Windows binaries are built or published.
 
 UI target: familiar layout, original design. No copied proprietary assets or
 trade dress. The checklist gets updated after every wave.
@@ -212,10 +213,10 @@ cargo build --release --bin oxidezap --bin oxidezapd --bin oxidezap-cli
 Keep the three binaries together. The window starts the daemon beside itself.
 The first build compiles the whole GPUI tree, so go get a coffee.
 
-Prebuilt AppImage and tarballs are on the
-[releases page](https://github.com/DuckB1t/whatsnative/releases). Linux `.deb`
-and `.rpm` packages are described in
-[docs/linux-packaging.md](docs/linux-packaging.md).
+Prebuilt Linux AppImage, `.deb`, `.rpm` and tarballs are on the
+[releases page](https://github.com/DuckB1t/whatsnative/releases). The Linux
+packages are described in [docs/linux-packaging.md](docs/linux-packaging.md).
+There are no macOS or Windows release assets.
 
 ## Docs, if you want the ugly details
 
