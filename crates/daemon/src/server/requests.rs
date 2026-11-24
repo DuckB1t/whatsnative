@@ -836,6 +836,43 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        // The generic categories are server-owned like read receipts. Both the
+        // fetch and the change publish a fresh answer later, so neither may be
+        // acknowledged here.
+        ClientRequest::FetchPrivacyCategories => {
+            let id = match addressed(id, "a privacy category read needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::FetchPrivacyCategories {
+                    id,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
+        ClientRequest::SetPrivacyCategory { category, value } => {
+            let id = match addressed(id, "a privacy category change needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::SetPrivacyCategory {
+                    id,
+                    category,
+                    value,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::LookupUsername {
             username,
             username_key,

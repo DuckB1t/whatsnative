@@ -967,24 +967,116 @@ async fn privacy_reads_and_read_receipt_changes_take_the_addressed_path() {
     }
 }
 
+/// The generic privacy halves reach the session as addressed work. The read
+/// publishes its answer account-wide and is acked later; the change gets a
+/// typed result later. Neither may be answered here, or a window would draw a
+/// value or a success the server has not sent yet. Ids are synthetic.
+#[tokio::test]
+async fn generic_privacy_reads_and_changes_take_the_addressed_path() {
+    use oxidezap_core::{PrivacySettingCategory, PrivacySettingValue};
+
+    let hub = connected_hub();
+    for (id, request) in [
+        (94, ClientRequest::FetchPrivacyCategories),
+        (
+            95,
+            ClientRequest::SetPrivacyCategory {
+                category: PrivacySettingCategory::GroupAdd,
+                value: PrivacySettingValue::Contacts,
+            },
+        ),
+    ] {
+        let (commands, taken) = bridge(CommandOutcome::Accepted);
+        let answer = handle_request(
+            Request {
+                id: Some(id),
+                request,
+            },
+            &hub,
+            &no_plugins(),
+            &commands,
+            &outbox(),
+        )
+        .await;
+        // `out_of_band` only writes a frame when the command was refused, so
+        // no frame here also means the stand-in bridge answered Accepted.
+        assert!(
+            answer.frame.is_none(),
+            "the session's task owns the answer to {id}"
+        );
+        assert!(!answer.shutdown);
+        match taken.await.unwrap().expect("a command was dispatched") {
+            Action::FetchPrivacyCategories { id: action_id, .. } => {
+                assert_eq!(action_id, 94);
+                assert!(
+                    Action::FetchPrivacyCategories {
+                        id,
+                        answer_to: outbox()
+                    }
+                    .needs_network()
+                );
+            }
+            Action::SetPrivacyCategory {
+                id: action_id,
+                category,
+                value,
+                ..
+            } => {
+                assert_eq!(action_id, 95);
+                assert_eq!(category, PrivacySettingCategory::GroupAdd);
+                assert_eq!(value, PrivacySettingValue::Contacts);
+                assert!(
+                    Action::SetPrivacyCategory {
+                        id,
+                        category,
+                        value,
+                        answer_to: outbox()
+                    }
+                    .needs_network()
+                );
+            }
+            other => panic!("expected a generic privacy action, got {other:?}"),
+        }
+    }
+}
+
 /// An addressed privacy request without an id cannot be answered later: no
 /// window could claim the frame. Refuse it here rather than dispatch work whose
 /// answer would be dropped.
 #[tokio::test]
 async fn a_privacy_request_without_an_id_is_refused_before_it_reaches_the_session() {
+    use oxidezap_core::{PrivacySettingCategory, PrivacySettingValue};
+
     let hub = connected_hub();
     let (commands, _taken) = live_bridge();
-    for request in [
-        ClientRequest::FetchPrivacySettings,
-        ClientRequest::SetReadReceipts { enabled: true },
+    for (request, detail) in [
+        (
+            ClientRequest::FetchPrivacySettings,
+            "a privacy read needs an id to answer under",
+        ),
+        (
+            ClientRequest::SetReadReceipts { enabled: true },
+            "a read-receipts change needs an id to answer under",
+        ),
+        (
+            ClientRequest::FetchPrivacyCategories,
+            "a privacy category read needs an id to answer under",
+        ),
+        (
+            ClientRequest::SetPrivacyCategory {
+                category: PrivacySettingCategory::About,
+                value: PrivacySettingValue::Contacts,
+            },
+            "a privacy category change needs an id to answer under",
+        ),
     ] {
         let answer = handle_request(bare(request), &hub, &no_plugins(), &commands, &outbox()).await;
         assert!(matches!(
             parse(answer.frame),
             DaemonMessage::Error {
-                error: oxidezap_ipc::ProtocolError::Malformed { .. },
+                error: oxidezap_ipc::ProtocolError::Malformed { detail: reason },
                 ..
-            }
+            } if reason == detail
         ));
     }
 }

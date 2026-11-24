@@ -415,7 +415,18 @@ use std::path::PathBuf;
 /// cannot decode either answer, so neither half may attach across this version.
 /// Both are legacy IPC/GUI parity only, with no wire request and no new CLI
 /// command.
-pub const PROTOCOL_VERSION: u32 = 62;
+///
+/// 63 adds `ClientRequest::FetchPrivacyCategories`,
+/// `ClientRequest::SetPrivacyCategory`, `DaemonMessage::PrivacyCategories` and
+/// `DaemonMessage::PrivacyCategoryResult` to the legacy IPC/GUI plane. It covers
+/// the six categories upstream can read and set with public APIs: last seen,
+/// online, profile photo, About text, group add and who can message me.
+/// `contact_blacklist` is recognised but not offered through the plain setter,
+/// because setting it needs a separate disallowed-list update this wave does
+/// not provide. Older daemons know neither frame and older windows cannot
+/// decode either answer, so neither half may attach across this version. This
+/// is legacy IPC/GUI parity only, with no wire request and no new CLI command.
+pub const PROTOCOL_VERSION: u32 = 63;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

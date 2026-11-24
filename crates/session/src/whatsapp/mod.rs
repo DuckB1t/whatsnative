@@ -37,7 +37,7 @@ mod membership;
 mod mutations;
 /// Polls, profiles, contacts, channels, media fetch and history coverage.
 mod ops;
-/// The account's DM read-receipts setting, read and changed on request.
+/// Account privacy settings owned by the server, read and changed on request.
 mod privacy;
 mod profile;
 /// Sends a scriptable front end asks for, read from daemon-local paths.

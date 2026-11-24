@@ -50,6 +50,8 @@ formatted_catalog! {
     unblock_failed(error) => ("Could not unblock that contact: {error}", "Não foi possível desbloquear esse contato: {error}");
     read_receipts_failed(error) => ("Could not change read receipts: {error}", "Não foi possível alterar os recibos de leitura: {error}");
     read_receipts_read_failed(error) => ("Could not load the read-receipts setting: {error}", "Não foi possível carregar a configuração de recibos de leitura: {error}");
+    privacy_categories_read_failed(error) => ("Could not load the privacy visibility settings: {error}", "Não foi possível carregar as configurações de visibilidade da privacidade: {error}");
+    privacy_category_change_failed(error) => ("Could not change that privacy setting: {error}", "Não foi possível alterar essa configuração de privacidade: {error}");
     invalid_username(min, max) => ("Enter a username of {min} to {max} characters, without the @.", "Digite um usuário de {min} a {max} caracteres, sem o @.");
     username_lookup_failed(error) => ("Could not look up that username: {error}", "Não foi possível buscar esse usuário: {error}");
     event_time(start, end) => ("{start} – {end}", "{start} – {end}");

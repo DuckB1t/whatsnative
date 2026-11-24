@@ -71,14 +71,13 @@ jobs:
           # otherwise never notice.
           #
           # Its automatic key hashes `Cargo.lock`, `.cargo/config.toml` and
-          # each *member* crate's manifest — not the root one, where the
+          # each *member* crate's manifest, not the root one, where the
           # profiles live. So changing `[profile.dev]` used to leave the key
           # identical while making every cached artifact useless: the restore
           # was a full match, cargo rebuilt all of it anyway, and rust-cache
           # then declined to save ("Cache up-to-date."), so the stale entry
-          # was never replaced. Measured on `main` after the profile change
-          # that introduced this: the Windows `Check` job went from 3m49 warm
-          # to 11m17, and stayed there.
+          # was never replaced. Naming the root manifest keeps the key tied to
+          # the profile that decides those fingerprints.
           #
           # Naming the root manifest here is what makes the key say what it
           # means. A `prefix-key` bump would fix today and leave the next
@@ -190,70 +189,6 @@ jobs:
       - run: cargo fmt --manifest-path xtask/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path xtask/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path xtask/Cargo.toml
-
-  # The platforms the release ships to, compiled and — for the crates where it
-  # matters — run.
-  #
-  # Compiling was not enough. The IPC transport compiled on Windows for weeks
-  # while deadlocking on it: a named pipe opened the ordinary way serializes
-  # reads against writes, so the front end's first request after startup waited
-  # on a read that was waiting for the answer to that request. No `cfg` was
-  # wrong and nothing failed to build; the behaviour differed. Only running
-  # something finds that.
-  #
-  # The GUI is excluded from the test step deliberately: its tests are pure
-  # logic that the Linux job already runs, and linking the gpui tree three
-  # times to learn nothing is most of this job's wall clock.
-  #
-  # Native runners rather than cross-compiling: `x86_64-pc-windows-msvc` needs
-  # the MSVC libraries, and the point is to build the way the release does.
-  cross:
-    name: Check (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # One platform failing must not hide the answer for the other.
-      fail-fast: false
-      matrix:
-        include:
-          - name: macos-aarch64
-            os: macos-15
-          - name: windows-x86_64
-            os: windows-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: "1.100.0"
-      - uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
-        with:
-          tool: protoc
-      - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
-        with:
-          # The root manifest's hash, for the reason spelled out over the
-          # `Check` job: the profiles live there, a profile decides every
-          # dependency's fingerprint, and rust-cache's automatic key does not
-          # hash that file.
-          key: check-${{ matrix.name }}-${{ hashFiles('Cargo.toml') }}
-          cache-on-failure: "true"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      # --all-targets so tests and benches are compiled too: a `cfg`-gated
-      # test that no longer builds is the same break as a `cfg`-gated module
-      # that no longer builds.
-      - run: cargo check --workspace --all-targets --all-features
-      # And the ones that touch the platform actually run. `oxidezap-daemon`
-      # is where the transport tests live, because they need both ends of it.
-      - name: Test the platform-sensitive crates
-        run: cargo test -p oxidezap-ipc -p oxidezap-daemon -p oxidezap-core -p oxidezap-video -p oxidezap-session --all-features
-      - name: Test avatar cache recovery without a display
-        run: cargo test -p oxidezap-gui --all-features session::avatar::tests
-      - name: Test call alerts and video controls without hardware
-        run: |
-          cargo test -p oxidezap-audio --all-features devices
-          cargo test -p oxidezap-gui --all-features devices
-          cargo test -p oxidezap-gui --all-features call_alert
-          cargo test -p oxidezap-gui --all-features call_card
 
   # The web half, run in a browser rather than checked.
   #

@@ -862,6 +862,84 @@ impl Bridge {
                 });
                 None
             }
+            Action::FetchPrivacyCategories { id, answer_to } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.fetch_privacy_categories();
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // The categories belong to the account, not to the window
+                    // that asked. Publish them for every front end and give
+                    // the asker only the ordinary ack.
+                    let answer = match task.await {
+                        Ok(Ok(settings)) => {
+                            hub.signal(&DaemonMessage::PrivacyCategories {
+                                settings: settings.settings,
+                            });
+                            Ok(DaemonMessage::Accepted { id: Some(id) })
+                        }
+                        Ok(Err(detail)) => Err(ProtocolError::Failed {
+                            detail,
+                            retryable: true,
+                        }),
+                        Err(error) => Err(ProtocolError::NoSession {
+                            detail: format!(
+                                "the session stopped before the privacy categories arrived: {error}"
+                            ),
+                        }),
+                    };
+                    answer_now(&answer_to, answered(id, answer));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
+            Action::SetPrivacyCategory {
+                id,
+                category,
+                value,
+                answer_to,
+            } => {
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.set_privacy_category(category, value);
+                let hub = Arc::clone(&self.hub);
+                oxidezap_session::spawn(async move {
+                    // The session sends the IQ and re-reads the server before
+                    // returning. Publish that fresh answer first so a window
+                    // reading its correlated result never draws against older
+                    // categories.
+                    let (ok, detail) = match task.await {
+                        Ok(Ok(settings)) => {
+                            hub.signal(&DaemonMessage::PrivacyCategories {
+                                settings: settings.settings,
+                            });
+                            (true, None)
+                        }
+                        Ok(Err(reason)) => (false, Some(reason)),
+                        Err(error) => (
+                            false,
+                            Some(format!(
+                                "the session stopped before the privacy category change was answered: {error}"
+                            )),
+                        ),
+                    };
+                    answer_now(
+                        &answer_to,
+                        answered(
+                            id,
+                            Ok(DaemonMessage::PrivacyCategoryResult { id, ok, detail }),
+                        ),
+                    );
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::LookupUsername {
                 id,
                 username,
@@ -2484,6 +2562,8 @@ impl Bridge {
             | Action::ListMediaMessages { .. }
             | Action::FetchPrivacySettings { .. }
             | Action::SetReadReceipts { .. }
+            | Action::FetchPrivacyCategories { .. }
+            | Action::SetPrivacyCategory { .. }
             | Action::SearchMessages { .. }
             | Action::CreateEvent { .. }
             | Action::PreviewCallLink { .. }

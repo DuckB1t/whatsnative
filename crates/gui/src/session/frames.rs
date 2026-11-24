@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::DateTime;
 use log::{debug, error, info, warn};
-use oxidezap_core::{CallState, Chat, MediaContent, UiEvent, VideoStream};
+use oxidezap_core::{CallState, Chat, MediaContent, PrivacySettings, UiEvent, VideoStream};
 use oxidezap_ipc::{
     ChatSummary, ConnectionState, DaemonEvent, DaemonMessage, PROTOCOL_VERSION, RequestId,
     StateSnapshot, StateVersion,
@@ -294,6 +294,12 @@ impl<'a> Frames<'a> {
             DaemonMessage::PrivacySettings { read_receipts } => {
                 self.publish(FromDaemon::PrivacySettings(read_receipts))?;
             }
+            // The six categories are account-wide too, and just as unaddressed:
+            // the asking window's read is released by the acknowledgement that
+            // follows this value, not by the value itself.
+            DaemonMessage::PrivacyCategories { settings } => {
+                self.publish(FromDaemon::PrivacyCategories(PrivacySettings { settings }))?;
+            }
             DaemonMessage::UsernameLookup { id, result } => {
                 if take_pending(self.pending, id).is_none() {
                     debug!("a username lookup arrived for {id}, which nobody is waiting on");
@@ -378,6 +384,31 @@ impl<'a> Frames<'a> {
                     None => debug!("a privacy result arrived for {id}, which nobody is waiting on"),
                 }
             }
+            // The counterpart for a generic category change. The fresh value
+            // was published account-wide just before this frame, so only the
+            // outcome is correlated here.
+            DaemonMessage::PrivacyCategoryResult { id, ok, detail } => {
+                let result = if ok {
+                    Ok(())
+                } else {
+                    Err(Failure::permanent(detail.unwrap_or_else(|| {
+                        "the server did not say why the privacy change failed".into()
+                    })))
+                };
+                match take_pending(self.pending, id) {
+                    Some(Awaiting::PrivacyCategoryChange(tx)) => {
+                        let _ = tx.send(result);
+                    }
+                    Some(waiting) => {
+                        self.fail(waiting, &Failure::permanent("unexpected privacy answer"))
+                    }
+                    None => {
+                        debug!(
+                            "a privacy category result arrived for {id}, which nobody is waiting on"
+                        )
+                    }
+                }
+            }
             // Every command is answered under the id it was asked with, which
             // is why this side no longer has to guess what a failure was
             // about.
@@ -396,6 +427,9 @@ impl<'a> Frames<'a> {
                     Some(Awaiting::Removed(tx)) => {
                         let _ = tx.send(Ok(()));
                     }
+                    // The account-wide category value arrived without an id;
+                    // this ack, and only this ack, releases the read.
+                    Some(Awaiting::PrivacyCategoriesRead) => {}
                     _ => {}
                 }
             }
@@ -1463,6 +1497,99 @@ mod tests {
             detail: None,
         });
         assert!(rx.try_recv().unwrap().is_ok());
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    /// The six categories are published account-wide, without an id, and the
+    /// ack releases the read. Their changes answer only the press that made
+    /// them, and a wrong waiter gets the existing permanent refusal. All ids
+    /// and values here are synthetic.
+    #[test]
+    fn privacy_categories_are_published_account_wide_and_results_answer_their_press() {
+        use oxidezap_core::{PrivacySetting, PrivacySettingCategory, PrivacySettingValue};
+        let (sink, mut events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+
+        pending
+            .lock()
+            .unwrap()
+            .insert(16, Awaiting::PrivacyCategoriesRead);
+        let settings = vec![PrivacySetting {
+            category: PrivacySettingCategory::LastSeen,
+            value: PrivacySettingValue::Contacts,
+        }];
+        let _ = frames.apply(DaemonMessage::PrivacyCategories {
+            settings: settings.clone(),
+        });
+        match events.try_recv().unwrap() {
+            FromDaemon::PrivacyCategories(published) => assert_eq!(published.settings, settings),
+            _ => panic!("the categories were not published account-wide"),
+        }
+        assert!(
+            pending.lock().unwrap().contains_key(&16),
+            "the ack, not the value, releases the read"
+        );
+        let _ = frames.apply(DaemonMessage::Accepted { id: Some(16) });
+        assert!(pending.lock().unwrap().is_empty());
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        pending
+            .lock()
+            .unwrap()
+            .insert(17, Awaiting::PrivacyCategoryChange(tx));
+        let _ = frames.apply(DaemonMessage::PrivacyCategoryResult {
+            id: 17,
+            ok: true,
+            detail: None,
+        });
+        assert!(rx.try_recv().unwrap().is_ok());
+        assert!(pending.lock().unwrap().is_empty());
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        pending
+            .lock()
+            .unwrap()
+            .insert(18, Awaiting::PrivacyCategoryChange(tx));
+        let _ = frames.apply(DaemonMessage::PrivacyCategoryResult {
+            id: 18,
+            ok: false,
+            detail: Some("the server refused the change".into()),
+        });
+        assert_eq!(
+            rx.try_recv().unwrap().unwrap_err().detail,
+            "the server refused the change"
+        );
+
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        pending
+            .lock()
+            .unwrap()
+            .insert(18, Awaiting::PrivacyCategoryChange(tx));
+        let _ = frames.apply(DaemonMessage::PrivacyCategoryResult {
+            id: 18,
+            ok: false,
+            detail: None,
+        });
+        assert_eq!(
+            rx.try_recv().unwrap().unwrap_err().detail,
+            "the server did not say why the privacy change failed"
+        );
+
+        pending
+            .lock()
+            .unwrap()
+            .insert(18, Awaiting::PrivacySettings);
+        let _ = frames.apply(DaemonMessage::PrivacyCategoryResult {
+            id: 18,
+            ok: true,
+            detail: None,
+        });
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            FromDaemon::PrivacySettingsLost { detail } if detail == "unexpected privacy answer"
+        ));
         assert!(pending.lock().unwrap().is_empty());
     }
 

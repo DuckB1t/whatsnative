@@ -1087,6 +1087,85 @@ endpoint. No message, call, reaction, vote or setting was touched.
 all passed. The added-line audit saw 16 lines and found no em or en dashes, no
 phone-shaped fixtures, no real JID namespaces, no account paths and no secrets.
 
+### 33. Privacy visibility stopped being a one trick pony
+
+**Problem.** The Privacy pane had one real account control and a pile of honest
+nothing next to it. That was fair while the pinned dependency had no public
+setter, but it does have one. Leaving six reachable account settings as text
+gaps would have been laziness wearing an honesty badge.
+
+**Change.** Protocol 63 adds the whole path. `oxidezap_core` now carries
+`PrivacySettingCategory`, `PrivacySettingValue`, `PrivacySetting` and
+`PrivacySettings`, with wire maps, `accepts`, `is_settable` and a lookup that
+does not guess a missing row. IPC adds `FetchPrivacyCategories`,
+`SetPrivacyCategory`, `PrivacyCategories` and `PrivacyCategoryResult`; the
+changelog and protocol version moved with them because legacy IPC frames are a
+wire change, not a footnote.
+
+The session adapter maps those categories to the pinned upstream's public
+`fetch_privacy_settings` and `set_privacy_setting` calls. It validates both the
+category and the value, writes no local device state, and re-reads the server
+after a successful set. The daemon publishes the fresh account-wide answer
+before it answers the press that caused the change. A missing request id is
+refused instead of guessing which window asked.
+
+The GUI shows six fixed rows after DM read receipts: last seen, online, profile
+photo, About, group add and who can message me. Button choices come from the
+category's own accepted values plus the setter's own limits, so online gets
+`all` and `same as last seen`, messages gets `all` and `contacts only`, and
+nobody gets `contact_blacklist` or `unknown` as a button. A missing category
+says it was not reported. A value this build cannot set says so and stays as
+reported. No button is optimistic; a click asks, the server answer redraws the
+row, and the correlated result only says whether the change stood. All buttons
+are disabled while one read or change is in flight, the last server answer stays
+on screen during a refresh, and leaving the account clears both the dedicated
+read-receipts answer and the six-category answer. English and Portuguese copy
+landed with the controls.
+
+The dedicated protocol 60 read-receipts path was left alone. Security
+notifications, 2FA/PIN, passkeys, linked-device removal, chat lock and
+disappearing defaults stay gaps because there is no honest read and write pair
+here. No live account was used to check any of this.
+
+**Not changed.** No pairing, no app or daemon launch, no real message, call,
+post, vote, reaction or account setting. The installed app was not touched.
+Every synthetic fixture uses `.invalid`, and no copied artwork or trade dress
+went into the pane.
+
+**Gates.** Targeted core, IPC, session, daemon and GUI checks passed on the way
+in. The final tree passed `cargo +1.100.0 fmt --all -- --check`,
+`cargo +1.100.0 clippy --workspace --all-targets --all-features -- -D warnings`,
+full workspace nextest (2764 passed, 35 skipped, one pre-existing leaky daemon
+launch test), doctests (1 passed, 10 ignored) and the xtask fmt, clippy and test
+gates (52 passed). One final standard nextest run hit the known flaky sticker
+animation test; its targeted rerun and a full `--no-fail-fast` rerun both passed
+with no code change. GUI nextest alone passed 786 tests with 15 skipped.
+`git diff --check` is clean. The added-line audit found no em or en dashes, no
+phone-shaped fixtures, no real JID namespaces, no account paths and no secrets.
+CI's nextest run is the GUI gate that counts; the old full libtest GUI command
+can still abort in this environment with the `gpui-pre-scheduler` destructor
+panic.
+
+### 34. CI stopped paying rent for operating systems we do not ship to
+
+**Problem.** The last CI run for `d296627` failed because the macOS arm64 runner
+was never acquired. The code was fine. The cross platform jobs were still
+burning Actions cache budget and human attention for artifacts this repository
+does not publish.
+
+**Change.** `ci.yml` no longer has the macOS and Windows cross job.
+`build.yml` no longer carries Windows branches, always true Linux guards or
+Windows packaging steps. `nightly.yml` no longer tells people to fight macOS
+quarantine or Windows SmartScreen. `docs/ci.md` now marks the old platform
+numbers as history instead of pretending they describe today's workflow. This
+project builds and ships Linux artifacts, so CI now says the same thing.
+
+**Not changed.** No tag, no release, no artifact and no installed app. The
+verified v0.2.0 Linux tarballs are still the installed binaries.
+
+**Gates.** The three workflow files parse as valid YAML. The full gates listed
+in section 33 ran on this same tree.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

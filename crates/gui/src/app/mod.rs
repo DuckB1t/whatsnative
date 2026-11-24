@@ -1155,8 +1155,9 @@ pub struct WhatsAppApp {
     /// The account's block list, as the daemon last answered, and the one
     /// request the Privacy pane keeps in flight. See [`blocklist`].
     blocklist: blocklist::BlocklistState,
-    /// The account's DM read-receipts value, including the case where the
-    /// server said something this build cannot read. See [`privacy`].
+    /// The account's DM read-receipts value and its six generic privacy
+    /// categories, including the cases where the server said something this
+    /// build cannot read. See [`privacy`].
     privacy: privacy::PrivacyState,
     /// The last username lookup this window asked for, and the one request it
     /// keeps in flight. See [`username_lookup`].
@@ -1629,6 +1630,15 @@ impl WhatsAppApp {
                     }),
                     FromDaemon::PrivacySettingsLost { detail } => entity.update(cx, |app, cx| {
                         app.read_receipts_failed(&detail, cx);
+                    }),
+                    // One account-wide answer for the six categories, from a
+                    // read or a change. The read's ack is a separate frame and
+                    // is consumed by the session, not by this publication.
+                    FromDaemon::PrivacyCategories(settings) => entity.update(cx, |app, cx| {
+                        app.adopt_privacy_categories(settings, cx);
+                    }),
+                    FromDaemon::PrivacyCategoriesLost { detail } => entity.update(cx, |app, cx| {
+                        app.privacy_categories_failed(&detail, cx);
                     }),
                     FromDaemon::UsernameLookup(result) => entity.update(cx, |app, cx| {
                         app.adopt_username_lookup(result, cx);
@@ -2836,9 +2846,9 @@ impl WhatsAppApp {
         // The block list belongs to the account being left. Keeping it would
         // draw another account's blocked contacts the next time Settings opens.
         self.reset_blocklist();
-        // So does the read-receipts answer: an unchecked value from the old
-        // account must not decide what a new account's switch says.
-        self.reset_read_receipts();
+        // So do the privacy answers: an unchecked value from the old account
+        // must not decide what a new account's settings say.
+        self.reset_privacy();
         // A username answer belongs to that account too, including a verified
         // name that another account must not inherit.
         self.reset_username_lookup();

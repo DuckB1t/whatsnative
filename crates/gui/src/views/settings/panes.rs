@@ -15,7 +15,7 @@ use gpui_component::input::Input;
 use gpui_component::switch::Switch;
 use gpui_component::{Disableable as _, Icon, IconName, Selectable as _, Sizable as _};
 
-use oxidezap_core::{LogLevel, UsernameLookupResult};
+use oxidezap_core::{LogLevel, PrivacySettingCategory, PrivacySettingValue, UsernameLookupResult};
 
 use crate::app::{SettingsSection, WhatsAppApp};
 use crate::components::ProductIcon;
@@ -587,6 +587,11 @@ fn privacy(
             metrics,
         ))
         .child(group(
+            label(crate::tr!(PrivacyVisibility), metrics, cx),
+            privacy_visibility(app, entity.clone(), metrics, cx),
+            metrics,
+        ))
+        .child(group(
             label(crate::tr!(BlockedContacts), metrics, cx),
             blocklist(app, entity.clone(), metrics, cx),
             metrics,
@@ -628,6 +633,224 @@ fn privacy(
             metrics,
         ))
         .into_any_element()
+}
+
+const PRIVACY_CATEGORY_ORDER: [PrivacySettingCategory; 6] = [
+    PrivacySettingCategory::LastSeen,
+    PrivacySettingCategory::Online,
+    PrivacySettingCategory::ProfilePhoto,
+    PrivacySettingCategory::About,
+    PrivacySettingCategory::GroupAdd,
+    PrivacySettingCategory::Messages,
+];
+
+/// The only values offered as buttons, in a fixed reading order.
+const PRIVACY_VALUE_ORDER: [PrivacySettingValue; 4] = [
+    PrivacySettingValue::All,
+    PrivacySettingValue::Contacts,
+    PrivacySettingValue::None,
+    PrivacySettingValue::MatchLastSeen,
+];
+
+/// A fixed order, so the six rows appear in the same place on every render.
+fn privacy_categories_in_order() -> [PrivacySettingCategory; 6] {
+    PRIVACY_CATEGORY_ORDER
+}
+
+/// Which values a row may actually offer.
+///
+/// Both gates matter: a category refuses values it does not understand, and a
+/// value such as `contact_blacklist` cannot be sent by the plain setter even
+/// where a category would otherwise accept it.
+fn settable_privacy_values(category: PrivacySettingCategory) -> Vec<PrivacySettingValue> {
+    PRIVACY_VALUE_ORDER
+        .into_iter()
+        .filter(|value| category.accepts(*value) && value.is_settable())
+        .collect()
+}
+
+fn privacy_category_label(category: PrivacySettingCategory) -> &'static str {
+    match category {
+        PrivacySettingCategory::LastSeen => crate::tr!(LastSeenVisibility),
+        PrivacySettingCategory::Online => crate::tr!(OnlineVisibility),
+        PrivacySettingCategory::ProfilePhoto => crate::tr!(ProfilePhotoVisibility),
+        PrivacySettingCategory::About => crate::tr!(AboutVisibility),
+        PrivacySettingCategory::GroupAdd => crate::tr!(GroupAddPermission),
+        PrivacySettingCategory::Messages => crate::tr!(MessagesPermission),
+        // The six rows are the only callers. These two have dedicated paths or
+        // no meaning here, and are never drawn as buttons.
+        PrivacySettingCategory::ReadReceipts | PrivacySettingCategory::Unknown => "",
+    }
+}
+
+fn privacy_value_label(value: PrivacySettingValue) -> &'static str {
+    match value {
+        PrivacySettingValue::All => crate::tr!(Everyone),
+        PrivacySettingValue::Contacts => crate::tr!(ContactsOnly),
+        PrivacySettingValue::None => crate::tr!(Nobody),
+        PrivacySettingValue::MatchLastSeen => crate::tr!(MatchLastSeen),
+        // Neither can be offered by the plain setter.
+        PrivacySettingValue::ContactBlacklist | PrivacySettingValue::Unknown => "",
+    }
+}
+
+fn privacy_category_id(category: PrivacySettingCategory) -> &'static str {
+    match category {
+        PrivacySettingCategory::LastSeen => "last-seen",
+        PrivacySettingCategory::Online => "online",
+        PrivacySettingCategory::ProfilePhoto => "profile-photo",
+        PrivacySettingCategory::About => "about",
+        PrivacySettingCategory::GroupAdd => "group-add",
+        PrivacySettingCategory::Messages => "messages",
+        PrivacySettingCategory::ReadReceipts | PrivacySettingCategory::Unknown => "unsupported",
+    }
+}
+
+fn privacy_value_id(value: PrivacySettingValue) -> &'static str {
+    match value {
+        PrivacySettingValue::All => "all",
+        PrivacySettingValue::Contacts => "contacts",
+        PrivacySettingValue::None => "none",
+        PrivacySettingValue::MatchLastSeen => "match-last-seen",
+        PrivacySettingValue::ContactBlacklist | PrivacySettingValue::Unknown => "unsupported",
+    }
+}
+
+/// The six account-wide categories this build can read and set.
+///
+/// Every row shows the server's answer, or says plainly when it did not give
+/// one. A value the build cannot set is reported as unsupported rather than
+/// drawn as a selected choice, and a missing category is never guessed from
+/// another one. Buttons are disabled while a read or a change is in flight;
+/// a click only asks, and the fresh account-wide answer redraws the row.
+fn privacy_visibility(
+    app: &WhatsAppApp,
+    entity: Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let loaded = app.privacy_categories_loaded();
+    let unavailable = app.privacy_categories_unavailable();
+    let busy = app.privacy_categories_busy();
+
+    let control = if loaded {
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .rounded(metrics.radius_md())
+            .overflow_hidden()
+            .bg(cx.theme().secondary)
+            .border_1()
+            .border_color(cx.theme().border)
+            .children(privacy_categories_in_order().into_iter().enumerate().map(
+                |(ix, category)| {
+                    privacy_category_row(
+                        category,
+                        app,
+                        entity.clone(),
+                        busy,
+                        ix + 1 == PRIVACY_CATEGORY_ORDER.len(),
+                        metrics,
+                        cx,
+                    )
+                },
+            ))
+            .into_any_element()
+    } else if unavailable {
+        pending(crate::tr!(PrivacyCategoriesUnavailable), metrics, cx).into_any_element()
+    } else {
+        pending(crate::tr!(LoadingPrivacyCategories), metrics, cx).into_any_element()
+    };
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(metrics.space_lg())
+        .child(
+            div()
+                .text_size(metrics.text_small())
+                .text_color(cx.theme().muted_foreground)
+                .child(crate::tr!(PrivacyVisibilityGuidance)),
+        )
+        .child(control)
+}
+
+fn privacy_category_row(
+    category: PrivacySettingCategory,
+    app: &WhatsAppApp,
+    entity: Entity<WhatsAppApp>,
+    busy: bool,
+    is_last: bool,
+    metrics: Metrics,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    let reported = app.privacy_categories().get(category).copied();
+    let current = reported.map(|setting| setting.value);
+    let status = match reported {
+        None => crate::tr!(PrivacyCategoryNotReported),
+        Some(setting) if setting.value.is_settable() && category.accepts(setting.value) => "",
+        Some(_) => crate::tr!(PrivacyCategoryUnsupported),
+    };
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(metrics.space_md())
+        .px(metrics.space_lg())
+        .py(metrics.space_lg())
+        .when(!is_last, |el| {
+            el.border_b_1().border_color(cx.theme().border)
+        })
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(metrics.space_lg())
+                .child(
+                    div()
+                        .text_size(metrics.text_secondary())
+                        .text_color(cx.theme().foreground)
+                        .child(privacy_category_label(category)),
+                )
+                .when(!status.is_empty(), |el| {
+                    el.child(
+                        div()
+                            .text_size(metrics.text_meta())
+                            .text_color(cx.theme().muted_foreground)
+                            .child(status),
+                    )
+                }),
+        )
+        .child(
+            div().flex().flex_wrap().gap(metrics.space_sm()).children(
+                settable_privacy_values(category)
+                    .into_iter()
+                    .map(move |value| {
+                        let entity = entity.clone();
+                        Button::new(SharedString::from(format!(
+                            "privacy-category-{}-{}",
+                            privacy_category_id(category),
+                            privacy_value_id(value)
+                        )))
+                        .label(privacy_value_label(value))
+                        .outline()
+                        .small()
+                        .selected(current == Some(value))
+                        .disabled(busy)
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| {
+                            entity.update(cx, |app, cx| {
+                                app.set_privacy_category(category, value, cx)
+                            });
+                        })
+                    }),
+            ),
+        )
 }
 
 /// Account-level DM read receipts, from the server and never guessed here.
@@ -1079,7 +1302,12 @@ fn diagnostics(entity: Entity<WhatsAppApp>, metrics: Metrics, cx: &App) -> AnyEl
 
 #[cfg(test)]
 mod tests {
-    use super::format_bytes;
+    use oxidezap_core::{PrivacySettingCategory as Category, PrivacySettingValue as Value};
+
+    use super::{
+        format_bytes, privacy_categories_in_order, privacy_category_label, privacy_value_label,
+        settable_privacy_values,
+    };
 
     /// The unit is binary and says so. A settings row that reports 1000-based
     /// "MB" over a filesystem that counts in 1024s is a number nobody can
@@ -1099,5 +1327,64 @@ mod tests {
     fn the_decimal_goes_where_it_carries_information() {
         assert_eq!(format_bytes(1_572_864), "1.5 MiB");
         assert_eq!(format_bytes(245_366_784), "234 MiB");
+    }
+
+    /// The pane is a fixed list: neither the dedicated receipts setting nor an
+    /// unrecognised category may join it, and the order never drifts with a
+    /// server's answer.
+    #[test]
+    fn privacy_rows_are_the_six_settable_categories_in_order() {
+        assert_eq!(
+            privacy_categories_in_order(),
+            [
+                Category::LastSeen,
+                Category::Online,
+                Category::ProfilePhoto,
+                Category::About,
+                Category::GroupAdd,
+                Category::Messages,
+            ]
+        );
+        for category in privacy_categories_in_order() {
+            assert!(!privacy_category_label(category).is_empty());
+        }
+    }
+
+    /// Both gates are applied to one fixed source. In particular a category
+    /// never gets `none` where upstream only permits `all` and `contacts`, and
+    /// neither a recognised but unsendable value nor an unknown one becomes a
+    /// button that looks like a choice.
+    #[test]
+    fn privacy_values_are_filtered_by_category_and_setter() {
+        assert_eq!(
+            settable_privacy_values(Category::LastSeen),
+            vec![Value::All, Value::Contacts, Value::None]
+        );
+        assert_eq!(
+            settable_privacy_values(Category::Online),
+            vec![Value::All, Value::MatchLastSeen]
+        );
+        assert_eq!(
+            settable_privacy_values(Category::ProfilePhoto),
+            vec![Value::All, Value::Contacts, Value::None]
+        );
+        assert_eq!(
+            settable_privacy_values(Category::About),
+            vec![Value::All, Value::Contacts, Value::None]
+        );
+        assert_eq!(
+            settable_privacy_values(Category::GroupAdd),
+            vec![Value::All, Value::Contacts, Value::None]
+        );
+        assert_eq!(
+            settable_privacy_values(Category::Messages),
+            vec![Value::All, Value::Contacts]
+        );
+        for category in privacy_categories_in_order() {
+            for value in settable_privacy_values(category) {
+                assert!(category.accepts(value) && value.is_settable());
+                assert!(!privacy_value_label(value).is_empty());
+            }
+        }
     }
 }

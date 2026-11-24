@@ -28,7 +28,7 @@
 - [x] Wave 1.4, media gallery
 - [x] Wave 1.5, local GIF and sticker search
 - [x] Wave 2, message actions with real APIs
-- [ ] Wave 3, privacy and settings with real mutations
+- [x] Wave 3, privacy and settings with real mutations
 - [ ] Wave 4, multi-account V2
 - [ ] MCP planning
 
@@ -56,6 +56,14 @@ before pushing. One pre-existing daemon launch test reports as leaky under
 nextest; it is unrelated to these waves. The old full libtest GUI command still
 aborts in this environment with a GPUI scheduler destructor panic, so CI's
 nextest run is the honest gate here.
+
+Wave 3 is also implemented, reviewed and green. It adds one protocol bump to 63
+and seven real account controls in the Privacy pane: the old DM read receipts
+plus last seen, online, profile photo, About, group add and who can message me.
+Every one of the six new controls uses the pinned upstream public setter,
+re-reads the server before it reports success and never flips a local value on a
+click. Unsupported server values stay as facts the window refuses to guess
+about. The full change is in section 33 of `docs/our-changes.md`.
 
 ## What the deep investigation found
 
@@ -125,10 +133,11 @@ nextest run is the honest gate here.
 
 - Media is a local jump list, not a gallery, with no thumbnails, filters or
   kind grouping (`docs/roadmap.md:646-653`).
-- Exactly one real account privacy control exists: DM read receipts. Last seen,
-  About visibility, group-add permissions, 2FA, passkeys, chat lock and
-  disappearing defaults are documented gaps, not fake switches
-  (`docs/roadmap.md:357-372`).
+- Account level privacy now has seven real controls: DM read receipts plus last
+  seen, online, profile photo, About, group add and who can message me. Security
+  notifications, 2FA, passkeys, chat lock, linked-device removal, disappearing
+  defaults and the message-request inbox remain documented gaps, not fake
+  switches (`docs/roadmap.md:362-378`).
 - The GUI is fixed to `AccountId::LEGACY`. Multi-account V2 has its own tracker
   in `docs/multi-account-todo.md` and is not mixed into this plan.
 
@@ -158,14 +167,19 @@ nextest run is the honest gate here.
 6. Attachment editing improvements that need no new codec: kind override and
    downscaling with the image crate. Cropping stays open if the picker gives us
    no crop rectangle.
+ 7. Six server owned privacy visibility controls. Use the public upstream read
+    and write IQ pair, re-read after every set and show unsupported values
+    honestly. This shipped in Wave 3, protocol 63.
 
 ### Blocked by upstream or by missing platform pieces
 
 - Cloud GIF trending and search, sticker pack open and add, channel role
-  administration, status audience editing, last seen and About visibility,
-  group-add permissions, chat lock, message-request inbox, passkeys, 2FA,
-  security notifications, key transparency, disappearing defaults, cross-platform
-  chat transfer, Meta AI, ads, business catalogs and channel subscriptions.
+  administration, status audience editing, chat lock, message-request inbox,
+  passkeys, 2FA, security notifications, key transparency, disappearing defaults,
+  cross-platform chat transfer, Meta AI, ads, business catalogs and channel
+  subscriptions. Last seen, online, profile photo, About, group add and who can
+  message me are no longer blocked; protocol 63 reaches them through public
+  upstream setters.
 - Animated GIF as a video message and video poster frames need an H.264 encoder.
   Nothing in this tree writes H.264.
 - Group call live validation needs real calls, which this plan forbids.
@@ -212,8 +226,32 @@ to them.
 
 ### Wave 3, privacy and settings
 
-Wire up any mutation that has a real public setter. Do not add decorative
-toggles. Update `docs/roadmap.md` when a gap closes.
+Wave 3 does not pretend every row in a messenger's privacy screen is reachable
+from this tree. Protocol 63 covers the categories the pinned upstream can both
+read with `fetch_privacy_settings` and set with the plain `set_privacy_setting`
+IQ: last seen, online, profile photo, About text, group add and who can message
+me. A successful set re-reads the server before the window updates, the same
+rule protocol 60 already uses for DM read receipts. `contact_blacklist` is shown
+as unsupported when the server reports it, because setting that value needs a
+separate disallowed-list update this wave does not offer.
+
+Security notifications, 2FA/PIN, passkeys and linked-device removal stay gaps:
+there is no public setter in this dependency. Disappearing defaults and chat
+lock also stay gaps for now, because a write-only control with no honest read
+path is a decorative toggle with extra network traffic.
+
+- Slice A: core DTOs and protocol 63 frames.
+- Slice B: session adapter and daemon handlers.
+- Slice C: settings pane controls, i18n and synthetic tests.
+- Slice D: docs, full gates and one push.
+
+Acceptance: every control shows a fresh server answer or says it is unknown,
+every mutation reaches a real public API, no unsupported value is guessed,
+and `docs/roadmap.md` is updated when a gap closes.
+
+Status: shipped in Wave 3. Protocol 63 is the only bump. The controls exist, the
+server value is the only source of truth, and the full gate run is in section 33
+of `docs/our-changes.md`.
 
 ### Wave 4, accounts
 

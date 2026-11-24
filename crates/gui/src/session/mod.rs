@@ -92,7 +92,8 @@ use oxidezap_core::{
     AccountId, CallLinkMedia, CallLinkPreview, CallState, ChannelPollCreated, ChannelPollDraft,
     ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
     CreatedMessageRef, DownloadableMedia, EventRsvp, JoinSubgroupRequest, LinkSubgroupsRequest,
-    QuotedMessage, SubgroupDraft, UiEvent, UnlinkSubgroupsRequest,
+    PrivacySettingCategory, PrivacySettingValue, PrivacySettings, QuotedMessage, SubgroupDraft,
+    UiEvent, UnlinkSubgroupsRequest,
 };
 use oxidezap_ipc::wire::dto::CallEventDto;
 use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, RequestId};
@@ -215,6 +216,15 @@ pub enum FromDaemon {
     PrivacySettings(oxidezap_core::PrivacyReadReceipts),
     /// A privacy read that never arrived, releasing the pane's one request.
     PrivacySettingsLost { detail: String },
+    /// The account's six generic privacy categories, published to every front
+    /// end rather than to the window that asked.
+    ///
+    /// A whole answer without a request id: the pane keeps the newest one. This
+    /// value does not release the read; the separate acknowledgement does.
+    PrivacyCategories(PrivacySettings),
+    /// A generic privacy-category read that never arrived. The separate lost
+    /// frame is what releases the pane's one read so it can ask again.
+    PrivacyCategoriesLost { detail: String },
     /// The typed answer to a username lookup, for the Contacts pane.
     ///
     /// The outcomes stay separate: needing a key is a different next step from
@@ -475,6 +485,14 @@ enum Awaiting {
     /// A privacy-settings read. The value itself is published account-wide;
     /// this holds the ask until its ack or refusal so the pane can try again.
     PrivacySettings,
+    /// The six-category privacy read. Its answer is published account-wide
+    /// and carries no id, so this holds the ask until the ack or the failed
+    /// frame releases it.
+    PrivacyCategoriesRead,
+    /// One category change, answered under its own id after the server has
+    /// taken the request. The fresh value arrives on the account-wide frame
+    /// before this answer, and nothing here updates a local copy.
+    PrivacyCategoryChange(oneshot::Sender<Result<(), Failure>>),
     /// A username lookup. The Contacts pane holds one in flight so two presses
     /// cannot race two answers into the same result card.
     UsernameLookup,
@@ -494,6 +512,7 @@ impl Awaiting {
         match self {
             Self::Account(tx) => tx.is_closed(),
             Self::Mutation(tx) => tx.is_closed(),
+            Self::PrivacyCategoryChange(tx) => tx.is_closed(),
             Self::EventCreated(tx) => tx.is_closed(),
             Self::ChannelPollCreated(tx) => tx.is_closed(),
             Self::Community(tx) => tx.is_closed(),
@@ -521,6 +540,7 @@ impl Awaiting {
             | Self::Members { .. }
             | Self::Blocklist
             | Self::PrivacySettings
+            | Self::PrivacyCategoriesRead
             | Self::UsernameLookup => false,
         }
     }
@@ -554,6 +574,9 @@ impl Awaiting {
                 let _ = tx.send(Err(failure.clone()));
             }
             Self::Mutation(tx) => {
+                let _ = tx.send(Err(failure.clone()));
+            }
+            Self::PrivacyCategoryChange(tx) => {
                 let _ = tx.send(Err(failure.clone()));
             }
             Self::EventCreated(tx) => {
@@ -647,6 +670,14 @@ impl Awaiting {
                 log::warn!("the privacy settings did not arrive: {detail}");
                 if let Some(events) = events {
                     let _ = events.send(FromDaemon::PrivacySettingsLost {
+                        detail: detail.to_string(),
+                    });
+                }
+            }
+            Self::PrivacyCategoriesRead => {
+                log::warn!("the privacy categories did not arrive: {detail}");
+                if let Some(events) = events {
+                    let _ = events.send(FromDaemon::PrivacyCategoriesLost {
                         detail: detail.to_string(),
                     });
                 }
@@ -2233,6 +2264,38 @@ impl SessionHandle {
         self.ask(
             ClientRequest::SetReadReceipts { enabled },
             Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Ask for the account's six generic privacy categories.
+    ///
+    /// The whole answer arrives as [`FromDaemon::PrivacyCategories`] for every
+    /// front end and carries no request id. Both a refusal and a dropped
+    /// connection arrive as [`FromDaemon::PrivacyCategoriesLost`], which
+    /// releases the pane's one read so it can ask again.
+    pub fn load_privacy_categories(&self) {
+        self.ask(
+            ClientRequest::FetchPrivacyCategories,
+            Awaiting::PrivacyCategoriesRead,
+        );
+    }
+
+    /// Set one generic privacy category on the account.
+    ///
+    /// The daemon publishes the fresh server answer under
+    /// [`FromDaemon::PrivacyCategories`] before it answers this request, so
+    /// the correlated receiver only says whether the change stood. Nothing on
+    /// this side changes a local value: the published answer redraws the pane.
+    pub fn set_privacy_category(
+        &self,
+        category: PrivacySettingCategory,
+        value: PrivacySettingValue,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::SetPrivacyCategory { category, value },
+            Awaiting::PrivacyCategoryChange(tx),
         );
         rx
     }

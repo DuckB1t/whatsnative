@@ -5,7 +5,8 @@ use oxidezap_core::{
     ChannelReact, ChannelVotePoll, Chat, ChatMessage, CommunityDraft, CommunityOperationResult,
     CreatedMessageRef, DownloadableMedia, EventLocation, EventRsvp, GroupHierarchy, GroupRoster,
     JoinSubgroupRequest, LinkSubgroupsRequest, LogLevel, OutgoingMedia, PluginAction,
-    PluginSurface, PrivacyReadReceipts, QuotedMessage, StatusStyle, SubgroupDraft, UiEvent,
+    PluginSurface, PrivacyReadReceipts, PrivacySetting, PrivacySettingCategory,
+    PrivacySettingValue, QuotedMessage, StatusStyle, SubgroupDraft, UiEvent,
     UnlinkSubgroupsRequest, UsernameLookupResult,
 };
 pub use oxidezap_core::{ContactHit, MessageSearchHit};
@@ -620,6 +621,29 @@ pub enum DaemonMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
     },
+    /// The account's six generic privacy categories, from a
+    /// [`ClientRequest::FetchPrivacyCategories`] read or a successful
+    /// [`ClientRequest::SetPrivacyCategory`] change.
+    ///
+    /// Dedicated and unaddressed like [`DaemonMessage::PrivacySettings`]: the
+    /// categories belong to the account, not to the window that asked. A fetch
+    /// gets an ordinary ack; a mutation publishes a fresh server answer before
+    /// its own correlated result. The DTOs keep an unknown state so a category
+    /// or value this build cannot read is never drawn as a known one.
+    PrivacyCategories { settings: Vec<PrivacySetting> },
+    /// The correlated answer to [`ClientRequest::SetPrivacyCategory`].
+    ///
+    /// A SET IQ answers with only a `dhash`, so an acknowledgement alone would
+    /// leave a window claiming a change the server may have refused. There is
+    /// no push event for these settings either, which is why the mutation
+    /// reports its own outcome under the id and the window re-reads the server.
+    /// `detail` is absent on success and optional on older frames.
+    PrivacyCategoryResult {
+        id: RequestId,
+        ok: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
     /// The answer to [`ClientRequest::LookupUsername`], under that request's
     /// id. One of three typed outcomes rather than a name plus a guess: the
     /// handle may need a key, or may resolve to nobody.
@@ -849,6 +873,7 @@ impl ClientRequest {
                 | Self::GroupMembers(_)
                 | Self::Blocklist
                 | Self::FetchPrivacySettings
+                | Self::FetchPrivacyCategories
                 | Self::LookupUsername { .. }
                 | Self::StorageUsage
                 | Self::ListCalls { .. }
@@ -1659,6 +1684,26 @@ pub enum ClientRequest {
     /// and must not be inferred from this one.
     SetReadReceipts {
         enabled: bool,
+    },
+    /// Read the six generic privacy categories from the server.
+    ///
+    /// A network read like [`ClientRequest::FetchPrivacySettings`]: the answer
+    /// is [`DaemonMessage::PrivacyCategories`], published without an id, and
+    /// this request gets an ordinary ack. The categories are last seen, online,
+    /// profile photo, About text, group add and who can message me, which are
+    /// the ones upstream can read and set with public APIs.
+    FetchPrivacyCategories,
+    /// Set one of the six generic privacy categories on the account.
+    ///
+    /// A real change on WhatsApp, answered by
+    /// [`DaemonMessage::PrivacyCategoryResult`] under this request's id once the
+    /// server has taken the IQ. The category and value travel as DTOs; their
+    /// upstream names are translated on the session side. `contact_blacklist`
+    /// is recognised but not offered through this plain setter, because setting
+    /// it needs a separate disallowed-list update this wave does not provide.
+    SetPrivacyCategory {
+        category: PrivacySettingCategory,
+        value: PrivacySettingValue,
     },
     /// Resolve a Meta username through the account held by the daemon.
     ///
@@ -3035,6 +3080,18 @@ mod tests {
                 ClientRequest::ForgetSession,
                 r#"{"request":"forget_session"}"#.to_string(),
             ),
+            (
+                ClientRequest::FetchPrivacyCategories,
+                r#"{"request":"fetch_privacy_categories"}"#.to_string(),
+            ),
+            (
+                ClientRequest::SetPrivacyCategory {
+                    category: PrivacySettingCategory::GroupAdd,
+                    value: PrivacySettingValue::Contacts,
+                },
+                r#"{"request":"set_privacy_category","category":"group_add","value":"contacts"}"#
+                    .to_string(),
+            ),
         ];
 
         for (request, expected) in cases {
@@ -3275,6 +3332,73 @@ mod tests {
                 ok: false,
                 detail: None,
             }
+        );
+    }
+
+    /// Protocol 63 gives the six generic privacy categories their own frames,
+    /// alongside the dedicated read-receipts pair from v60. The published
+    /// answer is unaddressed and the mutation's result is correlated. All
+    /// category and value pairs here are synthetic.
+    #[test]
+    fn protocol_63_generic_privacy_frames_put_the_same_bytes_on_the_wire() {
+        let fetch = ClientRequest::FetchPrivacyCategories;
+        assert_eq!(
+            serde_json::to_string(&fetch).unwrap(),
+            r#"{"request":"fetch_privacy_categories"}"#
+        );
+        assert!(fetch.is_read());
+
+        let set = ClientRequest::SetPrivacyCategory {
+            category: PrivacySettingCategory::GroupAdd,
+            value: PrivacySettingValue::Contacts,
+        };
+        assert_eq!(
+            serde_json::to_string(&set).unwrap(),
+            r#"{"request":"set_privacy_category","category":"group_add","value":"contacts"}"#
+        );
+        assert!(!set.is_read());
+
+        let published = DaemonMessage::PrivacyCategories {
+            settings: vec![PrivacySetting {
+                category: PrivacySettingCategory::LastSeen,
+                value: PrivacySettingValue::Contacts,
+            }],
+        };
+        let line = serde_json::to_string(&published).unwrap();
+        assert_eq!(
+            line,
+            r#"{"type":"privacy_categories","settings":[{"category":"last_seen","value":"contacts"}]}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).unwrap(),
+            published
+        );
+
+        let ok = DaemonMessage::PrivacyCategoryResult {
+            id: 9,
+            ok: true,
+            detail: None,
+        };
+        let line = serde_json::to_string(&ok).unwrap();
+        assert_eq!(
+            line,
+            r#"{"type":"privacy_category_result","id":9,"ok":true}"#
+        );
+        assert_eq!(serde_json::from_str::<DaemonMessage>(&line).unwrap(), ok);
+
+        let failed = DaemonMessage::PrivacyCategoryResult {
+            id: 9,
+            ok: false,
+            detail: Some("server refused".into()),
+        };
+        let line = serde_json::to_string(&failed).unwrap();
+        assert_eq!(
+            line,
+            r#"{"type":"privacy_category_result","id":9,"ok":false,"detail":"server refused"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&line).unwrap(),
+            failed
         );
     }
 

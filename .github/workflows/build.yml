@@ -62,7 +62,6 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           # `--no-install-recommends`: what these headers recommend is
@@ -81,36 +80,15 @@ jobs:
       # The registry and the git checkouts, and deliberately not `target/`.
       #
       # A repository gets 10 GB of Actions cache in total and GitHub evicts the
-      # least recently used entry to stay under it. What the other workflows
-      # write on a push to `main`, read off their own upload logs:
+      # least recently used entry to stay under it. The old cross platform CI
+      # jobs used to put the budget under pressure. With this project down to
+      # Linux only, the current regular writers are the Linux checks, MSRV and
+      # the web bundle. A full release target cache under fat LTO with
+      # `codegen-units = 1` still costs more than it saves here.
       #
-      #   ci.yml   Check (Linux)     2.17 GB
-      #   ci.yml   Check (Windows)   2.07 GB
-      #   ci.yml   Check (macOS)     1.64 GB
-      #   ci.yml   MSRV              0.87 GB
-      #   pages.yml pages-wasm       1.14 GB
-      #
-      # Which is already 8 GB before this job writes a byte, and this job
-      # writes three more — a release target directory under fat LTO with
-      # `codegen-units = 1`, per platform. So the budget was being overrun on
-      # every push, and what went missing rotated: across the pull requests
-      # sampled while writing this, the macOS and Windows `Check` jobs
-      # restored nothing on any of them, which is what turned a 3m49 Windows
-      # job on `main` into 12m26 on the pull request twenty minutes later.
-      #
-      # There is no version of this that keeps all three. So this job keeps the
-      # half of the cache that is cheap — the crates.io registry and the
-      # `whatsapp-rust` git checkout — and gives up the half that is over
-      # budget.
-      #
-      # It is a real trade rather than a free win, and the Windows job is where
-      # it is worth stating: with its cache it restored for 2m05, built for
-      # 7m51, and then spent 7m10 uploading — 9m15 of a 17m45 job moving a
-      # cache around. Cold, it loses the 7m51 and gains a full release
-      # compile; whether that job comes out ahead or behind is not something
-      # this change can predict, and it is the one job here that nobody is
-      # waiting on. What every pull request gains is not in doubt: a warm cache
-      # on the two platforms where a cold one costs eight minutes.
+      # So this job keeps the half of the cache that is cheap: the crates.io
+      # registry and the `whatsapp-rust` git checkout. It gives up the half
+      # that is over budget and recompiles the release binaries.
       - uses: Swatinem/rust-cache@2201cc584a476d1b508be977bbe4b7d1c7a52e9c # v2.9.3
         with:
           # The one cache in this repository whose key does not carry the
@@ -137,7 +115,6 @@ jobs:
       # desktop-file-utils and appstream validate the metadata. AppImage tooling is downloaded by
       # package.sh at pinned digests.
       - name: Install Linux packaging tools
-        if: runner.os == 'Linux'
         env:
           NFPM_VERSION: 2.48.0
           NFPM_SHA256_AMD64: 787af76e172dd5fc7cedf4d7c5a090a2f62be9001557a4db1103e270f90ddefd
@@ -160,7 +137,6 @@ jobs:
       # version (`nightly`, `pr-<n>`) becomes a pre-release of the Cargo.toml version inside
       # the packages, and a nightly AppImage looks for its updates in the `nightly` release.
       - name: Package for Linux distributions
-        if: runner.os == 'Linux'
         env:
           OXIDEZAP_VERSION: ${{ inputs.version }}
           CARGO_BUILD_TARGET: ${{ matrix.target }}
@@ -170,11 +146,9 @@ jobs:
       # (release-check.yml) and the plain archive by check-release.py. Verify the
       # staged tree that fed all three packages before it is left behind.
       - name: Smoke-test the staged Linux package tree
-        if: runner.os == 'Linux'
         run: packaging/linux/smoke-test.sh
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: runner.os == 'Linux'
         with:
           name: oxidezap-${{ matrix.name }}-packages
           path: dist/release/oxidezap-*
@@ -199,35 +173,25 @@ jobs:
               exit 1
               ;;
           esac
-          # One archive per platform, and the platform is in its *file* name.
-          # A directory would not do: `upload-artifact` stores a directory's
-          # contents at the artifact root, and the publish jobs download every
-          # platform with `merge-multiple`, so three sets of identically named
-          # binaries would land on top of each other and only one platform
-          # would survive into the release.
+          # One archive per architecture, and the architecture is in its *file*
+          # name. A directory would not do: `upload-artifact` stores a
+          # directory's contents at the artifact root, and the publish jobs
+          # download every artifact with `merge-multiple`, so two sets of
+          # identically named binaries would land on top of each other and
+          # only one architecture would survive into the release.
           out="oxidezap-$VERSION-$PLATFORM"
           mkdir -p "$out"
           cp crates/gui/assets/fonts/noto-color-emoji/NotoColorEmoji-OFL.txt "$out/"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            mv "target/$TARGET/release/oxidezap.exe" "$out/"
-            mv "target/$TARGET/release/oxidezapd.exe" "$out/"
-            mv "target/$TARGET/release/oxidezap-cli.exe" "$out/"
-            7z a -tzip "$out.zip" "$out" > /dev/null
-            echo "ASSET=$out.zip" >> "$GITHUB_ENV"
-          else
-            mv "target/$TARGET/release/oxidezap" "$out/"
-            mv "target/$TARGET/release/oxidezapd" "$out/"
-            mv "target/$TARGET/release/oxidezap-cli" "$out/"
-            # Preserving the execute bit, which the bare binaries never had:
-            # an archive can carry it where a raw asset download cannot.
-            chmod +x "$out/oxidezap" "$out/oxidezapd" "$out/oxidezap-cli"
-            if [ "${{ runner.os }}" = "Linux" ]; then
-              cp packaging/linux/install-desktop.sh packaging/linux/org.whatsnative.client.local.png "$out/"
-              chmod +x "$out/install-desktop.sh"
-            fi
-            tar -czf "$out.tar.gz" "$out"
-            echo "ASSET=$out.tar.gz" >> "$GITHUB_ENV"
-          fi
+          mv "target/$TARGET/release/oxidezap" "$out/"
+          mv "target/$TARGET/release/oxidezapd" "$out/"
+          mv "target/$TARGET/release/oxidezap-cli" "$out/"
+          # Preserving the execute bit, which the bare binaries never had:
+          # an archive can carry it where a raw asset download cannot.
+          chmod +x "$out/oxidezap" "$out/oxidezapd" "$out/oxidezap-cli"
+          cp packaging/linux/install-desktop.sh packaging/linux/org.whatsnative.client.local.png "$out/"
+          chmod +x "$out/install-desktop.sh"
+          tar -czf "$out.tar.gz" "$out"
+          echo "ASSET=$out.tar.gz" >> "$GITHUB_ENV"
 
       - name: Verify archive contents and binary architecture
         shell: bash
@@ -236,15 +200,13 @@ jobs:
           PLATFORM: ${{ matrix.name }}
         run: python3 .github/scripts/check-release.py "$ASSET" "$VERSION" "$PLATFORM"
 
-      - name: Run the packaged CLI on its native runner
+      - name: Run the packaged CLI on the Linux runner
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
           PLATFORM: ${{ matrix.name }}
-          RUNNER_OS: ${{ runner.os }}
         run: |
           cli="./oxidezap-$VERSION-$PLATFORM/oxidezap-cli"
-          if [ "$RUNNER_OS" = "Windows" ]; then cli="$cli.exe"; fi
           "$cli" --help
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

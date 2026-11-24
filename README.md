@@ -113,7 +113,7 @@ trade dress. The checklist gets updated after every wave.
 | Voice and video calls | 1:1 validated. Group calls draw a grid but have not been live tested |
 | Calls and chat details | Call log since daemon start, capped at 100. Details come from local state, not server profiles |
 | Plugins | Sandboxed `.wasm`, per-capability approval, no filesystem, no sockets |
-| Privacy | One real setting: DM read receipts. Everything else is honestly listed as missing |
+| Privacy | Seven real account controls: DM read receipts plus last seen, online, profile photo, About, group add and who can message me. The rest is listed as missing |
 | Languages | English and Portuguese |
 
 ## Screenshots
@@ -264,8 +264,10 @@ each need separate approval, and you can take it back. Start from
   are server owned, some have no public upstream API. We would rather say so
   than draw a switch that does nothing. The full list is in
   [docs/roadmap.md](docs/roadmap.md).
-- The privacy pane has exactly one real account control: DM read receipts. The
-  rest is a documented gap, not a lying toggle.
+- The privacy pane has seven real account controls: DM read receipts plus last
+  seen, online, profile photo, About, group add and who can message me. Each new
+  control uses a public upstream setter and shows only the server's fresh answer,
+  never a local guess. The rest is a documented gap, not a lying toggle.
 - A browser tab with its own session shares one plugin agent. Attaching to
   `oxidezapd` gives each plugin a thread.
 

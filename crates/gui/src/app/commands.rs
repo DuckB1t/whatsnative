@@ -334,6 +334,9 @@ impl WhatsAppApp {
             // Same for the read-receipts setting. Neither is inferred from
             // this window's chats, and both can change on another device.
             self.refresh_read_receipts(cx);
+            // The six generic categories live on the server as well. One read
+            // per arrival keeps the rows fresh without repeating it per render.
+            self.refresh_privacy_categories(cx);
         }
         if section == SettingsSection::Plugins {
             self.refresh_installed_plugins(cx);

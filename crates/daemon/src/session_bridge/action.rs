@@ -6,7 +6,8 @@
 
 use oxidezap_core::{
     ChannelPollDraft, ChannelReact, ChannelVotePoll, CommunityDraft, JoinSubgroupRequest,
-    LinkSubgroupsRequest, SubgroupDraft, UnlinkSubgroupsRequest,
+    LinkSubgroupsRequest, PrivacySettingCategory, PrivacySettingValue, SubgroupDraft,
+    UnlinkSubgroupsRequest,
 };
 use oxidezap_ipc::{CallAction, PostToChannel, RequestId};
 
@@ -328,6 +329,23 @@ pub enum Action {
     SetReadReceipts {
         id: RequestId,
         enabled: bool,
+        answer_to: Outbox,
+    },
+    /// Read the server-owned generic privacy categories. A network read like
+    /// the block list: the fresh categories are published to every front end
+    /// and this request gets its ordinary ack on `answer_to`.
+    FetchPrivacyCategories {
+        id: RequestId,
+        answer_to: Outbox,
+    },
+    /// Change one of the six generic privacy categories. The session validates
+    /// the pair, sends the IQ, reads the server again and publishes the fresh
+    /// categories before this request's correlated result. Read receipts stays
+    /// on its dedicated action above.
+    SetPrivacyCategory {
+        id: RequestId,
+        category: PrivacySettingCategory,
+        value: PrivacySettingValue,
         answer_to: Outbox,
     },
     /// Resolve a username through the live session. Like the block list, this

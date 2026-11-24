@@ -70,13 +70,7 @@ jobs:
           `oxidezap-nightly-plugins.zip` contains optional `.wasm` plugins.
           Unpack it and install the modules you want under Settings → Plugins.
 
-          The tarballs carry the execute bit. On macOS, clear the quarantine
-          flag before the first run:
-
-              xattr -dr com.apple.quarantine oxidezap oxidezapd oxidezap-cli
-
-          On Windows, SmartScreen will object. All of this follows from the
-          binaries being unsigned.
+          The tarballs carry the execute bit.
 
           `oxidezap-nightly-web.zip` is the same client as a web page: the
           bundle published to GitHub Pages, built to be served from anywhere
