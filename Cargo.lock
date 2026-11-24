@@ -6538,7 +6538,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-audio"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -6565,7 +6565,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-chat-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "buffa",
  "chrono",
@@ -6590,7 +6590,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "oxidezap-ipc",
  "oxidezap-wire",
@@ -6602,7 +6602,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6618,7 +6618,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-daemon"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -6667,7 +6667,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-gui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -6720,7 +6720,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-ipc"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "futures-channel",
  "futures-lite",
@@ -6742,7 +6742,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-logging"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "env_logger",
  "log",
@@ -6753,7 +6753,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-platform"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "futures-channel",
  "futures-lite",
@@ -6767,21 +6767,21 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-plugin"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "oxidezap-plugin-abi",
 ]
 
 [[package]]
 name = "oxidezap-plugin-abi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "oxidezap-plugin-abi",
 ]
 
 [[package]]
 name = "oxidezap-plugin-host"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6802,7 +6802,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-session"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -6842,7 +6842,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-video"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -6865,7 +6865,7 @@ dependencies = [
 
 [[package]]
 name = "oxidezap-wire"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",

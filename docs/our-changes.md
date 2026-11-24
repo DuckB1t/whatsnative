@@ -1193,6 +1193,27 @@ the added-line audit found no em or en dashes, no phone-shaped fixtures, no real
 JID namespaces, no account paths and no secrets. CI on `95bc5e8` passed the
 Linux Check job; Nightly and Pages were still running when last checked.
 
+### 36. Version said 0.3.0 before the tag did
+
+**Problem.** Tagging `v0.3.0` while the workspace still said `0.2.0` would have
+shipped binaries and a usage spec with the old version. That exact class of lie
+was fixed after v0.2.0, so it was not going back in.
+
+**Change.** `[workspace.package] version` is now `0.3.0` and `Cargo.lock` follows
+every workspace crate. README and feature plan now say v0.3.0 is the current
+release and name what each release carries. The tag points at this commit.
+
+**Not changed.** No protocol bump, no feature code and no new IPC frame. The
+release workflow still builds Linux only assets from the tag. No app, daemon,
+CLI or MCP server was launched. No real account was touched.
+
+**Gates.** fmt, clippy with warnings denied, workspace nextest (2764 passed,
+35 skipped, one pre-existing leaky daemon test), doctests and the xtask fmt,
+clippy and test gates (52 passed) were rerun after the version bump.
+`git diff --check` is clean and the added-line audit found no em or en dashes,
+no phone-shaped fixtures, no real JID namespaces, no account paths and no
+secrets.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

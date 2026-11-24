@@ -63,7 +63,8 @@ plus last seen, online, profile photo, About, group add and who can message me.
 Every one of the six new controls uses the pinned upstream public setter,
 re-reads the server before it reports success and never flips a local value on a
 click. Unsupported server values stay as facts the window refuses to guess
-about. The full change is in section 33 of `docs/our-changes.md`.
+about. The full change is in section 33 of `docs/our-changes.md`. v0.3.0 carries
+Wave 3 and the MCP plan; v0.2.0 still carries Waves 1 and 2.
 
 ## What the deep investigation found
 

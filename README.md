@@ -51,10 +51,10 @@ Progress snapshot, not a live counter:
 | Investigation and plan | 100% |
 | Wave 1, daily drivers | 100%, Calls, chat info, new chat, media gallery and local picker search done |
 | Wave 2, message actions | 100%, A through D done with real APIs only |
-| Wave 3, privacy and settings | 100%, pushed after v0.2.0 and not in that release |
+| Wave 3, privacy and settings | 100%, shipped in v0.3.0 after v0.2.0 |
 | Wave 4, multi-account | 0% |
 | MCP planning | 100%, a written plan only and no MCP server shipped |
-| Whole program | about 65%, Waves 1 through 3 pushed and MCP planned; v0.2.0 carries Waves 1 and 2 |
+| Whole program | about 65%, Waves 1 through 3 shipped; v0.2.0 carries Waves 1 and 2, v0.3.0 carries Wave 3 and the MCP plan |
 
 Checklist:
 
@@ -96,7 +96,7 @@ was actually sent. Protocol 62 adds a real pinned listing and a local contact
 search, so the pinned panel finds rows outside this window's loaded page and a
 forward can reach someone saved in the address book who is not a chat yet. There
 is no server-wide directory, no pin forever, no cloud GIF search and no real
-account was touched. `v0.2.0` is the current release; `v0.1.0` is the old one.
+account was touched. `v0.3.0` is the current release; `v0.2.0` is the previous one.
 Releases are Linux only. No macOS or Windows binaries are built or published.
 
 UI target: familiar layout, original design. No copied proprietary assets or
