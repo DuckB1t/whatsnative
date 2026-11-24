@@ -4,7 +4,7 @@ use usage_rs::{Args, Cli, Subcommands};
 
 /// Lightweight, scriptable WhatsApp CLI for WhatsNative
 #[derive(Cli)]
-#[usage(bin = "oxidezap-cli", version = "0.1.0", completion)]
+#[usage(bin = "oxidezap-cli", version, completion)]
 pub struct OxidezapCli {
     /// Format output as JSON
     #[usage(long, global)]
@@ -1207,4 +1207,19 @@ pub struct McpArgs {
     /// Output raw usage specification JSON
     #[usage(long)]
     pub spec: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OxidezapCli;
+
+    #[test]
+    fn usage_spec_carries_the_package_version() {
+        let spec = OxidezapCli::to_kdl();
+        let expected = format!("version \"{}\"", env!("CARGO_PKG_VERSION"));
+        assert!(
+            spec.lines().any(|line| line == expected),
+            "the generated usage spec must track the workspace version, got:\n{spec}"
+        );
+    }
 }

@@ -1064,6 +1064,29 @@ namespaces, account paths or secrets in the publication range. The CI-aligned
 nextest gate is the one that counts here; the old full libtest GUI command can
 still abort in this environment with the `gpui-pre-scheduler` destructor panic.
 
+### 32. The CLI stopped lying about its version
+
+The CLI usage attribute had `version = "0.1.0"` nailed into it while the
+workspace moved to `0.2.0`. That is small bullshit with a real cost: someone
+runs `oxidezap-cli --version`, gets the old number, and every bug report after
+that starts with an argument about which build they have. The attribute now
+reads the package version from Cargo at compile time. `--version` prints
+`oxidezap-cli 0.2.0`, and the generated usage spec says the same thing.
+
+A unit test in `crates/cli/src/args.rs` compares the generated spec against
+`CARGO_PKG_VERSION`. A future version bump cannot leave a stale literal behind
+without the suite catching it.
+
+**Not changed.** No daemon start, no pairing, no account read or write. The
+only local probes were the CLI `--version` flag and its local usage spec
+endpoint. No message, call, reaction, vote or setting was touched.
+
+**Gates.** fmt, clippy with `-D warnings`, workspace nextest (2747 passed,
+35 skipped, one pre-existing leaky daemon launch test), doctests (1 passed,
+10 ignored), xtask fmt, clippy and test (52 passed), and `git diff --check`
+all passed. The added-line audit saw 16 lines and found no em or en dashes, no
+phone-shaped fixtures, no real JID namespaces, no account paths and no secrets.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).
