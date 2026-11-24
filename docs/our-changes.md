@@ -1200,8 +1200,11 @@ shipped binaries and a usage spec with the old version. That exact class of lie
 was fixed after v0.2.0, so it was not going back in.
 
 **Change.** `[workspace.package] version` is now `0.3.0` and `Cargo.lock` follows
-every workspace crate. README and feature plan now say v0.3.0 is the current
-release and name what each release carries. The tag points at this commit.
+every workspace crate. The nested call playout test crate has its own lockfile,
+and CI caught that it still pinned `oxidezap-platform 0.2.0` under `--locked`;
+that lock is updated too. README and feature plan now say v0.3.0 is the current
+release and name what each release carries. The release tag points at the final
+commit in this section.
 
 **Not changed.** No protocol bump, no feature code and no new IPC frame. The
 release workflow still builds Linux only assets from the tag. No app, daemon,
