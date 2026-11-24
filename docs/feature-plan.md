@@ -262,8 +262,10 @@ these waves.
 ### After Wave 4
 
 The MCP plan is in `docs/mcp-plan.md`. Its Phase 0 froze the SDK and the nine
-tool contracts in `docs/mcp-tools.md`. Both are plans, not a shipped server.
-Implementation needs an explicit go ahead and keeps the first tool set read only.
+tool contracts in `docs/mcp-tools.md`. The user approved a later write scope in
+`docs/mcp-write-plan.md`: send, react, vote, post, call, select account and
+change settings, with no logout. All three are plans, not a shipped server.
+Implementation waits for Wave 4 and keeps the first tool set read only.
 
 ## Process rules for every wave
 

@@ -1274,6 +1274,61 @@ clippy and test gates (52 passed) all pass on this docs only tree. `git diff
 --check` is clean and the added-line audit found no em or en dashes, no
 phone-shaped fixtures, no real JID namespaces, no account paths and no secrets.
 
+### 39. The MCP write scope is approved and parked behind Wave 4
+
+**Problem.** The user changed the MCP scope after Phase 0. The frozen nine
+reads were still honest, but the plan said writes were only a maybe. That no
+longer matched the decision. Sending, reacting, voting, posting, calls,
+select account and settings now have a clear yes. Logout and device level
+operations still have a clear no.
+
+**Change.** `docs/mcp-write-plan.md` is new. It freezes the approved tool set,
+the no logout rule, the two call confirmation flow, the write switch, the
+audit line contents, the error codes and the order the tools may land. It puts
+all writes behind repo Wave 4 multi-account. `docs/mcp-plan.md`,
+`docs/feature-plan.md` and the README now point at the new file and say the
+first MCP build stays read only.
+
+**Not changed.** No MCP crate, no dependency, no protocol frame, no protocol
+bump, no daemon connection code, no tool and no write was added. The nine read
+contracts in `docs/mcp-tools.md` stay frozen. No app, daemon, CLI or MCP server
+was launched and no real account was touched.
+
+**Gates.** This is a docs only change. fmt, clippy with warnings denied,
+workspace nextest, doctests, xtask tests, `git diff --check`, the added-line
+dash audit and the account leak audit still have to pass before the commit.
+
+### 40. Wave 4.1 gave the GUI a real control plane adapter
+
+**Problem.** The GUI already opened a `ClientScope::Control` connection, but
+`Frames::apply` threw away `ControlHello`, `AccountsChanged` and `Accounts`.
+`SessionHandle` had no way to list local accounts or ask the daemon to create,
+reset or remove one. The whole multi-account control plane sat behind a window
+that could not read it.
+
+**Change.** `FromDaemon::AccountsChanged` now publishes the whole account set
+from both the first control hello and later changes. A new `Awaiting::Accounts`
+resolves `DaemonMessage::Accounts` under its own request id. `SessionHandle`
+gets `list_accounts`, `create_account`, `reset_account` and `remove_account`,
+all sent on the control connection and never on the account connection.
+`Accepted` is documented as a request ack, not completion; the snapshot event
+is the completion signal. Synthetic tests cover both hello scopes, all four
+requests, the snapshot events and the pending response paths. No app state
+adopts the list yet. That is the next slice.
+
+**Not changed.** No account switch, no Add/Reset/Remove UI, no call
+coordinator, no protocol frame, no protocol bump and no MCP code. No app,
+daemon, CLI or MCP server was launched. No real account, message, call, post,
+vote or reaction was touched.
+
+**Gates.** fmt and `git diff --check` pass. Workspace clippy with warnings
+denied passes. Workspace nextest passes with 2770 tests, 35 skipped and one
+pre-existing leaky daemon test. Doctests pass. xtask fmt and clippy pass. The
+local xtask test command cannot compile here because the installed compiler is
+1.99.1 and xtask requires 1.100.0, so CI remains the gate for that command.
+The added-line audit found no em or en dashes, phone-shaped fixtures, real JID
+namespaces, account paths or secrets.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

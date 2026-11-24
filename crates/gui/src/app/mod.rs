@@ -1706,6 +1706,13 @@ impl WhatsAppApp {
                     FromDaemon::MediaResults { results } => entity.update(cx, |app, cx| {
                         app.adopt_media_results(results, cx);
                     }),
+                    // The control plane's account list. This window still
+                    // takes its account from the account connection, so there
+                    // is no app state to adopt from this snapshot in this slice.
+                    FromDaemon::AccountsChanged(snapshot) => {
+                        let _ = snapshot;
+                        Ok(())
+                    }
                     // The tray's "Open", or another front end asking on a
                     // user's behalf. One window, so there is one to raise.
                     // The connection ended, and why. One screen drew three

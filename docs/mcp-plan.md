@@ -15,8 +15,11 @@ MCP process. The daemon still owns all of that.
 Fuck Electron, fuck webview. This is a Rust binary with stdin and stdout.
 
 Phase 0 is done as docs only. The SDK, tool names, input schemas, output data,
-limits and error codes are frozen in [docs/mcp-tools.md](mcp-tools.md). No MCP
-crate, dependency, socket code, tool or write exists yet.
+limits and error codes are frozen in [docs/mcp-tools.md](mcp-tools.md). The user
+later approved a write scope, frozen in
+[docs/mcp-write-plan.md](mcp-write-plan.md), but no MCP crate, dependency,
+socket code, tool or write exists yet. The approved writes wait for repo Wave 4
+multi-account.
 
 ## Decisions
 
@@ -52,9 +55,9 @@ crate, dependency, socket code, tool or write exists yet.
   no nonzero exit that hides the reason.
 - Start read only. The wire connection sets `read_only: true`. The legacy
   connection whitelists exactly three reads: contact search and the two
-  privacy fetches. Write tools are a later wave with their own gates. A model
-  that can send messages is a liability, not a feature, until somebody has
-  proved the guard rails.
+  privacy fetches. The approved write tools wait for repo Wave 4 and their own
+  gated slices. A model that can send messages is a liability, not a feature,
+  until somebody has proved the guard rails.
 
 ## First tool set
 
@@ -86,29 +89,36 @@ correlation the protocol does not give it.
 local account in that profile. The tool does not label it as one account's
 share. Media bytes and file counts are account scoped.
 
-## Write tools, later and never casual
+## Write tools, approved and never casual
 
-Writes are out of scope for the first MCP wave. That is not timidity, it is the
-difference between a tool and a loaded gun.
+The first MCP build stays read only. That is not timidity, it is the difference
+between a tool and a loaded gun. The user approved text send, reactions, poll
+votes, status posts, channel posts, call start and end, privacy and read receipt
+changes, and account selection. The exact list and the hard exclusions are in
+[docs/mcp-write-plan.md](mcp-write-plan.md). No logout tool exists.
 
-When writes do arrive, they come in a separate wave with all of this in place:
+Writes come after repo Wave 4 multi-account and in separate gated slices with
+all of this in place:
 
-- A process flag or environment switch, for example `--allow-writes` or
+- A process flag or environment switch, `--allow-writes` or
   `OXIDEZAP_MCP_ALLOW_WRITES=1`. Default stays read only.
 - Per tool declaration of write intent. The daemon's exhaustive
   `ClientRequest::access()` classification and read only enforcement stay the
   backstop, not a decorative comment.
-- A confirmation token for each write call. The first call returns a preview and
-  a token; the second call with that token performs it. No blind "trust me"
-  send.
-- No pairing, logout, account add or remove, store cleanup, history backfill,
-  media writes to disk, call start, or message purge in the first write set.
-  Those are account and device operations, not casual agent toys.
+- A two call confirmation token for each write call. The first call returns a
+  preview and a token; the second call with that token performs it. No blind
+  "trust me" send.
+- No pairing, logout, account add or remove, reset, store cleanup, history
+  backfill, media writes to disk or message purge in the write set. Those are
+  account and device operations, not casual agent toys.
 - A local audit line for every accepted write, with request id, tool name,
-  account id and outcome. No message bodies, no phone numbers, no tokens.
+  account id and outcome. No message bodies, phone numbers, JIDs, tokens or
+  account paths.
 
-A future write set can cover text send, reactions, chat read state and poll
-votes. Each one needs its own tests and its own honest limitation note.
+`select_account` rebinds the process to an existing local account. It never
+creates, removes, logs out or resets one. A confirmed switch ends any active
+call on the old account and restores the old binding if either hello fails.
+Calls land last, after Wave 4 has a real global call coordinator.
 
 ## Layout
 
@@ -133,8 +143,9 @@ votes. Each one needs its own tests and its own honest limitation note.
    and synthetic fixtures only. Full gates before any legacy tool lands.
 3. **Legacy read tools.** Add contact search and privacy reads with the
    unaddressed frame collector, then run full gates again.
-4. **Write wave, only if explicitly approved.** Reopen this plan, add the
-   confirmation flow and audit rules, then implement one write tool at a time.
+4. **Write wave, after repo Wave 4.** The scope is approved in
+   `docs/mcp-write-plan.md`. Add the switch, confirmation flow and audit rules,
+   then implement one write tool at a time in the order in that file.
 5. **Docs and Linux artifact.** Update `docs/cli.md`, the README and release
    notes when it actually exists. Do not advertise a plan as a product.
 
@@ -149,6 +160,9 @@ votes. Each one needs its own tests and its own honest limitation note.
 - Legacy tests cover unaddressed frames arriving before acks, duplicate frames
   and a refused unknown request.
 - Read only default is tested by trying a write tool with the switch off.
+- Write tests prove preview tokens are single use, bound to tool, account and
+  payload, and that a failed account switch restores the old binding. No test
+  logs out, pairs, resets or removes an account.
 - No app, daemon or CLI launch during validation. The fake daemon is a test
   double, not the installed service.
 - Repository gates still apply: fmt, clippy `-D warnings`, workspace nextest,

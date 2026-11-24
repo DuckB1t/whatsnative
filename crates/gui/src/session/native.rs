@@ -84,6 +84,33 @@ fn connect_over(endpoint: Endpoint) -> std::io::Result<(Session, Events)> {
     connect_over_account(endpoint, oxidezap_core::AccountId::LEGACY)
 }
 
+#[cfg(test)]
+fn connect_over_control(endpoint: Endpoint) -> std::io::Result<(Session, Events)> {
+    let (reader, writer) = endpoint.split()?;
+    let hangup = reader.hangup()?;
+
+    let attach::Attached {
+        mut session,
+        events,
+        sink,
+        pending,
+        pictures,
+        recover,
+    } = attach::begin_control(Link::over_stream(writer), Arc::new(Directory))?;
+
+    start_reader(
+        reader,
+        sink,
+        pending,
+        pictures,
+        recover,
+        hangup,
+        &mut session,
+    )?;
+
+    Ok((session, events))
+}
+
 fn connect_over_account(
     endpoint: Endpoint,
     account: oxidezap_core::AccountId,
@@ -441,10 +468,10 @@ mod tests {
     use std::sync::Arc;
     use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 
-    use oxidezap_ipc::{ClientRequest, Endpoint, Link};
+    use oxidezap_ipc::{ClientRequest, ClientScope, Endpoint, Link, Request};
 
     use super::Teardown;
-    use super::{Session, connect_over};
+    use super::{Session, connect_over, connect_over_account, connect_over_control};
 
     /// Long enough for a local socket to carry a line and a close, short
     /// enough that a test that is going to fail does it now.
@@ -500,12 +527,40 @@ mod tests {
             connect_over(Endpoint::connect_at(&self.path)?)
         }
 
+        /// An account connection to the id this test asked for.
+        fn account(
+            &self,
+            account: oxidezap_core::AccountId,
+        ) -> std::io::Result<(Session, super::Events)> {
+            connect_over_account(Endpoint::connect_at(&self.path)?, account)
+        }
+
+        /// A control connection, for the daemon-wide account requests.
+        fn control(&self) -> std::io::Result<(Session, super::Events)> {
+            connect_over_control(Endpoint::connect_at(&self.path)?)
+        }
+
         /// The next frame, which every connection begins with: the hello.
         fn hello(&self) {
             assert!(
                 matches!(self.heard.recv_timeout(SOON), Ok(Some(line)) if line.contains("\"request\":\"hello\"")),
                 "a connection says hello before anything else"
             );
+        }
+
+        /// The first frame, parsed as the hello that names the connection's
+        /// scope. This consumes the hello the helper above only checks.
+        fn hello_scope(&self) -> ClientScope {
+            let line = self
+                .heard
+                .recv_timeout(SOON)
+                .expect("the connection says hello")
+                .expect("a frame before the connection ended");
+            let request: Request = serde_json::from_str(&line).expect("a request frame");
+            match request.request {
+                ClientRequest::Hello { scope, .. } => scope,
+                other => panic!("the first frame was not a hello: {other:?}"),
+            }
         }
 
         /// Whether the connection ended, waiting for it if it has not.
@@ -669,6 +724,57 @@ mod tests {
         assert!(
             peer.quiet(),
             "and the request the hangup tried to make never reached the daemon"
+        );
+    }
+
+    #[test]
+    fn hello_names_the_connection_scope() {
+        let account = oxidezap_core::AccountId::new(11).unwrap();
+
+        let control_peer = Peer::listening("scope-control").unwrap();
+        let (_control, _events) = control_peer.control().unwrap();
+        assert_eq!(control_peer.hello_scope(), ClientScope::Control);
+
+        let account_peer = Peer::listening("scope-account").unwrap();
+        let (_account_session, _events) = account_peer.account(account).unwrap();
+        assert_eq!(account_peer.hello_scope(), ClientScope::Account { account });
+    }
+
+    #[test]
+    fn lifecycle_requests_reach_only_the_control_connection() {
+        let control_peer = Peer::listening("lifecycle-control").unwrap();
+        let (control, _control_events) = control_peer.control().unwrap();
+        assert_eq!(control_peer.hello_scope(), ClientScope::Control);
+
+        let account = oxidezap_core::AccountId::new(12).unwrap();
+        let account_peer = Peer::listening("lifecycle-account").unwrap();
+        let (_account_session, _account_events) = account_peer.account(account).unwrap();
+        assert_eq!(account_peer.hello_scope(), ClientScope::Account { account });
+
+        let managed = oxidezap_core::AccountId::new(13).unwrap();
+        let _listed = control.list_accounts();
+        let _created = control.create_account();
+        let _reset = control.reset_account(managed);
+        let _removed = control.remove_account(managed);
+
+        for expected in [
+            ClientRequest::ListAccounts,
+            ClientRequest::CreateAccount,
+            ClientRequest::ResetAccount { account: managed },
+            ClientRequest::RemoveAccount { account: managed },
+        ] {
+            let line = control_peer
+                .heard
+                .recv_timeout(SOON)
+                .expect("a control request")
+                .expect("a frame");
+            let request: Request = serde_json::from_str(&line).unwrap();
+            assert_eq!(request.request, expected);
+        }
+
+        assert!(
+            account_peer.quiet(),
+            "a lifecycle request reached the account connection"
         );
     }
 }

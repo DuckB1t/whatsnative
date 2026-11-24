@@ -181,6 +181,10 @@ impl<'a> Frames<'a> {
                 }
             }
 
+            // The control plane's first frame carries the account list whole.
+            DaemonMessage::ControlHello { protocol, accounts } if protocol == PROTOCOL_VERSION => {
+                self.publish(FromDaemon::AccountsChanged(accounts))?;
+            }
             // The first frame, and the only one that describes where things
             // already stand. A window opened while the daemon was already
             // linked hears nothing else about the account it is attached to:
@@ -202,7 +206,8 @@ impl<'a> Frames<'a> {
             // snapshot is a whole state to adopt, and a frame that merely
             // *deserializes* is not a frame that means what this build
             // thinks it means.
-            DaemonMessage::Hello { protocol, .. } => {
+            DaemonMessage::Hello { protocol, .. }
+            | DaemonMessage::ControlHello { protocol, .. } => {
                 error!(
                     "the daemon speaks protocol {protocol}, this build speaks {PROTOCOL_VERSION}"
                 );
@@ -416,6 +421,10 @@ impl<'a> Frames<'a> {
                 // For most requests this only releases the entry. For the few
                 // whose whole answer is that they were done, it is the answer.
                 match take_pending(self.pending, id) {
+                    // Reset and remove use `Mutation` here only to release
+                    // the request. `Accepted` says the daemon took the
+                    // request, not that the account finished changing;
+                    // `AccountsChanged` is the completion signal.
                     Some(Awaiting::Mutation(tx)) | Some(Awaiting::StagedMutation { tx, .. }) => {
                         let _ = tx.send(Ok(()));
                     }
@@ -436,9 +445,23 @@ impl<'a> Frames<'a> {
             // Accepted with no id: a request sent without one, which nobody
             // is waiting on an answer for.
             DaemonMessage::Accepted { id: None } => {}
+            DaemonMessage::AccountsChanged { snapshot } => {
+                self.publish(FromDaemon::AccountsChanged(snapshot))?;
+            }
+            DaemonMessage::Accounts { id, snapshot } => match take_pending(self.pending, id) {
+                Some(Awaiting::Accounts(tx)) => {
+                    let _ = tx.send(Ok(snapshot));
+                }
+                Some(waiting) => {
+                    self.fail(waiting, &Failure::permanent("unexpected account listing"))
+                }
+                None => debug!("an account listing arrived for {id}, which nobody is waiting on"),
+            },
             DaemonMessage::AccountRetired { account, successor } => {
                 self.publish(FromDaemon::AccountRetired { account, successor })?;
             }
+            // Both create and relink wait on `Awaiting::Account`, so one
+            // answer resolves either request under its own id.
             DaemonMessage::AccountCreated { id, account } => {
                 if let Some(Awaiting::Account(tx)) = take_pending(self.pending, id) {
                     let _ = tx.send(Ok(account));
@@ -1163,7 +1186,7 @@ fn fill_with(
 mod tests {
     use super::*;
     use oxidezap_core::CallState;
-    use oxidezap_ipc::StateVersion;
+    use oxidezap_ipc::{AccountOverview, AccountStatus, AccountsSnapshot, StateVersion};
 
     #[test]
     fn wire_preview_bytes_keep_their_mime_and_retry_flag_until_full_media_arrives() {
@@ -1357,6 +1380,129 @@ mod tests {
     }
 
     struct NoMedia;
+
+    fn account_snapshot(id: i32) -> AccountsSnapshot {
+        AccountsSnapshot {
+            accounts: vec![AccountOverview {
+                id: oxidezap_core::AccountId::new(id).unwrap(),
+                status: AccountStatus::Running,
+            }],
+        }
+    }
+
+    #[test]
+    fn control_hello_publishes_the_account_snapshot() {
+        let (sink, mut events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+        let snapshot = account_snapshot(7);
+
+        assert!(
+            frames
+                .apply(DaemonMessage::ControlHello {
+                    protocol: PROTOCOL_VERSION,
+                    accounts: snapshot.clone(),
+                })
+                .is_continue()
+        );
+        match events.try_recv().unwrap() {
+            FromDaemon::AccountsChanged(published) => assert_eq!(published, snapshot),
+            _ => panic!("the control hello's account set was not published"),
+        }
+    }
+
+    #[test]
+    fn accounts_changed_publishes_the_account_snapshot() {
+        let (sink, mut events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+        let snapshot = account_snapshot(8);
+
+        assert!(
+            frames
+                .apply(DaemonMessage::AccountsChanged {
+                    snapshot: snapshot.clone(),
+                })
+                .is_continue()
+        );
+        match events.try_recv().unwrap() {
+            FromDaemon::AccountsChanged(published) => assert_eq!(published, snapshot),
+            _ => panic!("the account change was not published"),
+        }
+    }
+
+    #[test]
+    fn accounts_answer_resolves_the_waiting_listing() {
+        let (sink, _events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        pending.lock().unwrap().insert(31, Awaiting::Accounts(tx));
+        let snapshot = account_snapshot(9);
+
+        assert!(
+            frames
+                .apply(DaemonMessage::Accounts {
+                    id: 31,
+                    snapshot: snapshot.clone(),
+                })
+                .is_continue()
+        );
+        assert_eq!(rx.try_recv().unwrap().unwrap(), snapshot);
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn account_creation_and_control_acks_resolve_their_requests() {
+        let (sink, _events) = super::super::sink::channel();
+        let pending = Pending::default();
+        let pictures = crate::video::LatestFrames::default();
+        let mut frames = Frames::new(&sink, &pending, &NoMedia, &pictures, Arc::new(|_, _| false));
+        let created = oxidezap_core::AccountId::new(10).unwrap();
+        let (created_tx, mut created_rx) = tokio::sync::oneshot::channel();
+        pending
+            .lock()
+            .unwrap()
+            .insert(41, Awaiting::Account(created_tx));
+
+        assert!(
+            frames
+                .apply(DaemonMessage::AccountCreated {
+                    id: 41,
+                    account: created,
+                })
+                .is_continue()
+        );
+        assert_eq!(created_rx.try_recv().unwrap().unwrap(), created);
+
+        let (reset_tx, mut reset_rx) = tokio::sync::oneshot::channel();
+        let (remove_tx, mut remove_rx) = tokio::sync::oneshot::channel();
+        pending
+            .lock()
+            .unwrap()
+            .insert(42, Awaiting::Mutation(reset_tx));
+        pending
+            .lock()
+            .unwrap()
+            .insert(43, Awaiting::Mutation(remove_tx));
+
+        assert!(
+            frames
+                .apply(DaemonMessage::Accepted { id: Some(42) })
+                .is_continue()
+        );
+        assert!(
+            frames
+                .apply(DaemonMessage::Accepted { id: Some(43) })
+                .is_continue()
+        );
+        assert!(reset_rx.try_recv().unwrap().is_ok());
+        assert!(remove_rx.try_recv().unwrap().is_ok());
+        assert!(pending.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn edit_confirmation_is_correlated_and_refusals_and_disconnects_release_waiters() {

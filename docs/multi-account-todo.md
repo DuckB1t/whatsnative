@@ -279,10 +279,13 @@ de contas no daemon nativo.** O que falta agora é a camada acima:
    supervisor anexado, então as três mutations respondem `Refused` lá,
    correto para hoje, mas item 8 do plano (registry multi-conta próprio pra
    web) segue pendente.
-3. **Coordenação global (tray, calls) ainda não existe**: o `hub`
-   pré-construído passado a `spawn_with_hub` continua fixo em
-   `AccountId::LEGACY`; a tray só observa esse hub. Com múltiplas contas
-   reais, a tray precisa saber agregar mais de uma.
+3. **Coordenação global (tray, calls) está pela metade**: a tray já agrega.
+   `crates/daemon/src/tray/accounts.rs` segue o `AccountRegistry` via
+   `TrayHub::follow`, soma unread com `saturating_add` e usa `connected` se
+   qualquer runtime estiver conectado. O fence de hardware de chamadas em
+   `session_bridge/call_devices.rs` também já cobre preview de câmera entre
+   runtimes. Falta um `CallCoordinator` explícito, estado de chamada na tray,
+   sinais cross-account e a política determinística completa.
 
 **Decisão de produto do item 9/seção 20 (perguntada e respondida): o que
 acontece com uma chamada ativa quando o usuário troca de conta.** Opção
@@ -332,20 +335,24 @@ confirmação antes de chamar `hang_up` e prosseguir.
       `attach::begin_control`) ao lado da de conta, e as requisições de
       processo (`SetLogLevel`, `ShowWindow`, `ReloadPlugins`, `InstallPlugin`,
       `RemovePlugin`, `ListInstalledPlugins`) foram movidas para ela, o plano
-      de conta as recusava. Falta o `AccountWorkspace` propriamente dito: a
-      conexão de conta continua fixa em `AccountId::LEGACY`.
+      de conta as recusava. A Wave 4.1 também decodifica `ControlHello`,
+      `AccountsChanged` e `Accounts`, e expõe `list_accounts`,
+      `create_account`, `reset_account` e `remove_account` no `SessionHandle`.
+      Falta o `AccountWorkspace` propriamente dito e o switcher: a conexão de
+      conta continua fixa em `AccountId::LEGACY`.
 - [ ] **7. UX**, switcher, Add, Reset, Remove, pairing por runtime e estado
       mínimo da conta ativa.
 - [ ] **8. Web/embedded**, registry singleton, Web Lock no daemon, um DB OPFS,
       scopes de tab e restauração do conjunto inteiro, plugin-state por conta.
       A `ControlSession` já cobre os quatro transports; o que falta aqui é o
       registry multi-conta do lado do daemon embutido.
-- [ ] **9. Global**, tray agregado, `CallCoordinator`, sinais cross-account e
-      política determinística para hardware de chamadas. Decisão de produto
-      **já tomada** (não mais pendente): opção A, finalizar a chamada ativa
-      ao trocar de conta, com aviso explícito antes de agir, ver a nota no
-      "Bloqueio arquitetural atual" acima. Falta só a implementação, que
-      depende do switcher (item 6/7) existir.
+- [~] **9. Global**, tray agregado e fence de preview entre runtimes já
+      prontos; falta `CallCoordinator`, estado de chamada na tray, sinais
+      cross-account e política determinística para hardware de chamadas.
+      Decisão de produto **já tomada** (não mais pendente): opção A, finalizar
+      a chamada ativa ao trocar de conta, com aviso explícito antes de agir,
+      ver a nota no "Bloqueio arquitetural atual" acima. Falta só a
+      implementação, que depende do switcher (item 6/7) existir.
 - [ ] **10. Hardening/performance**, matriz de races, testes de isolamento,
        stress de writer, benchmark 1/2/4 contas, web, docs e CI completo.
        **Gate de release, não item adiável:** cada `WhatsAppClient` ainda cria

@@ -96,7 +96,9 @@ use oxidezap_core::{
     UiEvent, UnlinkSubgroupsRequest,
 };
 use oxidezap_ipc::wire::dto::CallEventDto;
-use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, RequestId};
+use oxidezap_ipc::{
+    AccountsSnapshot, CallAction, ClientRequest, Link, PageCursor, Request, RequestId,
+};
 // The payload structs the protocol declares, named rather than glob-imported
 // so `Typing` and `Download` read at the call site as what they are: the
 // request's own payload, built here and moved onto the wire unchanged.
@@ -147,6 +149,11 @@ pub enum FromDaemon {
         account: AccountId,
         successor: AccountId,
     },
+    /// The daemon's account list, published on the control plane.
+    ///
+    /// Both the first control hello and later changes carry the whole set, so
+    /// every front end can draw the same list without merging deltas.
+    AccountsChanged(AccountsSnapshot),
     /// Something the session said.
     Session(Box<UiEvent>),
     /// The calls in progress at the moment this client attached.
@@ -395,7 +402,17 @@ type SyncedStickers = Vec<oxidezap_core::PickerSticker>;
 
 enum Awaiting {
     SyncedStickers(oneshot::Sender<Result<SyncedStickers, Failure>>),
+    /// A relink or creation answer, the id the daemon allocated.
+    ///
+    /// Both answer with an id and a refusal sentence. Sharing this variant
+    /// keeps relink's failure path exactly as it was.
     Account(oneshot::Sender<Result<oxidezap_core::AccountId, String>>),
+    /// The control plane's point-in-time account list.
+    ///
+    /// The control API and its frame tests construct this before an app slice
+    /// calls it, so the native binary has no caller yet.
+    #[allow(dead_code)]
+    Accounts(oneshot::Sender<Result<AccountsSnapshot, Failure>>),
     /// A message mutation whose result must reach the action that opened it.
     Mutation(oneshot::Sender<Result<(), Failure>>),
     /// A creation whose result is the message that was made, not just an
@@ -511,6 +528,7 @@ impl Awaiting {
     fn is_abandoned(&self) -> bool {
         match self {
             Self::Account(tx) => tx.is_closed(),
+            Self::Accounts(tx) => tx.is_closed(),
             Self::Mutation(tx) => tx.is_closed(),
             Self::PrivacyCategoryChange(tx) => tx.is_closed(),
             Self::EventCreated(tx) => tx.is_closed(),
@@ -560,6 +578,9 @@ impl Awaiting {
         match self {
             Self::Account(tx) => {
                 let _ = tx.send(Err(detail.to_string()));
+            }
+            Self::Accounts(tx) => {
+                let _ = tx.send(Err(failure.clone()));
             }
             Self::CallDevices(tx) => {
                 let _ = tx.send(Err(detail.to_string()));
@@ -2672,6 +2693,63 @@ impl SessionHandle {
     pub fn forget_session(&self) {
         self.conn.media.clear_cached();
         self.tell(ClientRequest::ForgetSession);
+    }
+
+    /// Account lifecycle asks belong to the control connection.
+    ///
+    /// The app holds that connection as `self.control` beside its account
+    /// session. None of these methods is meant to be sent through `self.client`:
+    /// the daemon serves them only on the control plane.
+    ///
+    /// The snapshot comes back under this request's id rather than as the
+    /// published [`FromDaemon::AccountsChanged`] event.
+    #[allow(dead_code)]
+    pub fn list_accounts(&self) -> oneshot::Receiver<Result<AccountsSnapshot, Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(ClientRequest::ListAccounts, Awaiting::Accounts(tx));
+        rx
+    }
+
+    /// Allocate a new account slot. The id arrives as `AccountCreated`.
+    #[allow(dead_code)]
+    pub fn create_account(&self) -> oneshot::Receiver<Result<oxidezap_core::AccountId, String>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(ClientRequest::CreateAccount, Awaiting::Account(tx));
+        rx
+    }
+
+    /// Ask the daemon to reset one account while keeping its id.
+    ///
+    /// `Accepted` is only the request ack, not completion. Watch
+    /// [`FromDaemon::AccountsChanged`] for the account reaching its next state.
+    #[allow(dead_code)]
+    pub fn reset_account(
+        &self,
+        account: oxidezap_core::AccountId,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::ResetAccount { account },
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Ask the daemon to remove one account permanently.
+    ///
+    /// `Accepted` is only the request ack, not completion. Watch
+    /// [`FromDaemon::AccountsChanged`] for the account leaving the set.
+    #[allow(dead_code)]
+    pub fn remove_account(
+        &self,
+        account: oxidezap_core::AccountId,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::RemoveAccount { account },
+            Awaiting::Mutation(tx),
+        );
+        rx
     }
 
     pub fn relink_account(

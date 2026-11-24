@@ -52,8 +52,8 @@ Progress snapshot, not a live counter:
 | Wave 1, daily drivers | 100%, Calls, chat info, new chat, media gallery and local picker search done |
 | Wave 2, message actions | 100%, A through D done with real APIs only |
 | Wave 3, privacy and settings | 100%, shipped in v0.3.0 after v0.2.0 |
-| Wave 4, multi-account | 0% |
-| MCP planning | 100%, SDK and nine tool contracts frozen, no MCP server shipped |
+| Wave 4, multi-account | 10%, GUI control adapter for account lists and lifecycle done |
+| MCP planning | 100%, SDK, nine reads and the approved write scope frozen, no MCP server shipped |
 | Whole program | about 65%, Waves 1 through 3 shipped; v0.2.0 carries Waves 1 and 2, v0.3.0 carries Wave 3 and the MCP plan |
 
 Checklist:
@@ -230,6 +230,7 @@ There are no macOS or Windows release assets.
 | [CLI](docs/cli.md) | The scriptable front end |
 | [MCP plan](docs/mcp-plan.md) | What a real MCP server would be, and why the current command is not one |
 | [MCP tool contracts](docs/mcp-tools.md) | The nine frozen tool schemas, limits, transport split and error codes |
+| [MCP write plan](docs/mcp-write-plan.md) | The approved write tools, exclusions, gates and order after Wave 4 |
 | [Localization](docs/localization.md) | English and Portuguese |
 | [Web](docs/web.md) | The browser build and its hard limits |
 | [Plugin ABI](docs/plugin-abi.md) | The contract plugin authors must obey |
