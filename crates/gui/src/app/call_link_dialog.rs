@@ -116,7 +116,7 @@ fn can_join_call_link(preview_shown: bool, consent_given: bool) -> bool {
 impl WhatsAppApp {
     pub fn begin_call_link_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.can_send()
-            || self.client.is_none()
+            || self.client().is_none()
             || self.call_link_dialog.is_some()
             || self.event_dialog.is_some()
             || self.channel_poll_dialog.is_some()
@@ -232,7 +232,7 @@ impl WhatsAppApp {
                 return self.invalid_call_link(crate::tr!(CallLinkInvalid), cx);
             }
         };
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client_handle() else {
             return self.invalid_call_link(crate::tr!(DaemonDisconnectedBeforeAnswer), cx);
         };
         let validated_media = validated.media;
@@ -316,7 +316,7 @@ impl WhatsAppApp {
             log::warn!("Cannot join call link: this window is offline");
             return;
         }
-        if self.client.is_none() {
+        if self.client().is_none() {
             log::warn!("Cannot join call link: client is unavailable");
             return;
         }
@@ -343,7 +343,7 @@ impl WhatsAppApp {
         self.calls
             .update(cx, |calls, cx| calls.place_outgoing(call, cx));
 
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             log::warn!("Cannot join call link: client is unavailable");
             return;
         };

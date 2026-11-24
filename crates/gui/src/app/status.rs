@@ -664,7 +664,7 @@ impl WhatsAppApp {
         if !self.can_send() {
             return;
         }
-        let Some(client) = &self.client else {
+        let Some(client) = self.client_handle() else {
             return;
         };
         let Some(post) = &mut self.status_post else {
@@ -993,7 +993,7 @@ impl WhatsAppApp {
         // only here died with the process — which is why every restart
         // offered updates that had already been watched as new.
         self.watched_status.insert(message_id.clone());
-        if let Some(client) = &self.client {
+        if let Some(client) = self.client() {
             client.mark_status_watched(vec![message_id]);
         }
         self.invalidate_chat_cache();
@@ -1020,7 +1020,7 @@ impl WhatsAppApp {
         if !taken_back {
             return;
         }
-        if let Some(client) = &self.client {
+        if let Some(client) = self.client() {
             client.reload_history();
         }
         self.invalidate_chat_cache();
@@ -1468,7 +1468,7 @@ mod tests {
         let (mut cx, app) = fixture(cx);
         cx.update(|window, cx| {
             app.update(cx, |app, cx| {
-                app.client = Some(client);
+                app.install_test_session(Some(client));
                 app.begin_status_post(window, cx);
                 let text = app.status_post().expect("the composer").text.clone();
                 text.update(cx, |input, cx| {
@@ -1518,7 +1518,7 @@ mod tests {
         let (mut cx, app) = fixture(cx);
         cx.update(|window, cx| {
             app.update(cx, |app, cx| {
-                app.client = Some(client);
+                app.install_test_session(Some(client));
                 app.begin_status_post(window, cx);
                 app.set_status_recipient(RECIPIENT, true, cx);
                 app.set_status_background(0xFF7B_1FA2, cx);

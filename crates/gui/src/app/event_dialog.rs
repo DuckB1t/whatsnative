@@ -135,7 +135,7 @@ impl WhatsAppApp {
             is_scheduled_call: dialog.is_scheduled_call,
             extra_guests_allowed: dialog.extra_guests_allowed,
         };
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             self.notify_user(crate::tr!(CouldNotCreateEvent), notices::Tone::Problem, cx);
             return;
         };

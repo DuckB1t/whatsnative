@@ -156,7 +156,7 @@ impl WhatsAppApp {
             );
             return;
         }
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             return;
         };
         let answer = client.edit_message(jid.clone(), id.clone(), text.to_owned());

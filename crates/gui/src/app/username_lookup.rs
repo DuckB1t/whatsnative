@@ -98,7 +98,7 @@ impl WhatsAppApp {
         if self.username_lookup.busy || self.lookup_owner != LookupOwner::Settings {
             return;
         }
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             return;
         };
         let (Some(username), Some(key)) = (

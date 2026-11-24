@@ -391,7 +391,7 @@ impl WhatsAppApp {
 
     /// Whether the status feed has a page that can be requested or retried.
     pub fn status_can_load_more(&self, cx: &App) -> bool {
-        self.client.is_some()
+        self.client().is_some()
             && self
                 .pages
                 .read(cx)
@@ -405,7 +405,7 @@ impl WhatsAppApp {
     /// Request one status page, retaining its cursor across a failed request.
     pub fn load_more_status(&mut self, cx: &mut App) {
         let jid = oxidezap_core::STATUS_BROADCAST_JID;
-        if self.client.is_none() {
+        if self.client().is_none() {
             return;
         }
         self.pages.update(cx, |pages, _| {
@@ -441,7 +441,7 @@ impl WhatsAppApp {
         // because the paging state survives. Common on the web, where a page
         // cannot start a daemon and simply waits for one. Asked before the
         // position moves, so a window with no session leaves it `Unasked`.
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             return;
         };
         if self.pages.update(cx, |pages, _| pages.open_timeline(jid)) {
@@ -456,7 +456,7 @@ impl WhatsAppApp {
     pub(super) fn want_older_messages(&mut self, jid: &str, cx: &mut App) {
         // See `ensure_timeline_page`: no session, no request, so no
         // `Loading` to be stuck in.
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             return;
         };
         if let Some(cursor) = self.pages.update(cx, |pages, _| pages.older(jid)) {
@@ -485,7 +485,7 @@ impl WhatsAppApp {
     /// that named no position: it re-fetches the rows already on screen to
     /// obtain a cursor, and they merge into themselves.
     pub fn want_more_chats(&mut self, cx: &mut App) {
-        let Some(client) = &self.client else {
+        let Some(client) = self.client_handle() else {
             return;
         };
         let archived = self.destination == super::Destination::Chats
@@ -505,9 +505,7 @@ impl WhatsAppApp {
         &mut self,
         cx: &mut App,
     ) -> Option<NotificationPagePlan> {
-        let Some(client) = &self.client else {
-            return None;
-        };
+        let client = self.client_handle()?;
         let result = self
             .pages
             .update(cx, |pages, _| pages.notification_page_plan());
@@ -1309,7 +1307,7 @@ mod tests {
             crate::theme::init(cx);
             let app = cx.new(WhatsAppApp::new);
             app.update(cx, |app, cx| {
-                app.client = Some(crate::session::Session::recording_test_session(endpoint));
+                app.install_test_session(Some(crate::session::Session::recording_test_session(endpoint)));
                 let jid = oxidezap_core::STATUS_BROADCAST_JID;
                 assert!(app.pages.update(cx, |pages, _| pages.open_timeline(jid)));
                 assert!(app.pages.update(cx, |pages, _| pages.timeline_page_arrived(jid, Some(cursor("older")))));

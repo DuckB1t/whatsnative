@@ -97,7 +97,7 @@ impl WhatsAppApp {
                     .invalid_channel_poll_field(crate::tr!(ChannelPollSelectableCountInvalid), cx);
             }
         };
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             self.notify_user(
                 crate::tr!(CouldNotCreateChannelPoll),
                 notices::Tone::Problem,

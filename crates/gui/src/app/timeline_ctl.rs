@@ -210,7 +210,7 @@ impl WhatsAppApp {
             warn!("Multiple-choice voting needs synchronized ballots");
             return;
         }
-        if let Some(client) = self.client.as_ref() {
+        if let Some(client) = self.client() {
             // A channel poll is not an E2E poll: its ballot names the server's
             // content id and hashes the option text stored with the message.
             let waiting = if is_channel_jid(chat_jid) {
@@ -274,7 +274,7 @@ impl WhatsAppApp {
             warn!("Cannot answer event: this window is offline");
             return;
         }
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             return;
         };
         let waiting = client.respond_event(chat_jid, message_id, response, None);
@@ -433,7 +433,7 @@ impl WhatsAppApp {
         // the account, and the daemon refuses account requests anywhere
         // else. `control()` is the process-wide connection beside it, which
         // is why this sent nothing on a page until it moved here.
-        if let Some(session) = &self.client {
+        if let Some(session) = self.client() {
             // Channels are addressed by the server's content id, which the
             // session resolves from the stored row. An ordinary chat keeps the
             // E2E reaction path and the local bubble echo.

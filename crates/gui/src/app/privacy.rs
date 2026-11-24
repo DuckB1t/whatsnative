@@ -136,7 +136,7 @@ impl WhatsAppApp {
         if self.privacy.busy() {
             return;
         }
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             return;
         };
         self.privacy.begin_change();
@@ -172,7 +172,7 @@ impl WhatsAppApp {
         if !self.privacy.begin_change() {
             return;
         }
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             self.privacy.settle();
             return;
         };
@@ -234,7 +234,7 @@ impl WhatsAppApp {
         if !self.privacy.begin_category_request() {
             return;
         }
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             self.privacy.settle_categories();
             return;
         };
@@ -276,7 +276,7 @@ impl WhatsAppApp {
         if !self.privacy.begin_category_request() {
             return;
         }
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             self.privacy.settle_categories();
             return;
         };

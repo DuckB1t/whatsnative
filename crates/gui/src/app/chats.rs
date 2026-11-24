@@ -255,7 +255,7 @@ impl WhatsAppApp {
                         && let Some(newest) = newest_shared_message(&self.chats[at])
                     {
                         self.owed_reads.remove(&jid);
-                        if let Some(client) = &self.client {
+                        if let Some(client) = self.client() {
                             info!(
                                 "Marking {} read, now that it has messages",
                                 observe_str(&jid)

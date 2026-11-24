@@ -657,7 +657,7 @@ pub(super) mod tests {
         peer.set_nonblocking(true).unwrap();
         cx.update(|window, cx| {
             app.update(cx, |app, cx| {
-                app.client = Some(Session::recording_test_session(endpoint));
+                app.install_test_session(Some(Session::recording_test_session(endpoint)));
                 app.window_focused = true;
                 app.set_destination(Destination::Channels, window, cx);
                 let chat = app.find_chat_mut("peer@example.invalid").unwrap();

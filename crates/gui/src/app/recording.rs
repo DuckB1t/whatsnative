@@ -331,7 +331,7 @@ impl WhatsAppApp {
             }
         };
 
-        if self.client.is_none() {
+        if self.client().is_none() {
             warn!("Cannot send audio: not connected to the daemon");
             self.notify_user(
                 crate::tr!(ThatRecordingCouldNotBeSentNotConnected).to_string(),
@@ -447,7 +447,7 @@ impl WhatsAppApp {
             }
         };
 
-        if self.client.is_none() {
+        if self.client().is_none() {
             warn!("Cannot send audio: client is unavailable");
             self.notify_user(
                 crate::tr!(ThatRecordingCouldNotBeSentNotConnected).to_string(),
@@ -498,7 +498,7 @@ impl WhatsAppApp {
         duration_secs: u32,
         quoted: Option<QuotedMessage>,
     ) {
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             warn!("Cannot send audio: client is unavailable");
             return;
         };

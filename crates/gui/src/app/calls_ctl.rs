@@ -662,8 +662,7 @@ impl Calls {
                 }
                 let client = app
                     .update(cx, |app, _| {
-                        app.client
-                            .as_ref()
+                        app.client()
                             .filter(|client| client.account() == task_key.account)
                             .map(|client| client.handle())
                     })
@@ -803,7 +802,7 @@ impl WhatsAppApp {
     /// than waiting for an answer event that never arrives for an inbound
     /// call. That gap is what used to leave the audio running with no UI.
     pub fn accept_call(&mut self, cx: &mut Context<Self>) {
-        if self.client.is_none() {
+        if self.client().is_none() {
             warn!("Cannot accept call: client is unavailable");
             return;
         }
@@ -878,7 +877,7 @@ impl WhatsAppApp {
             call.call_id,
             observe_str(&call.caller_jid)
         );
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             // Checked at the top; re-read here because the notice above needs
             // `self`, and a borrow held across it would outlive it.
             warn!("Cannot accept call: client is unavailable");
@@ -902,7 +901,7 @@ impl WhatsAppApp {
         let Some((call_id, wanted)) = self.calls.update(cx, |calls, cx| calls.ask_video(cx)) else {
             return;
         };
-        if let Some(client) = &self.client {
+        if let Some(client) = self.client() {
             client.set_call_video(&call_id, wanted);
         }
     }
@@ -912,7 +911,7 @@ impl WhatsAppApp {
         let Some((call_id, muted)) = self.calls.update(cx, |calls, cx| calls.ask_muted(cx)) else {
             return;
         };
-        if let Some(client) = &self.client {
+        if let Some(client) = self.client() {
             client.set_call_muted(&call_id, muted);
         }
     }
@@ -940,7 +939,7 @@ impl WhatsAppApp {
     /// direction, the newest, and the ones it replaced were never worth
     /// drawing.
     pub(super) fn draw_waiting_call_frames(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             return;
         };
         let waiting = client.call_frames().take_for(self.calls.read(cx).state());
@@ -962,7 +961,7 @@ impl WhatsAppApp {
         // refusal down anyway put a line in the conversation saying the call
         // was declined when nothing had been declined at all. The visible
         // Decline says the same by returning early.
-        if self.client.is_none() {
+        if self.client().is_none() {
             warn!("Cannot decline the waiting call: client is unavailable");
             return;
         }
@@ -971,7 +970,7 @@ impl WhatsAppApp {
             return;
         };
         info!("Declining waiting call {call_id}");
-        if let Some(client) = &self.client {
+        if let Some(client) = self.client() {
             client.decline_call(call_id.as_str());
             let account = client.account();
             self.calls
@@ -983,7 +982,7 @@ impl WhatsAppApp {
 
     /// Decline the incoming call the card is showing.
     pub fn decline_call(&mut self, cx: &mut Context<Self>) {
-        if self.client.is_none() {
+        if self.client().is_none() {
             warn!("Cannot decline call: client is unavailable");
             return;
         }
@@ -995,7 +994,7 @@ impl WhatsAppApp {
             call.call_id,
             observe_str(&call.caller_jid)
         );
-        if let Some(client) = &self.client {
+        if let Some(client) = self.client() {
             client.decline_call(call.call_id.as_str());
             let account = client.account();
             self.calls
@@ -1030,7 +1029,7 @@ impl WhatsAppApp {
         let call_id = stage.call_id().to_string();
         info!("Ending call {call_id}");
         self.record_call(ended, cx);
-        if let Some(client) = &self.client {
+        if let Some(client) = self.client() {
             match &stage {
                 // A ringing offer has to be rejected rather than hung up:
                 // there is no live handle, and the caller should stop ringing
@@ -1094,7 +1093,7 @@ impl WhatsAppApp {
             warn!("Cannot start call: this window is offline");
             return;
         }
-        if self.client.is_none() {
+        if self.client().is_none() {
             warn!("Cannot start call: client is unavailable");
             return;
         }
@@ -1191,7 +1190,7 @@ impl WhatsAppApp {
         self.calls
             .update(cx, |calls, cx| calls.place_outgoing(call, cx));
 
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             // Checked at the top; re-read here because the checks between
             // need `self` and a borrow held across them would outlive them.
             warn!("Cannot start call: client is unavailable");
@@ -1241,7 +1240,7 @@ impl WhatsAppApp {
     }
 
     fn sync_call_alerts(&mut self, cx: &mut Context<Self>) {
-        let account = self.client.as_ref().map(Session::account);
+        let account = self.client().map(Session::account);
         let app = cx.entity().downgrade();
         self.calls
             .update(cx, |calls, cx| calls.sync_alert(account, app, cx));
@@ -1317,6 +1316,7 @@ impl WhatsAppApp {
             KeyboardOwner::PinnedMessages => window.focus(&self.pinned_messages_focus, cx),
             KeyboardOwner::MediaMessages => window.focus(&self.media_messages_focus, cx),
             KeyboardOwner::MessageDelete => window.focus(&self.message_delete_focus, cx),
+            KeyboardOwner::AccountSwitch => window.focus(&self.account_switch_focus, cx),
             KeyboardOwner::ForwardPicker => window.focus(&self.forward_picker_focus, cx),
             KeyboardOwner::NewChatDialog => {
                 if let Some(dialog) = self.new_chat_dialog.as_ref() {
@@ -1468,6 +1468,9 @@ fn keyboard_owner_for(
     showing_settings: bool,
 ) -> KeyboardOwner {
     let composing = intent == ChatOpen::ToCompose;
+    if surfaces.account_switch {
+        return KeyboardOwner::AccountSwitch;
+    }
     match ringing_call.filter(|_| surfaces.call_card) {
         Some(call_id) => KeyboardOwner::RingingCall(call_id),
         None if surfaces.global_search => KeyboardOwner::GlobalSearch,
@@ -1507,7 +1510,7 @@ pub(crate) fn exercise_call_frame_adoption(
         crate::theme::init(cx);
         cx.new(|cx| {
             let mut app = WhatsAppApp::new(cx);
-            app.client = Some(client);
+            app.install_test_session(Some(client));
             app.adopt_calls(initial, cx);
             app
         })
@@ -1556,6 +1559,7 @@ mod keyboard_owner_tests {
         paste_preview: false,
         message_edit: false,
         message_delete: false,
+        account_switch: false,
         forward_picker: false,
         new_chat_dialog: false,
         global_search: false,
@@ -1587,6 +1591,7 @@ mod keyboard_owner_tests {
             paste_preview: true,
             message_edit: false,
             message_delete: false,
+            account_switch: false,
             forward_picker: false,
             new_chat_dialog: false,
             global_search: false,
@@ -1599,6 +1604,19 @@ mod keyboard_owner_tests {
         assert_eq!(
             keyboard_owner_for(Some("call-1".into()), all, ChatOpen::ToCompose, true),
             KeyboardOwner::RingingCall("call-1".into())
+        );
+        assert_eq!(
+            keyboard_owner_for(
+                Some("call-1".into()),
+                KeyboardSurfaces {
+                    account_switch: true,
+                    ..all
+                },
+                ChatOpen::ToCompose,
+                true
+            ),
+            KeyboardOwner::AccountSwitch,
+            "a switch confirmation outranks even a ringing call"
         );
         assert_eq!(
             keyboard_owner_for(None, all, ChatOpen::ToCompose, true),

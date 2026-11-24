@@ -193,7 +193,7 @@ mod tests {
             let app_entity = cx.new(|cx| {
                 let mut app = WhatsAppApp::new(cx);
                 app.chats = chats();
-                app.client = Some(client);
+                app.install_test_session(Some(client));
                 app
             });
             app = Some(app_entity.clone());

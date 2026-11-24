@@ -158,7 +158,7 @@ impl WhatsAppApp {
     /// is in flight makes a refresh a change of data, not a blank pane.
     pub(crate) fn refresh_calls(&mut self, cx: &mut Context<Self>) {
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.list_calls(CALL_LIMIT))
         else {

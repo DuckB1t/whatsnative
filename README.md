@@ -52,7 +52,7 @@ Progress snapshot, not a live counter:
 | Wave 1, daily drivers | 100%, Calls, chat info, new chat, media gallery and local picker search done |
 | Wave 2, message actions | 100%, A through D done with real APIs only |
 | Wave 3, privacy and settings | 100%, shipped in v0.3.0 after v0.2.0 |
-| Wave 4, multi-account | 10%, GUI control adapter for account lists and lifecycle done |
+| Wave 4, multi-account | 45%, native account switcher and lifecycle done, global call coordination and perf gate remain |
 | MCP planning | 100%, SDK, nine reads and the approved write scope frozen, no MCP server shipped |
 | Whole program | about 65%, Waves 1 through 3 shipped; v0.2.0 carries Waves 1 and 2, v0.3.0 carries Wave 3 and the MCP plan |
 

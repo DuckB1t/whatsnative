@@ -300,6 +300,7 @@ pub fn render_connected_view(
         paste_preview: false,
         message_edit: false,
         message_delete: false,
+        account_switch: false,
         forward_picker: false,
         new_chat_dialog: false,
         global_search: false,

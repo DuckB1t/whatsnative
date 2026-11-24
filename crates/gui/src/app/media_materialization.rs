@@ -1016,7 +1016,7 @@ mod tests {
         let (app, _) = setup(cx);
         app.update(cx, |app, _| {
             app.materialization_cache = None;
-            assert!(app.client.is_none());
+            assert!(app.client().is_none());
             let cache = app
                 .media_cache()
                 .expect("retained native history has its local cache");

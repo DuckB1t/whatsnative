@@ -6,8 +6,8 @@
 //! worse answer than an honest note about what is missing.
 
 use gpui::{
-    AnyElement, App, Entity, IntoElement, ParentElement, SharedString, Styled, div,
-    prelude::FluentBuilder as _,
+    AnyElement, App, Entity, InteractiveElement, IntoElement, ParentElement, SharedString, Styled,
+    div, prelude::FluentBuilder as _,
 };
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -406,25 +406,185 @@ fn account(
             .unwrap_or_else(|| crate::tr!(NotLinked).to_string()),
     ));
 
-    group(
-        label(crate::tr!(LinkedDevice), metrics, cx),
-        div()
-            .flex()
-            .flex_col()
-            .gap(metrics.space_lg())
-            .child(card(lines, metrics, cx))
-            .when(app.has_retained_history(), |this| {
-                this.child(
-                    Button::new("account-retained-history")
-                        .label(crate::tr!(OpenRetainedHistory))
-                        .on_click(move |_, window, cx| {
-                            entity.update(cx, |app, cx| app.open_retained_history(window, cx));
-                        }),
+    let linked = div()
+        .flex()
+        .flex_col()
+        .gap(metrics.space_lg())
+        .child(card(lines, metrics, cx))
+        .when(app.has_retained_history(), |this| {
+            let open = entity.clone();
+            this.child(
+                Button::new("account-retained-history")
+                    .label(crate::tr!(OpenRetainedHistory))
+                    .on_click(move |_, window, cx| {
+                        open.update(cx, |app, cx| app.open_retained_history(window, cx));
+                    }),
+            )
+        });
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(metrics.space_xxl())
+        .child(
+            group(
+                label(crate::tr!(LinkedDevice), metrics, cx),
+                linked,
+                metrics,
+            )
+            .into_any_element(),
+        )
+        .child(
+            group(
+                label(crate::tr!(Accounts), metrics, cx),
+                account_list(app, entity, metrics, cx),
+                metrics,
+            )
+            .into_any_element(),
+        )
+        .into_any_element()
+}
+
+/// The account set the control plane has published.
+///
+/// A row carries only what `AccountOverview` actually has: the local id, the
+/// runtime status, and whether this window chose it. Names and phone numbers
+/// would have to be invented from an id, which is worse than showing less.
+fn account_list(
+    app: &WhatsAppApp,
+    entity: Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> AnyElement {
+    let has_control = app.has_account_control();
+    let active = app.active_account();
+    let accounts = app.accounts().unwrap_or_default();
+    let mut list = div().flex().flex_col().gap(metrics.space_lg());
+
+    if cfg!(target_family = "wasm") {
+        // A page owns one daemon in its address space; the desktop window is
+        // the only front end with a multi-account switcher in this slice.
+        list = list.child(pending(crate::tr!(AccountSwitcherNativeOnly), metrics, cx));
+    } else {
+        list = list
+            .children(accounts.iter().map(|overview| {
+                account_row(
+                    overview,
+                    active,
+                    app.account_request(overview.id),
+                    has_control,
+                    entity.clone(),
+                    metrics,
+                    cx,
                 )
-            }),
-        metrics,
-    )
-    .into_any_element()
+            }))
+            .when(accounts.is_empty(), |this| {
+                this.child(pending(crate::tr!(NoAccountsReported), metrics, cx))
+            });
+
+        let add = entity.clone();
+        let refresh = entity.clone();
+        list = list
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(metrics.space_md())
+                    .child(
+                        Button::new("accounts-add")
+                            .label(crate::tr!(AddAccount))
+                            .disabled(!has_control)
+                            .on_click(move |_, window, cx| {
+                                add.update(cx, |app, cx| app.add_account(window, cx));
+                            }),
+                    )
+                    .child(
+                        Button::new("accounts-refresh")
+                            .label(crate::tr!(RefreshAccounts))
+                            .disabled(!has_control)
+                            .on_click(move |_, _, cx| {
+                                refresh.update(cx, |app, cx| app.refresh_accounts(cx));
+                            }),
+                    ),
+            )
+            .when(!has_control, |this| {
+                this.child(pending(crate::tr!(AccountControlUnavailable), metrics, cx))
+            });
+    }
+    list.into_any_element()
+}
+
+/// One account row: id, status, active marker, and the four honest actions.
+fn account_row(
+    overview: &oxidezap_ipc::AccountOverview,
+    active: oxidezap_core::AccountId,
+    requested: Option<oxidezap_ipc::AccountStatus>,
+    has_control: bool,
+    entity: Entity<WhatsAppApp>,
+    metrics: Metrics,
+    cx: &App,
+) -> AnyElement {
+    let id = overview.id;
+    let status = requested.unwrap_or(overview.status);
+    let status_text =
+        crate::i18n::Language::current().text(crate::app::accounts::status_key(status));
+    let switch = entity.clone();
+    let reset = entity.clone();
+    let remove = entity.clone();
+
+    div()
+        .id(SharedString::from(format!("account-row-{id}")))
+        .debug_selector(|| format!("account-row-{id}"))
+        .flex()
+        .items_center()
+        .flex_wrap()
+        .gap(metrics.space_md())
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(metrics.text_meta())
+                .child(format!("{} {}", crate::tr!(AccountIdLabel), id)),
+        )
+        .child(
+            div()
+                .text_size(metrics.text_meta())
+                .text_color(cx.theme().muted_foreground)
+                .child(status_text),
+        )
+        .when(id == active, |this| {
+            this.child(
+                div()
+                    .text_size(metrics.text_micro())
+                    .text_color(cx.theme().accent)
+                    .child(crate::tr!(Active)),
+            )
+        })
+        .child(
+            Button::new(SharedString::from(format!("account-switch-{id}")))
+                .label(crate::tr!(Switch))
+                .disabled(id == active)
+                .on_click(move |_, window, cx| {
+                    switch.update(cx, |app, cx| app.switch_account(id, window, cx));
+                }),
+        )
+        .child(
+            Button::new(SharedString::from(format!("account-reset-{id}")))
+                .label(crate::tr!(Reset))
+                .disabled(!has_control || requested.is_some())
+                .on_click(move |_, _, cx| {
+                    reset.update(cx, |app, cx| app.reset_account(id, cx));
+                }),
+        )
+        .child(
+            Button::new(SharedString::from(format!("account-remove-{id}")))
+                .label(crate::tr!(Remove))
+                .disabled(!has_control || requested.is_some())
+                .on_click(move |_, _, cx| {
+                    remove.update(cx, |app, cx| app.remove_account(id, cx));
+                }),
+        )
+        .into_any_element()
 }
 
 fn notifications(metrics: Metrics, cx: &App) -> AnyElement {

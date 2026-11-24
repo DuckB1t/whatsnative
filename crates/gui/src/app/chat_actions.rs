@@ -179,7 +179,7 @@ impl WhatsAppApp {
         F: FnOnce(&Session, &str) -> oneshot::Receiver<Result<(), Failure>>,
     {
         let jid = jid.to_string();
-        let Some(waiting) = self.client.as_ref().map(|client| request(client, &jid)) else {
+        let Some(waiting) = self.client().map(|client| request(client, &jid)) else {
             self.settle_chat_mutation(
                 &jid,
                 before,
@@ -334,7 +334,7 @@ mod tests {
         });
         cx.new(|cx| {
             let mut app = WhatsAppApp::new(cx);
-            app.client = client;
+            app.install_test_session(client);
             app.chats.push(Arc::new(Chat::new(JID.to_string())));
             app
         })

@@ -654,7 +654,7 @@ impl WhatsAppApp {
             return;
         }
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.search_messages(query.clone(), None, false, GLOBAL_SEARCH_LIMIT))
         else {

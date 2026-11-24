@@ -262,7 +262,7 @@ impl WhatsAppApp {
     /// separately as `FromDaemon::StarredResults`, like a search answer.
     fn request_starred(&mut self, cx: &mut Context<Self>) {
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.list_starred_messages(LIST_LIMIT))
         else {
@@ -302,7 +302,7 @@ impl WhatsAppApp {
     /// so a pin made by another front end turns up here too.
     fn request_pinned(&mut self, cx: &mut Context<Self>) {
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.list_pinned_messages(LIST_LIMIT))
         else {
@@ -341,7 +341,7 @@ impl WhatsAppApp {
     /// `FromDaemon::MediaResults`, like every other jump list.
     fn request_media(&mut self, cx: &mut Context<Self>) {
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.list_media_messages(LIST_LIMIT))
         else {

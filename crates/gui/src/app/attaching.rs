@@ -118,7 +118,7 @@ impl WhatsAppApp {
         input: &Entity<InputAreaView>,
         cx: &mut Context<Self>,
     ) {
-        let Some(client) = self.client.as_ref().map(|session| session.handle()) else {
+        let Some(client) = self.client().map(|session| session.handle()) else {
             return;
         };
         input.update(cx, |view, cx| {
@@ -279,7 +279,7 @@ impl WhatsAppApp {
         {
             return;
         }
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             return;
         };
         let generation = request.generation;
@@ -712,7 +712,7 @@ impl WhatsAppApp {
         self.attachment_attempts
             .push((file.clone(), caption.clone()));
 
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             warn!("Cannot send a file: client is unavailable");
             self.notify_user(
                 format!("{} could not be sent: not connected.", file.file_name),

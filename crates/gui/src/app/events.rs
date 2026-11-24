@@ -521,7 +521,7 @@ impl WhatsAppApp {
                 // was still connecting is ringing at the far end with nothing
                 // holding it. The daemon not tracking it is what says so.
                 if !self.call_state(cx).holds(&call_id)
-                    && let Some(client) = &self.client
+                    && let Some(client) = self.client()
                 {
                     info!("cancelling {call_id}, which nobody is waiting for");
                     client.cancel_call(&call_id);
@@ -562,7 +562,7 @@ mod avatar_tests {
             app.chats.push(Arc::new(current));
             // The actual optimistic state mutation used by send_quoted. No
             // session exists, so this fixture cannot send a network message.
-            assert!(app.client.is_none());
+            assert!(app.client().is_none());
             assert!(app.add_message_to_chat(
                 jid,
                 ChatMessage::new_outgoing("synthetic-send".into(), "hello".into()),

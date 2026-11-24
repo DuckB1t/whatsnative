@@ -350,7 +350,7 @@ impl WhatsAppApp {
             dialog.hidden,
         );
 
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             self.notify_user(crate::tr!(CommunityCouldNotStart), Tone::Problem, cx);
             return;
         };

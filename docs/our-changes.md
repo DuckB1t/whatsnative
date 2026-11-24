@@ -1329,6 +1329,45 @@ local xtask test command cannot compile here because the installed compiler is
 The added-line audit found no em or en dashes, phone-shaped fixtures, real JID
 namespaces, account paths or secrets.
 
+### 41. Wave 4.2 put one active account in the GUI
+
+**Problem.** Wave 4.1 gave the window a control lane, but the visible session
+was still a bare `client`/`event_task` pair pinned to `AccountId::LEGACY`.
+There was no way to switch accounts from the app, no Add/Reset/Remove rows,
+and nothing stopped a switch from killing a live call behind someone's back.
+
+**Change.** A new pure `app/accounts.rs` owns one `Session` and its reader in
+an `AccountWorkspace`, with helpers for choosing a snapshot's active id,
+falling back when an active account disappears, and rolling back a failed
+switch. `WhatsAppApp` now adopts snapshots from both lanes, persists the
+chosen account, and attaches a new workspace only after `Session::attach`
+succeeds. The control session is never dropped by a switch. Settings gained
+a native Accounts list with id, status, active marker, Add, Refresh, Switch,
+Reset and Remove. `AccountOverview` has no friendly name, so the UI shows no
+invented one. Add uses the id returned by `CreateAccount`; pairing stays in
+that account's Hello state. Reset and Remove say requested and wait for
+`AccountsChanged`, because `Accepted` is only an ack. A busy call requires
+an explicit modal before `hang_up`; cancel changes neither the call nor the
+account. Escape cancels the modal first, and the modal owns the keyboard one
+layer above the call card. Recovery, retained history and relink now share
+the same connection teardown path.
+
+**Not changed.** No protocol frame, no `PROTOCOL_VERSION` bump, no new
+dependency, no MCP code, no logout, pair/unpair or data wipe path. The web
+front end gets an honest native-only notice instead of a fake control. No
+app, daemon, CLI or MCP server was launched. No real account, message, call,
+post, vote, reaction or setting was touched.
+
+**Gates.** fmt and `git diff --check` pass. Workspace clippy with warnings
+denied passes. Workspace nextest passes with 2775 tests, 35 skipped and one
+pre-existing leaky daemon test. Doctests pass. xtask fmt and clippy pass.
+The local xtask test binary still cannot compile on the installed 1.99.1
+compiler because xtask requires 1.100.0, so CI remains the gate for that
+command. The full GUI libtest still aborts on the same unrelated GPUI
+scheduler assertion as the base commit; nextest is the honest local gate.
+The added-line audit found no em or en dashes, long digit strings, real JID
+namespaces, account paths or secrets.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

@@ -520,7 +520,7 @@ impl WhatsAppApp {
         let Some(chat) = audio_receipt_chat(&self.chats, message_id) else {
             return;
         };
-        if let Some(client) = &self.client {
+        if let Some(client) = self.client() {
             client.mark_audio_played(chat, message_id.clone());
         }
     }
@@ -530,7 +530,7 @@ impl WhatsAppApp {
             return;
         }
         let epoch = self.playback_epoch;
-        let account = self.client.as_ref().map(|client| client.account());
+        let account = self.client().map(|client| client.account());
         self.playback_tick = Some(cx.spawn(async move |entity: WeakEntity<Self>, cx| {
             loop {
                 // ~15fps: the playhead only has to look continuous, and a
@@ -538,7 +538,7 @@ impl WhatsAppApp {
                 crate::platform::sleep(std::time::Duration::from_millis(66)).await;
                 let running = entity.update(cx, |app, cx| {
                     if app.playback_epoch != epoch
-                        || app.client.as_ref().map(|client| client.account()) != account
+                        || app.client().map(|client| client.account()) != account
                     {
                         return false;
                     }
@@ -803,7 +803,7 @@ impl WhatsAppApp {
             return;
         }
 
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             warn!("Cannot download audio: client is unavailable");
             self.finish_download(&message_id);
             self.notify_user(
@@ -901,7 +901,7 @@ impl WhatsAppApp {
         }
         let preview = downloadable.is_thumbnail;
         let download_rx = {
-            let Some(client) = &self.client else {
+            let Some(client) = self.client() else {
                 warn!("Cannot download image: client is unavailable");
                 self.finish_download(&message_id);
                 return;
@@ -1061,7 +1061,7 @@ impl WhatsAppApp {
         downloadable: DownloadableMedia,
         cx: &mut Context<Self>,
     ) {
-        if self.client.is_none() {
+        if self.client().is_none() {
             warn!("Cannot download document: client is unavailable");
             return;
         }
@@ -1074,7 +1074,7 @@ impl WhatsAppApp {
             return;
         }
         cx.notify();
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             self.document_downloads_in_flight.remove(&scope);
             return;
         };
@@ -1628,7 +1628,7 @@ impl WhatsAppApp {
             self.notify_user(reason.to_string(), crate::app::notices::Tone::Problem, cx);
             return;
         }
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             warn!("Cannot download video: client is unavailable");
             return;
         };

@@ -78,7 +78,7 @@ impl WhatsAppApp {
         cx: &mut Context<Self>,
     ) {
         if !can_set_member_label(group_jid, self.can_send())
-            || self.client.is_none()
+            || self.client().is_none()
             || self.member_label_dialog.is_some()
             || self.call_link_dialog.is_some()
             || self.event_dialog.is_some()
@@ -157,7 +157,7 @@ impl WhatsAppApp {
                 return self.notify_user(crate::tr!(MemberLabelSingleLine), Tone::Problem, cx);
             }
         };
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client_handle() else {
             return self.notify_user(crate::tr!(MemberLabelFailed), Tone::Problem, cx);
         };
         let request_id = Self::next_local_id("member-label");
@@ -432,7 +432,7 @@ mod tests {
             let app = cx.new(|cx| {
                 let mut app = WhatsAppApp::new(cx);
                 app.app_state = AppState::Connected;
-                app.client = Some(client);
+                app.install_test_session(Some(client));
                 app
             });
             app_entity = Some(app.clone());

@@ -472,7 +472,7 @@ impl WhatsAppApp {
     /// way, because a number that blanks every time the pane opens reads as a
     /// failure.
     pub fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             return;
         };
         let waiting = client.storage_usage();
@@ -632,7 +632,7 @@ impl WhatsAppApp {
     /// pane went on showing the old total, which reads as a clear that did
     /// not work.
     pub fn clear_media_cache(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             return;
         };
         let account = client.account();

@@ -138,7 +138,7 @@ impl Recovering {
 }
 
 impl WhatsAppApp {
-    fn save_account_selection(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn save_account_selection(&mut self, cx: &mut Context<Self>) {
         if let Err(error) = self.account_selection.save() {
             self.notify_user(
                 crate::tr!(could_not_remember_account, error),
@@ -170,8 +170,7 @@ impl WhatsAppApp {
         };
         self.save_account_selection(cx);
         if active {
-            self.event_task.take();
-            self.client.take();
+            self.take_client();
             self.app_state = AppState::Loading;
             if let Some(window) = self.account_window {
                 cx.spawn(async move |app: WeakEntity<Self>, cx| {
@@ -196,8 +195,7 @@ impl WhatsAppApp {
         let Some(account) = self.account_selection.retained.take() else {
             return;
         };
-        self.event_task.take();
-        self.client.take();
+        self.take_client();
         self.clear_account_view(window, cx);
         self.account_selection.active = account;
         self.save_account_selection(cx);
@@ -235,8 +233,7 @@ impl WhatsAppApp {
                     }
                     match result {
                         Ok(Ok(account)) => {
-                            app.event_task.take();
-                            app.client.take();
+                            app.take_client();
                             app.clear_account_view(window, cx);
                             app.account_selection = AccountSelection {
                                 active: account,
@@ -270,7 +267,7 @@ impl WhatsAppApp {
             cx.notify();
             return;
         }
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             self.retry_connection(cx);
             return;
         };

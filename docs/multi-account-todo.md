@@ -270,9 +270,10 @@ nenhum dos dois solta.
 **Não sobrou nenhuma peça de arquitetura pendente para o lifecycle dinâmico
 de contas no daemon nativo.** O que falta agora é a camada acima:
 
-1. **A GUI depende de tudo isso**: `ControlSession`/`AccountWorkspace`,
-   switcher, Add/Reset/Remove na UI, hoje a GUI nem fala v30 do jeito
-   multi-conta, só usa o wrapper de conta legada.
+1. **A GUI já fala v30 do jeito multi-conta na parte nativa**: o
+   `AccountWorkspace` troca só a conexão frontal, e o switcher com
+   Add/Reset/Remove vive na aba Accounts das configurações. Web/embedded
+   continuam com o aviso honesto de que o switcher é nativo.
 2. **Web/embedded continuam de fora**: `embedded.rs` continua construindo um
    `AccountRuntime` único à mão (não usa `AccountSupervisor`, que exige
    `Send` e o host de plugin web não é); o registry ali nunca tem um
@@ -293,16 +294,11 @@ escolhida: **A, finalizar a chamada.** Trocar de conta encerra qualquer
 chamada ativa na conta que está sendo deixada; a UI deve avisar
 explicitamente antes de agir ("trocar de conta vai encerrar sua chamada
  atual") e só prosseguir com confirmação do usuário, nunca finalizar a
-chamada silenciosamente. Nenhuma implementação de bloqueio restante: esta
-é a resposta definitiva para quando o switcher (item 6/7) e a coordenação
-global de chamada (item 9) forem implementados. Registrado aqui em vez de
-no código porque não existe hoje nenhuma ação de "trocar de conta" na GUI
-para este aviso ser anexado a, a GUI ainda fala só com a conta legada (ver
-item 1 abaixo). Quando o switcher existir, a confirmação entra no mesmo
-ponto onde `reset_and_pair_again`/`clear data and pair again`
-(`crates/gui/src/app/mod.rs`) já encerra a sessão hoje: checar
-`WhatsAppApp::active_call` antes de agir e, se houver uma, pedir
-confirmação antes de chamar `hang_up` e prosseguir.
+chamada silenciosamente. A Wave 4.2 ligou essa resposta ao switcher nativo:
+`switch_account` checa `call_state(cx).is_busy()`, mostra o aviso, e só
+chama `hang_up` depois da confirmação explícita. Cancelar deixa a chamada e
+a conta ativa intactas. Ainda falta a coordenação global do item 9 para a
+tray e a política determinística completa de hardware entre runtimes.
 
 ## Sequência de implementação
 
@@ -330,7 +326,7 @@ confirmação antes de chamar `hang_up` e prosseguir.
       de requests, e as três mutações de lifecycle (`CreateAccount` ->
       `AccountCreated`, `ResetAccount`/`RemoveAccount` -> `Accepted`) todas
       respondendo de verdade em `serve_control_client`.
-- [~] **6. GUI**, a **`ControlSession` já existe e está ligada**: a GUI abre
+- [x] **6. GUI**, a **`ControlSession` já existe e está ligada**: a GUI abre
       uma segunda conexão `ClientScope::Control` (`Session::connect_control`,
       `attach::begin_control`) ao lado da de conta, e as requisições de
       processo (`SetLogLevel`, `ShowWindow`, `ReloadPlugins`, `InstallPlugin`,
@@ -338,10 +334,16 @@ confirmação antes de chamar `hang_up` e prosseguir.
       de conta as recusava. A Wave 4.1 também decodifica `ControlHello`,
       `AccountsChanged` e `Accounts`, e expõe `list_accounts`,
       `create_account`, `reset_account` e `remove_account` no `SessionHandle`.
-      Falta o `AccountWorkspace` propriamente dito e o switcher: a conexão de
-      conta continua fixa em `AccountId::LEGACY`.
-- [ ] **7. UX**, switcher, Add, Reset, Remove, pairing por runtime e estado
-      mínimo da conta ativa.
+      A Wave 4.2 trocou o par `client`/`event_task` por um `AccountWorkspace`
+      por conta ativa. O `control` sobrevive ao switch, a seleção é
+      persistida, e um attach falho devolve a seleção anterior sem deixar uma
+      UI meio trocada.
+- [x] **7. UX**, switcher, Add, Reset, Remove, pairing por runtime e estado
+      mínimo da conta ativa. A lista nativa mostra só id e status, sem nomes
+      inventados. Add usa o id devolvido pelo control plane e deixa o pairing
+      para o Hello daquela conta. Reset/Remove mostram "requested" e esperam
+      `AccountsChanged`, nunca tratam `Accepted` como conclusão. Web mostra
+      aviso explícito de que o switcher é nativo.
 - [ ] **8. Web/embedded**, registry singleton, Web Lock no daemon, um DB OPFS,
       scopes de tab e restauração do conjunto inteiro, plugin-state por conta.
       A `ControlSession` já cobre os quatro transports; o que falta aqui é o

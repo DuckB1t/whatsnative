@@ -95,7 +95,7 @@ impl WhatsAppApp {
         if self.blocklist.busy() {
             return;
         }
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             return;
         };
         self.blocklist.busy = true;
@@ -125,7 +125,7 @@ impl WhatsAppApp {
     /// locally, so a second click cannot send the same block twice while the
     /// first is still on the wire.
     pub(crate) fn block_contact(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             return;
         };
         let Some(field) = self.blocklist.target.clone() else {
@@ -162,7 +162,7 @@ impl WhatsAppApp {
 
     /// Unblock one address from a row in the list.
     pub(crate) fn unblock_contact(&mut self, jid: String, cx: &mut Context<Self>) {
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             return;
         };
         let waiting = client.unblock(jid);

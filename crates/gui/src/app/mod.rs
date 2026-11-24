@@ -6,6 +6,7 @@
 //! - `messages`: Message list caching and height calculation
 //! - `calls`: Call state management (incoming/outgoing)
 
+pub(crate) mod accounts;
 mod attaching;
 mod blocklist;
 mod body;
@@ -153,6 +154,9 @@ enum KeyboardOwner {
     /// A call that is ringing — not one that has been answered, which is a
     /// call people type through.
     RingingCall(String),
+    /// The switch confirmation, which must own the keyboard until the person
+    /// says whether the current call may end.
+    AccountSwitch,
     /// A sent message's replacement text, in its own modal field.
     MessageEdit,
     /// An addressed sent-message deletion awaiting final confirmation.
@@ -202,6 +206,8 @@ pub struct KeyboardSurfaces {
     pub paste_preview: bool,
     pub message_edit: bool,
     pub message_delete: bool,
+    /// The account-switch confirmation, drawn over the call card.
+    pub account_switch: bool,
     pub forward_picker: bool,
     /// The new chat dialog over the sidebar.
     pub new_chat_dialog: bool,
@@ -516,11 +522,12 @@ use crate::views::{
 };
 use oxidezap_audio::{AudioPlayer, AudioRecorder, encode_to_opus_ogg};
 use oxidezap_core::{
-    AppState, Availability, CachedQrCode, CallOutcome, CallRecord, CallState, Chat, ChatMessage,
-    ComposingKind, DownloadableMedia, Ending, EventRsvp, Issued, MediaContent, MessageStatus,
-    OutgoingCall, PresenceRegistry, QuotedMessage, ReceiptType, Resend, Stage, SystemNotice,
-    TypingSummary, UiEvent,
+    AccountId, AppState, Availability, CachedQrCode, CallOutcome, CallRecord, CallState, Chat,
+    ChatMessage, ComposingKind, DownloadableMedia, Ending, EventRsvp, Issued, MediaContent,
+    MessageStatus, OutgoingCall, PresenceRegistry, QuotedMessage, ReceiptType, Resend, Stage,
+    SystemNotice, TypingSummary, UiEvent,
 };
+use oxidezap_ipc::{AccountStatus, AccountsSnapshot};
 
 // ChatListCache is now in chats.rs and re-exported above
 // RecordingState is now in media/mod.rs and re-exported above
@@ -828,8 +835,19 @@ pub struct WhatsAppApp {
     /// arriving while the sheet is up, and a second copy of a conversation
     /// would go stale the moment the next frame arrived.
     chat_info_jid: Option<String>,
-    /// WhatsApp client wrapper
-    client: Option<Session>,
+    /// The one account connection this window is showing. Its reader lives
+    /// with the connection so a switch cannot leave a task draining one
+    /// account into another account's view.
+    account_workspace: Option<accounts::AccountWorkspace>,
+    /// The control plane's newest account set. `None` until the control lane
+    /// has answered or published one, which is different from an empty set.
+    accounts_snapshot: Option<AccountsSnapshot>,
+    /// Lifecycle requests this window has sent but has not seen settled.
+    /// `Accepted` is only a request ack, so the status comes from the next
+    /// snapshot rather than from the answer.
+    account_requests: HashMap<AccountId, AccountStatus>,
+    /// A switch waiting for the person to agree to end a live call.
+    account_switch_confirmation: Option<AccountId>,
     account_selection: recovery::AccountSelection,
     /// The daemon's control plane, beside the account connection.
     ///
@@ -870,6 +888,8 @@ pub struct WhatsAppApp {
     paste_preview_focus: FocusHandle,
     /// Focus target for the sent-message deletion confirmation modal.
     message_delete_focus: FocusHandle,
+    /// Focus target for the account-switch call confirmation.
+    account_switch_focus: FocusHandle,
     /// Focus target for the chat picker a forward opens.
     forward_picker_focus: FocusHandle,
     /// Focus target for the full emoji table opened from a react strip.
@@ -1066,21 +1086,17 @@ pub struct WhatsAppApp {
     /// Unsent input text stashed per chat on switch; the shared input view
     /// would otherwise carry chat A's draft into chat B and send it there
     drafts: HashMap<String, String>,
-    /// Background task for event polling (must be retained)
-    #[allow(dead_code)]
-    event_task: Option<Task<()>>,
     /// Reconnecting to the daemon, which can mean starting one and waiting
     /// for it to listen. Retained for the same reason: dropping the task
     /// cancels it.
     #[allow(dead_code)]
     reconnect_task: Option<Task<()>>,
-    /// The control connection's event reader. Retained for the same reason as
-    /// `event_task`: dropping it ends the reader.
+    /// The control connection's event reader. Dropping it ends the reader.
     ///
-    /// Its frames are answered through the control session's own request
-    /// table, so it needs no separate handling beyond staying alive — the
-    /// `Awaiting` entries the control requests registered are what its reader
-    /// resolves.
+    /// Its frames answer the control requests through that session's own
+    /// request table, and it is also where published account snapshots arrive.
+    /// The reader applies those snapshots, because `Accepted` on a lifecycle
+    /// request says only that the daemon took the request.
     #[allow(dead_code)]
     control_event_task: Option<Task<()>>,
     /// The microphone, what it is being held open for, and the timer that
@@ -1375,7 +1391,7 @@ impl WhatsAppApp {
         if let Some(cache) = &self.materialization_cache {
             return Some(Arc::clone(cache));
         }
-        self.client.as_ref().map(Session::media_cache).or_else(|| {
+        self.client().map(Session::media_cache).or_else(|| {
             (!self.chats.is_empty())
                 .then(Session::retained_media_cache)
                 .flatten()
@@ -1438,7 +1454,7 @@ impl WhatsAppApp {
 
         self.avatar_manager
             .demand_chats_windowed(&visible_demands, &overscan_demands);
-        if let Some(session) = &self.client {
+        if let Some(session) = self.client() {
             self.avatar_manager.flush_demands(session);
         }
     }
@@ -1451,24 +1467,32 @@ impl WhatsAppApp {
                 picture_id: chat.avatar_picture_id.clone(),
                 cache_key: chat.avatar_cache_key.clone(),
             });
-        if let Some(session) = &self.client {
+        if let Some(session) = self.client() {
             self.avatar_manager.flush_demands(session);
         }
     }
 
     /// Drain the control connection's events.
     ///
-    /// The control plane carries no account state, so there is nothing to
-    /// apply. The reader resolves global requests and forwards explicit account
-    /// retirements so active and retained selections survive cleanup and restart.
+    /// This lane carries the account set as well as the answers to global
+    /// requests. Explicit retirements still move the persisted selection, and
+    /// a whole snapshot settles lifecycle requests and catches an active
+    /// account disappearing without a retirement frame.
     fn spawn_control_reader(mut ui_rx: crate::session::Events, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |entity: WeakEntity<Self>, cx| {
             while let Some(event) = ui_rx.recv().await {
-                if let FromDaemon::AccountRetired { account, successor } = event
-                    && entity
-                        .update(cx, |app, cx| app.account_retired(account, successor, cx))
-                        .is_err()
-                {
+                let result = match event {
+                    FromDaemon::AccountRetired { account, successor } => {
+                        entity.update(cx, |app, cx| {
+                            app.account_retired(account, successor, cx);
+                        })
+                    }
+                    FromDaemon::AccountsChanged(snapshot) => entity.update(cx, |app, cx| {
+                        app.adopt_accounts_snapshot(snapshot, cx);
+                    }),
+                    _ => entity.update(cx, |_, _| {}),
+                };
+                if result.is_err() {
                     break;
                 }
             }
@@ -1482,6 +1506,474 @@ impl WhatsAppApp {
     /// it could not do rather than panicking.
     fn control(&self) -> Option<&Session> {
         self.control.as_ref()
+    }
+
+    /// The active account's connection, as seen by every request path.
+    fn client(&self) -> Option<&Session> {
+        self.account_workspace
+            .as_ref()
+            .map(|workspace| workspace.session())
+    }
+
+    /// A cloneable way to send on the active connection.
+    ///
+    /// Callers that also need to change app state take this before the mutable
+    /// borrow, so the request can be sent after the change without the session
+    /// keeping the whole window borrowed.
+    fn client_handle(&self) -> Option<crate::session::SessionHandle> {
+        self.client().map(|client| client.handle())
+    }
+
+    /// Take the active connection, ending its reader before closing it.
+    fn take_client(&mut self) -> Option<Session> {
+        let workspace = self.account_workspace.take()?;
+        let session = workspace.into_session();
+        self.avatar_manager.set_session(None);
+        self.last_avatar_window_fingerprint = None;
+        Some(session)
+    }
+
+    /// Replace the active workspace. The old one drops here, reader first.
+    fn install_workspace(&mut self, session: Session, reader: Task<()>) {
+        let account = session.account();
+        self.account_workspace = Some(accounts::AccountWorkspace::new(account, session, reader));
+    }
+
+    /// Install a connection without a reader, for tests that only send.
+    #[cfg(test)]
+    fn install_test_session(&mut self, session: Option<Session>) {
+        self.account_workspace = session.map(|session| {
+            let account = session.account();
+            accounts::AccountWorkspace::without_reader(account, session)
+        });
+    }
+
+    /// The accounts the control plane has told this window about.
+    pub fn accounts(&self) -> Option<&[oxidezap_ipc::AccountOverview]> {
+        self.accounts_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.accounts.as_slice())
+    }
+
+    /// The id this window has chosen, whether or not it is connected.
+    pub fn active_account(&self) -> AccountId {
+        self.account_selection.active
+    }
+
+    /// Whether this window can send account lifecycle requests at all.
+    pub fn has_account_control(&self) -> bool {
+        self.control().is_some()
+    }
+
+    /// What this window has asked for one account, but has not seen settled.
+    pub fn account_request(&self, account: AccountId) -> Option<AccountStatus> {
+        self.account_requests.get(&account).copied()
+    }
+
+    /// Ask the control plane for the whole account set.
+    ///
+    /// A hello also publishes this set, but a window that opens while nothing
+    /// is changing would otherwise have no list until someone adds an account.
+    pub fn refresh_accounts(&mut self, cx: &mut Context<Self>) {
+        let Some(control) = self.control() else {
+            self.notify_user(
+                crate::tr!(AccountControlUnavailable),
+                notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        let answer = control.list_accounts();
+        cx.spawn(async move |app: WeakEntity<Self>, cx| {
+            let result = answer.await;
+            let _ = app.update(cx, |app, cx| match result {
+                Ok(Ok(snapshot)) => app.adopt_accounts_snapshot(snapshot, cx),
+                Ok(Err(failure)) => app.notify_user(
+                    format!("{}: {}", crate::tr!(CouldNotLoadAccounts), failure.detail),
+                    notices::Tone::Problem,
+                    cx,
+                ),
+                Err(_) => app.notify_user(
+                    crate::tr!(AccountControlUnavailable),
+                    notices::Tone::Problem,
+                    cx,
+                ),
+            });
+        })
+        .detach();
+    }
+
+    /// Adopt a whole account snapshot from the control lane.
+    ///
+    /// A reset or removal is settled by the account leaving or reaching its
+    /// next state, never by the `Accepted` answer to the request. An active
+    /// id missing from a fresh snapshot is the fallback path for a daemon
+    /// that removed it without sending a retirement frame.
+    pub(super) fn adopt_accounts_snapshot(
+        &mut self,
+        snapshot: AccountsSnapshot,
+        cx: &mut Context<Self>,
+    ) {
+        let active = self.account_selection.active;
+        self.accounts_snapshot = Some(snapshot.clone());
+        self.account_requests.retain(|account, requested| {
+            match snapshot
+                .accounts
+                .iter()
+                .find(|overview| overview.id == *account)
+            {
+                None => false,
+                Some(overview) if *requested == AccountStatus::Resetting => {
+                    overview.status == AccountStatus::Resetting
+                }
+                Some(_) => true,
+            }
+        });
+
+        // The choice this snapshot supports, and whether it is a successor for
+        // the account this window was showing. `None` is an empty daemon: there
+        // is nothing to attach, so the Add button is the way forward and the
+        // selection is kept for the account that will be created.
+        let had_active_workspace = self
+            .account_workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.account() == active);
+        match accounts::active_in(&snapshot, active) {
+            Some(chosen) if chosen != active => {
+                if let Some(fallback) = accounts::fallback_after_gone(&snapshot, active) {
+                    debug_assert_eq!(chosen, fallback);
+                    self.account_selection.active = fallback;
+                    self.save_account_selection(cx);
+                    if had_active_workspace {
+                        self.recover_from_removed_account(active, fallback, cx);
+                    }
+                }
+            }
+            None if accounts::is_gone(&snapshot, active) => {
+                self.save_account_selection(cx);
+                self.leave_removed_account(cx, had_active_workspace);
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// Stop showing an account the snapshot no longer names, with no successor.
+    ///
+    /// The Add button already says what to do next. What this has to do is stop
+    /// presenting a connection the daemon has retired without a frame, and keep
+    /// the last choice on disk so the next account starts from a known id.
+    fn leave_removed_account(&mut self, cx: &mut Context<Self>, had_active_workspace: bool) {
+        self.take_client();
+        self.app_state = AppState::Offline;
+        if !had_active_workspace {
+            return;
+        }
+        self.notify_user(crate::tr!(NoAccountsReported), notices::Tone::Info, cx);
+        if let Some(window) = self.account_window.or(self.modal_window) {
+            cx.spawn(async move |app: WeakEntity<Self>, cx| {
+                let _ = window.update(cx, |_, window, cx| {
+                    let _ = app.update(cx, |app, cx| {
+                        if app.account_workspace.is_some() {
+                            return;
+                        }
+                        app.clear_account_view(window, cx);
+                    });
+                });
+            })
+            .detach();
+        }
+    }
+
+    /// Leave an account the daemon has already removed from under this window.
+    fn recover_from_removed_account(
+        &mut self,
+        gone: AccountId,
+        successor: AccountId,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = gone;
+        self.take_client();
+        self.app_state = AppState::Loading;
+        if let Some(window) = self.account_window.or(self.modal_window) {
+            cx.spawn(async move |app: WeakEntity<Self>, cx| {
+                let _ = window.update(cx, |_, window, cx| {
+                    let _ = app.update(cx, |app, cx| {
+                        let current = app.account_selection.active;
+                        if app.account_workspace.is_some() || current != successor {
+                            return;
+                        }
+                        app.clear_account_view(window, cx);
+                        app.retry_connection(cx);
+                    });
+                });
+            })
+            .detach();
+        } else {
+            self.retry_connection(cx);
+        }
+    }
+
+    /// Choose an account for this window.
+    ///
+    /// A busy call is not ended behind someone's back. The confirmation names
+    /// that consequence and only its confirm button reaches `hang_up`.
+    pub fn switch_account(
+        &mut self,
+        account: AccountId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if account == self.account_selection.active {
+            return;
+        }
+        if self.call_state(cx).is_busy() {
+            self.account_switch_confirmation = Some(account);
+            cx.notify();
+            return;
+        }
+        self.perform_account_switch(account, window, cx);
+    }
+
+    /// Put up the call warning without changing either account or call.
+    pub fn cancel_account_switch(&mut self, cx: &mut Context<Self>) {
+        self.account_switch_confirmation = None;
+        cx.notify();
+    }
+
+    /// End the call only after the person has agreed, then switch.
+    pub fn confirm_account_switch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(target) = self.account_switch_confirmation.take() else {
+            return;
+        };
+        if target == self.account_selection.active {
+            return;
+        }
+        if self.call_state(cx).is_busy() {
+            self.hang_up(cx);
+        }
+        self.perform_account_switch(target, window, cx);
+    }
+
+    /// Replace the active connection, one attach at a time.
+    fn perform_account_switch(
+        &mut self,
+        target: AccountId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous = self.account_selection.active;
+        if previous == target {
+            return;
+        }
+
+        self.account_switch_confirmation = None;
+        // Old account state must not survive into the new account's view, even
+        // if the attach is refused and this window ends up with no connection.
+        self.clear_account_view(window, cx);
+        self.take_client();
+        self.avatar_manager.reset_connection();
+        self.avatar_manager.set_session(None);
+        self.last_avatar_window_fingerprint = None;
+        self.app_state = AppState::Loading;
+        self.account_selection.active = target;
+        self.save_account_selection(cx);
+
+        let intent = accounts::SwitchIntent {
+            previous,
+            requested: target,
+        };
+        let window = window.window_handle();
+        cx.spawn(async move |app: WeakEntity<Self>, cx| {
+            let attached = Session::attach(target, cx).await;
+            match attached {
+                Ok((client, events)) => {
+                    let _ = window.update(cx, |_, _, cx| {
+                        let _ = app.update(cx, |app, cx| {
+                            // A later switch may have won while this attach
+                            // was in flight. Dropping this client here keeps
+                            // the window on that newer choice.
+                            if app.account_selection.active != target {
+                                return;
+                            }
+                            let reader = Self::spawn_event_task(events, cx);
+                            for chat in &mut app.chats {
+                                Arc::make_mut(chat).avatar_live = false;
+                            }
+                            app.avatar_manager.set_session(Some(client.handle()));
+                            app.avatar_manager.flush_demands(&client);
+                            app.install_workspace(client, reader);
+                            app.resume_visible_read(cx);
+                            app.resend_log_level(cx);
+                            app.refresh_call_device_preferences(cx);
+                            if app.destination == Destination::Calls {
+                                app.refresh_calls(cx);
+                            }
+                            cx.notify();
+                        });
+                    });
+                }
+                Err(error) => {
+                    let settled = Session::is_settled(&error);
+                    let _ = app.update(cx, |app, cx| {
+                        if accounts::rollback(&mut app.account_selection.active, intent) {
+                            app.save_account_selection(cx);
+                        }
+                        app.app_state = if settled {
+                            AppState::Refused {
+                                reason: error.to_string(),
+                            }
+                        } else {
+                            AppState::Error(crate::session::Fault::unreachable(format!(
+                                "failed to reach the daemon: {error}"
+                            )))
+                        };
+                        app.notify_user(
+                            crate::tr!(AccountSwitchFailed),
+                            notices::Tone::Problem,
+                            cx,
+                        );
+                        if !settled {
+                            app.schedule_retry(cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Allocate another account slot and make it this window's account.
+    ///
+    /// The id comes from the control plane. Pairing is left to that account's
+    /// own Hello state; this side invents no code and no number for it.
+    pub fn add_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(control) = self.control() else {
+            self.notify_user(
+                crate::tr!(AccountControlUnavailable),
+                notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        let answer = control.create_account();
+        let window = window.window_handle();
+        cx.spawn(async move |app: WeakEntity<Self>, cx| {
+            let result = answer.await;
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = app.update(cx, |app, cx| match result {
+                    Ok(Ok(account)) => {
+                        app.refresh_accounts(cx);
+                        app.switch_account(account, window, cx);
+                    }
+                    Ok(Err(reason)) => app.notify_user(
+                        format!("{}: {}", crate::tr!(AccountAddFailed), reason),
+                        notices::Tone::Problem,
+                        cx,
+                    ),
+                    Err(_) => app.notify_user(
+                        crate::tr!(AccountControlUnavailable),
+                        notices::Tone::Problem,
+                        cx,
+                    ),
+                });
+            });
+        })
+        .detach();
+    }
+
+    /// Ask the daemon to reset one account while keeping its id.
+    ///
+    /// The notice says requested, not done. The pending mark is cleared by the
+    /// next snapshot that shows the account out of `Resetting`.
+    pub fn reset_account(&mut self, account: AccountId, cx: &mut Context<Self>) {
+        let Some(control) = self.control() else {
+            self.notify_user(
+                crate::tr!(AccountControlUnavailable),
+                notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        if self.account_requests.contains_key(&account) {
+            return;
+        }
+        let answer = control.reset_account(account);
+        self.account_requests
+            .insert(account, AccountStatus::Resetting);
+        self.notify_user(
+            format!("{} {account}", crate::tr!(AccountResetRequested)),
+            notices::Tone::Info,
+            cx,
+        );
+        cx.spawn(async move |app: WeakEntity<Self>, cx| {
+            let result = answer.await;
+            let _ = app.update(cx, |app, cx| {
+                if !matches!(result, Ok(Ok(()))) {
+                    if app.account_requests.get(&account) == Some(&AccountStatus::Resetting) {
+                        app.account_requests.remove(&account);
+                    }
+                    let detail = match result {
+                        Ok(Err(failure)) => failure.detail,
+                        _ => crate::tr!(AccountControlUnavailable).to_string(),
+                    };
+                    app.notify_user(
+                        format!("{}: {}", crate::tr!(AccountResetFailed), detail),
+                        notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Ask the daemon to remove one account permanently.
+    ///
+    /// As with reset, the ack is not completion. The account stays on screen
+    /// until a snapshot stops naming it.
+    pub fn remove_account(&mut self, account: AccountId, cx: &mut Context<Self>) {
+        let Some(control) = self.control() else {
+            self.notify_user(
+                crate::tr!(AccountControlUnavailable),
+                notices::Tone::Problem,
+                cx,
+            );
+            return;
+        };
+        if self.account_requests.contains_key(&account) {
+            return;
+        }
+        let answer = control.remove_account(account);
+        self.account_requests
+            .insert(account, AccountStatus::Removing);
+        self.notify_user(
+            format!("{} {account}", crate::tr!(AccountRemoveRequested)),
+            notices::Tone::Info,
+            cx,
+        );
+        cx.spawn(async move |app: WeakEntity<Self>, cx| {
+            let result = answer.await;
+            let _ = app.update(cx, |app, cx| {
+                if !matches!(result, Ok(Ok(()))) {
+                    if app.account_requests.get(&account) == Some(&AccountStatus::Removing) {
+                        app.account_requests.remove(&account);
+                    }
+                    let detail = match result {
+                        Ok(Err(failure)) => failure.detail,
+                        _ => crate::tr!(AccountControlUnavailable).to_string(),
+                    };
+                    app.notify_user(
+                        format!("{}: {}", crate::tr!(AccountRemoveFailed), detail),
+                        notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
     }
 
     /// Spawn the event handling task that processes UI events from the WhatsApp client
@@ -1706,13 +2198,13 @@ impl WhatsAppApp {
                     FromDaemon::MediaResults { results } => entity.update(cx, |app, cx| {
                         app.adopt_media_results(results, cx);
                     }),
-                    // The control plane's account list. This window still
-                    // takes its account from the account connection, so there
-                    // is no app state to adopt from this snapshot in this slice.
-                    FromDaemon::AccountsChanged(snapshot) => {
-                        let _ = snapshot;
-                        Ok(())
-                    }
+                    // The control plane's account list, published on hello and
+                    // whenever a runtime changes. The control reader handles
+                    // the same frame on that lane; adopting it here too means
+                    // an account-plane hello cannot leave the switcher empty.
+                    FromDaemon::AccountsChanged(snapshot) => entity.update(cx, |app, cx| {
+                        app.adopt_accounts_snapshot(snapshot, cx);
+                    }),
                     // The tray's "Open", or another front end asking on a
                     // user's behalf. One window, so there is one to raise.
                     // The connection ended, and why. One screen drew three
@@ -1768,7 +2260,10 @@ impl WhatsAppApp {
             chat_overlays: HashMap::new(),
             selected_chat: None,
             chat_info_jid: None,
-            client: None,
+            account_workspace: None,
+            accounts_snapshot: None,
+            account_requests: HashMap::new(),
+            account_switch_confirmation: None,
             account_selection: recovery::AccountSelection::load(),
             incoming_file_epoch: 0,
             incoming_file_reading: false,
@@ -1782,6 +2277,7 @@ impl WhatsAppApp {
             call_focus: cx.focus_handle(),
             paste_preview_focus: cx.focus_handle(),
             message_delete_focus: cx.focus_handle(),
+            account_switch_focus: cx.focus_handle(),
             forward_picker_focus: cx.focus_handle(),
             reaction_picker_focus: cx.focus_handle(),
             new_chat_focus: cx.focus_handle(),
@@ -1834,7 +2330,6 @@ impl WhatsAppApp {
             file_drop_listener: None,
             composing_chat: None,
             drafts: HashMap::new(),
-            event_task: None,
             reconnect_task: None,
             control: None,
             control_event_task: None,
@@ -2628,11 +3123,11 @@ impl WhatsAppApp {
         if !chat_read_can_be_committed(
             self.window_focused,
             crate::platform::application_is_active(),
-            self.client.is_some(),
+            self.client().is_some(),
         ) {
             return;
         }
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             return;
         };
         let Some(jid) = self.visible_chat.clone() else {
@@ -3434,7 +3929,7 @@ impl WhatsAppApp {
         if self.composing_chat.as_deref() != Some(jid.as_str())
             && let Some(prev) = self.composing_chat.take()
         {
-            if let Some(client) = &self.client {
+            if let Some(client) = self.client() {
                 client.send_paused(&prev);
             }
             if let Some(ref input_area) = self.input_area {
@@ -3512,7 +4007,7 @@ impl WhatsAppApp {
             && chat_read_can_be_committed(
                 self.window_focused,
                 crate::platform::application_is_active(),
-                self.client.is_some(),
+                self.client().is_some(),
             )
             && let Some(chat) = self
                 .find_chat(&jid)
@@ -3521,7 +4016,7 @@ impl WhatsAppApp {
             match read_bound(chat) {
                 ReadBound::Now(newest) => {
                     info!("Marking {} read", observe_str(&jid));
-                    if let Some(client) = self.client.as_ref() {
+                    if let Some(client) = self.client() {
                         client.mark_chat_read(&jid, newest);
                         self.owed_reads.remove(&jid);
                         mark_locally = true;
@@ -3566,7 +4061,7 @@ impl WhatsAppApp {
         if !jid.contains("@g.us") || self.rosters_in_flight.contains(jid) {
             return;
         }
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             return;
         };
         client.load_group_members(jid.to_string());
@@ -3589,11 +4084,12 @@ impl WhatsAppApp {
     pub fn reset_and_pair_again(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.app_state = AppState::Loading;
 
-        let dying = self.client.take().inspect(|client| client.forget_session());
-        // Before the connection goes, because dropping it waits for its
-        // reader to leave and a reader parked for room in this queue is
-        // waiting on the thread standing here.
-        self.event_task.take();
+        // Taking the workspace drops its reader before the connection, which
+        // is the order a reader parked on a full queue needs.
+        let dying = self.take_client();
+        if let Some(client) = &dying {
+            client.forget_session();
+        }
         let asked = dying.is_some();
         drop(dying);
 
@@ -3631,12 +4127,10 @@ impl WhatsAppApp {
         // served the whole history again for nothing — and dropping it is
         // what ends its reader, which is the half the daemon counts.
         //
-        // The event task goes first, because dropping the session waits for
-        // the reader to leave and a reader parked for room in that queue is
-        // waiting on this very thread to drain it.
-        self.event_task.take();
+        // The workspace drops its reader before its connection, which is the
+        // order a reader parked on a full queue needs.
+        self.take_client();
         self.control_event_task.take();
-        self.client.take();
         self.control.take();
 
         // A failure routes back to the error screen, where retry stays
@@ -3658,10 +4152,10 @@ impl WhatsAppApp {
                         for chat in &mut app.chats {
                             Arc::make_mut(chat).avatar_live = false;
                         }
-                        app.event_task = Some(Self::spawn_event_task(ui_rx, cx));
+                        let reader = Self::spawn_event_task(ui_rx, cx);
                         app.avatar_manager.set_session(Some(client.handle()));
                         app.avatar_manager.flush_demands(&client);
-                        app.client = Some(client);
+                        app.install_workspace(client, reader);
                         app.resume_visible_read(cx);
                         if let Ok((control, control_rx)) = control {
                             // Its frames answer through the control session's
@@ -3670,6 +4164,7 @@ impl WhatsAppApp {
                             app.control_event_task =
                                 Some(Self::spawn_control_reader(control_rx, cx));
                             app.control = Some(control);
+                            app.refresh_accounts(cx);
                         }
                         // A level chosen while this was unreachable reached
                         // nobody, and the daemon on the other end may be a
@@ -3787,7 +4282,7 @@ impl WhatsAppApp {
                 // Send "composing" presence
                 if let Some(jid) = &self.selected_chat {
                     self.composing_chat = Some(jid.clone());
-                    if let Some(client) = &self.client {
+                    if let Some(client) = self.client() {
                         client.send_composing(jid);
                     }
                 }
@@ -3800,7 +4295,7 @@ impl WhatsAppApp {
                     .take()
                     .or_else(|| self.selected_chat.clone());
                 if let Some(jid) = target
-                    && let Some(client) = &self.client
+                    && let Some(client) = self.client()
                 {
                     client.send_paused(&jid);
                 }
@@ -3878,7 +4373,7 @@ impl WhatsAppApp {
             return false;
         }
 
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             warn!("Cannot send message: client is unavailable");
             return false;
         };
@@ -4254,7 +4749,7 @@ impl WhatsAppApp {
                 .find_chat(&chat_jid)
                 .map(Arc::as_ref)
                 .and_then(newest_shared_message);
-            if let Some(client) = &self.client {
+            if let Some(client) = self.client() {
                 // Receipt and the persisted read in one: see `select_chat`.
                 client.mark_chat_read(&chat_jid, newest);
             }
@@ -5100,6 +5595,15 @@ impl Render for WhatsAppApp {
             )
             .into_any_element()
         });
+        let account_switch = self.account_switch_confirmation.map(|target| {
+            render_account_switch_confirmation(
+                target,
+                cx.entity().clone(),
+                &self.account_switch_focus,
+                cx,
+            )
+            .into_any_element()
+        });
         // The creation form borrows the deletion modal's focus handle because
         // the two are mutually exclusive and `sync_overlay_focus` already knows
         // how to hand a modal its keyboard. Adding another owner there would be
@@ -5322,6 +5826,7 @@ impl Render for WhatsAppApp {
         // call card above a fullscreen viewer or confirmation surface.
         let paste_preview_open = paste_preview.is_some();
         let message_delete_open = message_delete.is_some();
+        let account_switch_open = account_switch.is_some();
         let event_dialog_open = event_dialog.is_some();
         let channel_poll_dialog_open = channel_poll_dialog.is_some();
         let community_dialog_open = community_dialog.is_some();
@@ -5331,6 +5836,7 @@ impl Render for WhatsAppApp {
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
         let modal_open = paste_preview_open
             || message_delete_open
+            || account_switch_open
             || event_dialog_open
             || channel_poll_dialog_open
             || community_dialog_open
@@ -5388,6 +5894,7 @@ impl Render for WhatsAppApp {
         )
         .children(paste_preview)
         .children(message_delete)
+        .children(account_switch)
         .children(event_dialog)
         .children(channel_poll_dialog)
         .children(community_dialog)
@@ -5416,6 +5923,7 @@ impl Render for WhatsAppApp {
                             || community_dialog_open
                             || call_link_dialog_open
                             || member_label_dialog_open;
+                        app.keyboard_surfaces.account_switch = account_switch_open;
                         app.keyboard_surfaces.global_search = global_search_open;
                         app.keyboard_surfaces.saved_messages = saved_messages_open;
                         app.keyboard_surfaces.pinned_messages = pinned_messages_open;
@@ -5436,6 +5944,79 @@ impl Render for WhatsAppApp {
             .absolute(),
         )
     }
+}
+
+/// The explicit permission needed before a switch ends a live call.
+///
+/// Nothing here changes state: both buttons report back to the app, and
+/// cancelling leaves the current account and the call exactly as they were.
+fn render_account_switch_confirmation(
+    target: AccountId,
+    app: Entity<WhatsAppApp>,
+    focus: &FocusHandle,
+    cx: &App,
+) -> impl IntoElement + use<> {
+    use gpui_component::ActiveTheme as _;
+    use gpui_component::FocusTrapElement;
+    use gpui_component::button::{Button, ButtonVariants as _};
+
+    let metrics = cx.product().metrics;
+    let cancel = app.clone();
+    div()
+        .id("account-switch-confirmation")
+        .debug_selector(|| "account-switch-confirmation".into())
+        .track_focus(focus)
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p(metrics.space_xxl())
+        .bg(crate::components::parts::scrim(cx).opacity(0.92))
+        .on_scroll(|_, _, cx| cx.stop_propagation())
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(
+            div()
+                .w_full()
+                .max_w(metrics.bubble_max_width())
+                .p(metrics.space_xxl())
+                .rounded(metrics.radius_lg())
+                .bg(cx.theme().background)
+                .flex()
+                .flex_col()
+                .gap(metrics.space_lg())
+                .child(crate::tr!(AccountSwitchCallWarning))
+                .child(
+                    div()
+                        .id("account-switch-target")
+                        .debug_selector(|| "account-switch-target".into())
+                        .child(format!("{} {}", crate::tr!(AccountIdLabel), target)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(metrics.space_md())
+                        .child(
+                            Button::new("account-switch-cancel-button")
+                                .label(crate::tr!(Cancel))
+                                .on_click(move |_, _, cx| {
+                                    cancel.update(cx, |app, cx| app.cancel_account_switch(cx));
+                                }),
+                        )
+                        .child(
+                            Button::new("account-switch-confirm-button")
+                                .label(crate::tr!(SwitchAndEndCall))
+                                .danger()
+                                .on_click(move |_, window, cx| {
+                                    app.update(cx, |app, cx| {
+                                        app.confirm_account_switch(window, cx);
+                                    });
+                                }),
+                        ),
+                ),
+        )
+        .focus_trap("account-switch-trap", focus)
 }
 
 /// Drop the least recently built timelines, sparing the one on screen.

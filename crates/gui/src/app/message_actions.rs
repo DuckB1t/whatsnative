@@ -51,7 +51,7 @@ impl WhatsAppApp {
     /// the book that is already a loaded chat is skipped when rows are built.
     fn request_contacts(&mut self, cx: &mut Context<Self>) {
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.search_contacts("", super::saved_messages::LIST_LIMIT))
         else {
@@ -108,7 +108,7 @@ impl WhatsAppApp {
         };
         cx.notify();
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.forward_message(&draft.chat_jid, &draft.message_id, target))
         else {
@@ -166,7 +166,7 @@ impl WhatsAppApp {
         self.invalidate_message_cache(&chat_jid, cx);
         cx.notify();
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.set_starred(&chat_jid, message_id, starred))
         else {
@@ -267,7 +267,7 @@ impl WhatsAppApp {
         self.invalidate_message_cache(&chat_jid, cx);
         cx.notify();
         let Some(waiting) = self
-            .client
+            .client()
             .as_ref()
             .map(|client| client.set_message_pinned(&chat_jid, message_id, pinned))
         else {
@@ -571,7 +571,7 @@ impl WhatsAppApp {
             .push((jid.to_owned(), message_id.to_owned(), for_everyone));
         self.pending_message_actions.insert(key.clone());
         let generation = self.edit_generation;
-        let Some(client) = self.client.as_ref() else {
+        let Some(client) = self.client() else {
             self.pending_message_actions.remove(&key);
             self.notify_user(crate::tr!(DeleteUnavailable), notices::Tone::Problem, cx);
             return;

@@ -154,7 +154,7 @@ impl WhatsAppApp {
     }
 
     pub fn confirm_prepared_call(&mut self, cx: &mut Context<Self>) {
-        let Some(client) = self.client.as_ref().map(|c| c.handle()) else {
+        let Some(client) = self.client().map(|c| c.handle()) else {
             return;
         };
         if self.settings.read(cx).devices.confirming {
@@ -257,7 +257,7 @@ impl WhatsAppApp {
     }
 
     fn device_request(&mut self, action: Action, cx: &mut Context<Self>) {
-        let Some(client) = &self.client else {
+        let Some(client) = self.client() else {
             self.settings.update(cx, |s, cx| {
                 s.devices.status = crate::tr!(ConnectToTheDaemonToConfigureDevices).into();
                 cx.notify();
@@ -344,7 +344,7 @@ impl WhatsAppApp {
             cx.notify();
             id
         });
-        if let (Some(id), Some(client)) = (id, &self.client) {
+        if let (Some(id), Some(client)) = (id, self.client()) {
             let waiting = client.call_devices(Action::CancelPreview { preview_id: id });
             let settings = self.settings.clone();
             let epoch = settings.read(cx).epoch();
@@ -383,7 +383,7 @@ impl WhatsAppApp {
         if !self.settings.read(cx).devices.may_preview() {
             return;
         }
-        let Some(client) = self.client.as_ref().map(|c| c.handle()) else {
+        let Some(client) = self.client().map(|c| c.handle()) else {
             return;
         };
         let settings = self.settings.clone();

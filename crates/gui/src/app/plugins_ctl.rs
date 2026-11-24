@@ -457,7 +457,7 @@ impl WhatsAppApp {
         // than noted as sent: the line under the box goes on saying it is
         // not saved, and the next Enter, blur or Save after the session is
         // back sends it.
-        if self.client.is_none() {
+        if self.client().is_none() {
             log::debug!("plugin {plugin}: holding `{id}` until this window is attached");
             return;
         }
@@ -727,7 +727,7 @@ impl WhatsAppApp {
     /// switch stays where the daemon left it and the notice explains why the
     /// permission did not change.
     pub fn approve_plugin(&mut self, plugin: &str, approved: bool, cx: &mut Context<Self>) {
-        if let Some(client) = self.client.as_ref() {
+        if let Some(client) = self.client() {
             let waiting = client.plugin_approval(plugin, approved);
             cx.spawn(async move |entity, cx| {
                 let failure = match waiting.await {
@@ -817,7 +817,7 @@ impl WhatsAppApp {
         } else {
             value
         };
-        if let Some(client) = self.client.as_ref() {
+        if let Some(client) = self.client() {
             client.plugin_action(plugin, action, value, chat, slot, widget);
         }
         // Nothing changes here: what the plugin makes of it comes back as a

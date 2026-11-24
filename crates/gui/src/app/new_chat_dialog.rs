@@ -265,7 +265,7 @@ impl WhatsAppApp {
         };
         let typed_key = typed_key.trim();
         let key = (!typed_key.is_empty()).then(|| typed_key.to_string());
-        let Some(client) = self.client.as_ref().map(|client| client.handle()) else {
+        let Some(client) = self.client().map(|client| client.handle()) else {
             if let Some(dialog) = self.new_chat_dialog.as_mut() {
                 dialog.failed();
             }
