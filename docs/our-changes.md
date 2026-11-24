@@ -1185,7 +1185,9 @@ point at the plan and say plainly that no MCP server ships today.
 
 **Not changed.** No new crate, no code, no protocol frame, no release and no
 tag. No MCP server was launched. No real account, message, call, post, vote or
-reaction was touched. No installed binary changed.
+reaction was touched. No installed binary changed. Section 38 corrects the
+transport detail in this entry: the real surface needs two frame planes, not
+`IpcClient` alone.
 
 **Gates.** Docs only after the pushed Wave 3 gates, so the build and test
 numbers in section 33 still describe the code. `git diff --check` is clean and
@@ -1240,6 +1242,37 @@ call, post, vote or reaction. No macOS or Windows artifact was published.
 release workflow was green. The downloaded tarball passed `sha256sum -c`, and
 the installed binaries matched the extracted ones byte for byte. No added em
 or en dashes and no account leak patterns went into this section.
+
+### 38. Phase 0 froze the MCP contracts without shipping MCP
+
+**Problem.** The first MCP plan said one typed client was enough. It was not.
+`IpcClient` speaks wire envelopes and cannot carry legacy contact or privacy
+frames. The same plan also promised `get_chat` recent rows the wire response
+does not carry, and called contact search a server lookup when the daemon only
+reads the local address book. There was no chosen SDK, no frozen schema, no
+settled limit and no error code table. Guessing those during implementation
+would have turned a small read surface into a pile of surprises.
+
+**Change.** `docs/mcp-tools.md` is new and freezes Phase 0. It pins `rmcp`
+exactly `3.11.0` with `server`, `macros` and `transport-io` only. It freezes nine
+read tools, their JSON schemas, limits, envelope shape, two plane transport
+contract and error codes. `docs/mcp-plan.md` now states the real split: seven
+tools on the wire plane through `IpcClient`, three on the legacy plane through
+`Endpoint`, `Reader` and `Link`. It drops the invented `get_chat` rows and says
+contact search is local only. README, feature plan and CLI docs point at the
+contract file. `read_privacy` is the only tool that asks the server, and
+`database_bytes` is labelled as the shared store.
+
+**Not changed.** No `oxidezap-mcp` crate, no manifest edit, no dependency in the
+lockfile, no daemon connection code, no tool, no write, no protocol frame, no
+protocol bump, no release and no tag. No app, daemon, CLI or MCP server was
+launched. No real account, message, call, post, vote or reaction was touched.
+
+**Gates.** fmt, clippy with warnings denied, workspace nextest (2764 passed,
+35 skipped, one pre-existing leaky daemon test), doctests and the xtask fmt,
+clippy and test gates (52 passed) all pass on this docs only tree. `git diff
+--check` is clean and the added-line audit found no em or en dashes, no
+phone-shaped fixtures, no real JID namespaces, no account paths and no secrets.
 
 ## Planned (see plan file)
 

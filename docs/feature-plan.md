@@ -261,7 +261,8 @@ these waves.
 
 ### After Wave 4
 
-The MCP plan is in `docs/mcp-plan.md`. It is a plan, not a shipped server.
+The MCP plan is in `docs/mcp-plan.md`. Its Phase 0 froze the SDK and the nine
+tool contracts in `docs/mcp-tools.md`. Both are plans, not a shipped server.
 Implementation needs an explicit go ahead and keeps the first tool set read only.
 
 ## Process rules for every wave

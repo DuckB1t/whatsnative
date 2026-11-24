@@ -7,12 +7,16 @@
 
 ## The blunt version
 
-A real MCP server should be a thin front end onto the daemon. It speaks MCP over
-stdio, connects to `oxidezapd` through the same typed line protocol the CLI
-uses, and exposes a small set of tools. No session, no store, no media and no
-account state in the MCP process. The daemon still owns all of that.
+A real MCP server is a thin front end onto the daemon. It speaks MCP over
+stdio, opens two typed line protocol connections to `oxidezapd`, and exposes a
+small set of reads. No session, no store, no media and no account state in the
+MCP process. The daemon still owns all of that.
 
 Fuck Electron, fuck webview. This is a Rust binary with stdin and stdout.
+
+Phase 0 is done as docs only. The SDK, tool names, input schemas, output data,
+limits and error codes are frozen in [docs/mcp-tools.md](mcp-tools.md). No MCP
+crate, dependency, socket code, tool or write exists yet.
 
 ## Decisions
 
@@ -23,42 +27,64 @@ Fuck Electron, fuck webview. This is a Rust binary with stdin and stdout.
 - Transport is MCP over stdio using JSON-RPC. No HTTP listener, no websocket, no
   browser tab and no friendly little web panel. A host spawns the binary and
   talks to it on pipes.
-- The server connects with `IpcClient` from `crates/ipc/src/client.rs` and uses
-  typed `ClientRequest` and `DaemonMessage` frames. It does not shell out to the
-  CLI. Shelling out would inherit human formatting, exit codes and raw text
-  refusal, then turn all of it back into JSON. That is a clown car.
-- The hello handshake says this front end does not own a window. If no daemon is
-  reachable, return a structured tool error. Do not auto start a daemon in the
-  first version. A hidden process is how a read tool becomes a surprise.
-- Account selection is explicit. Tool calls carry an account id or the process
-  was started with one. No silent grab of whatever account happens to be
-  selected.
+- The server freezes `rmcp 3.11.0` as the SDK. Exact pin, minimum server and
+  stdio features only. No auth, HTTP, client or reqwest stack. The reasoning and
+  the feature list are in `docs/mcp-tools.md`.
+- One process serves one daemon profile and one local account. It is selected
+  at startup by `--local-account` or `OXIDEZAP_LOCAL_ACCOUNT`. Tool calls have
+  no account field. A model cannot wander into another account mid session.
+- Two daemon connections are required. `IpcClient` speaks wire
+  `RequestEnvelope` frames and covers seven tools. A plain `Endpoint` split
+  into `Reader` and `Link` speaks legacy `Request` frames and covers contact
+  search and the two privacy reads. `IpcClient` cannot carry those legacy
+  frames. The handshake fixes the frame plane on each connection from the
+  first hello, and a connection never mixes planes.
+- The wire hello names the client, pins the local account, requires account
+  selection acknowledgement, asks for no session events and sets `read_only`.
+  The legacy hello binds the same account, owns no window, asks for no session
+  events and asks for no call video. If no daemon is reachable, return a
+  structured tool error. Do not auto start a daemon in the first version. A
+  hidden process is how a read tool becomes a surprise.
 - All tool results use the same shape as the CLI machine envelope: `ok`, `data`
-  and structured `error` with a code and message. No prose wrapped in JSON, no
-  human table, no nonzero exit that hides the reason.
-- Start read only. Write tools are a later wave with their own gates. A model
+  and structured `error` with a code and message. The MCP result puts that
+  envelope in `structuredContent` and mirrors it as one text item for hosts
+  that ignore `structuredContent`. No prose wrapped in JSON, no human table,
+  no nonzero exit that hides the reason.
+- Start read only. The wire connection sets `read_only: true`. The legacy
+  connection whitelists exactly three reads: contact search and the two
+  privacy fetches. Write tools are a later wave with their own gates. A model
   that can send messages is a liability, not a feature, until somebody has
   proved the guard rails.
 
 ## First tool set
 
-The first version exposes a curated set of reads, not all 22 CLI commands.
+The first version exposes a curated set of nine reads, not all 22 CLI commands.
+The exact schemas and limits are in `docs/mcp-tools.md`.
 
 | Tool | What it does | Why it is in |
 | --- | --- | --- |
-| `account_status` | Connection state and selected account facts | Bootstraps the host without dumping the store |
+| `account_status` | Connection state and selected local account facts | Bootstraps the host without dumping the store |
 | `list_chats` | Bounded chat summaries with a page cursor | Basic orientation |
-| `get_chat` | One chat's local summary and bounded recent rows | Follow up from `list_chats` |
+| `get_chat` | One chat's local summary | Follow up from `list_chats`, no invented recent rows |
 | `list_messages` | Bounded messages for one chat, with a cursor | No unbounded history ever |
-| `search_messages` | Bounded search over local history | The useful read most people expect |
-| `search_contacts` | Local and server contact lookup, clearly labelled by source | Avoids pretending a local hit is a server fact |
+| `search_messages` | Bounded search over local stored history | The useful read most people expect |
+| `search_contacts` | Local address book only, no server directory | Avoids pretending a local hit is a server fact |
 | `list_calls` | Daemon lifetime call log, capped and labelled | Reuses an honest existing surface |
-| `read_privacy` | The six protocol 63 categories plus DM read receipts | Proves account reads can be typed and bounded |
+| `read_privacy` | Six generic categories plus DM read receipts, read from the server | Proves account reads can be typed and bounded |
 | `store_stats` | Local store counts, no content | Useful diagnostics with no message leak |
 
 Every tool declares its account scope, its maximum result size and whether it
 touches the network. A tool that reads the local store says so. A tool that asks
-the server says so. A tool that can do both says which part came from where.
+the server says so. `read_privacy` is the only tool that asks the server.
+
+The request itself gets an ordinary ack, but contact and privacy data arrive
+first as account-wide frames with no request id. The MCP reader collects those
+frames instead of pretending the ack carried data. It does not claim a unique
+correlation the protocol does not give it.
+
+`database_bytes` from `store_stats` is the whole shared SQLite file for every
+local account in that profile. The tool does not label it as one account's
+share. Media bytes and file counts are account scoped.
 
 ## Write tools, later and never casual
 
@@ -88,12 +114,8 @@ votes. Each one needs its own tests and its own honest limitation note.
 
 - New crate `crates/mcp` with binary `oxidezap-mcp`.
 - Dependencies stay thin: `oxidezap-ipc`, `oxidezap-wire`, `oxidezap-core`,
-  `serde` and whatever small MCP SDK survives review.
-- Phase 0 chooses the SDK. If a maintained crate gives us `initialize`,
-  `tools/list`, `tools/call` and structured errors without dragging in a web
-  stack, use it. If it fights Rust 1.100 or pulls half the browser with it,
-  hand roll the small JSON-RPC subset. Being clever is not worth a dependency
-  swamp.
+  `serde`, `serde_json` and `rmcp` with the exact feature set in
+  `docs/mcp-tools.md`.
 - The crate holds no session, no chat store and no media. That is the layering
   rule in `AGENTS.md`, not a suggestion.
 - Reuse the fake daemon harness pattern from
@@ -101,14 +123,16 @@ votes. Each one needs its own tests and its own honest limitation note.
 
 ## Phases
 
-1. **Tool contract and SDK choice.** Freeze the table above, pick the SDK,
-   write the JSON schema for each tool and settle the error codes. No network
-   code yet.
-2. **Stdio skeleton.** `initialize`, `tools/list`, structured errors and one
+0. **Tool contract and SDK choice.** Done in docs. `docs/mcp-tools.md` freezes
+   the nine tools, schemas, limits, transport contract and error codes. No
+   network code yet.
+1. **Stdio skeleton.** `initialize`, `tools/list`, structured errors and one
    honest tool, `account_status`, against a fake daemon. Tests cover malformed
    JSON-RPC, unknown tools and missing daemon.
-3. **Read tools.** Add the rest of the table with page limits, source labels and
-   synthetic fixtures only. Full gates before any write discussion.
+2. **Wire read tools.** Add the six other wire-backed reads with page limits
+   and synthetic fixtures only. Full gates before any legacy tool lands.
+3. **Legacy read tools.** Add contact search and privacy reads with the
+   unaddressed frame collector, then run full gates again.
 4. **Write wave, only if explicitly approved.** Reopen this plan, add the
    confirmation flow and audit rules, then implement one write tool at a time.
 5. **Docs and Linux artifact.** Update `docs/cli.md`, the README and release
@@ -118,10 +142,12 @@ votes. Each one needs its own tests and its own honest limitation note.
 
 - Every test uses a fake daemon and `.invalid` fixtures. No real JID, phone
   number, message, call, reaction or account.
-- Tool schema tests prove every tool has a bounded result and a declared write
+- Tool schema tests prove every tool has a bounded result and a declared read
   flag.
 - Protocol tests cover `initialize`, `tools/list`, `tools/call`, cancelled
   calls, malformed frames and structured refusals.
+- Legacy tests cover unaddressed frames arriving before acks, duplicate frames
+  and a refused unknown request.
 - Read only default is tested by trying a write tool with the switch off.
 - No app, daemon or CLI launch during validation. The fake daemon is a test
   double, not the installed service.
