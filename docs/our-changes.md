@@ -1217,6 +1217,30 @@ clippy and test gates (52 passed) were rerun after the version bump.
 no phone-shaped fixtures, no real JID namespaces, no account paths and no
 secrets.
 
+### 37. v0.3.0 shipped from a green run
+
+**Problem.** A release with a stale binary version or an unverified archive is
+worse than no release. CI caught the nested lockfile, which was the whole point
+of watching it before tagging.
+
+**Change.** Tag `v0.3.0` points at `c0a7656`. Release workflow `45366608991`
+passed its build, web and publish jobs and published a non-prerelease set of
+Linux assets. The x86_64 tarball checksum matched both the GitHub asset digest
+and `checksums.sha256`:
+`93e9ee8bc7f0ecd4582caf3ae1ee4fa7afeed46610d307e27200aaaf2535a839`. The
+installed app was updated from that verified tarball. The three previous
+binaries were kept as `*.bak-pre-v0.3.0-20261124`. The old daemon was stopped
+first and was not relaunched. The `.local/bin` symlinks still point at the
+install directory. No app, daemon or CLI was launched for verification.
+
+**Not changed.** No new feature, no protocol bump, no real account, message,
+call, post, vote or reaction. No macOS or Windows artifact was published.
+
+**Gates.** CI run `45365172332` was green on `c0a7656` before the tag. The
+release workflow was green. The downloaded tarball passed `sha256sum -c`, and
+the installed binaries matched the extracted ones byte for byte. No added em
+or en dashes and no account leak patterns went into this section.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).
