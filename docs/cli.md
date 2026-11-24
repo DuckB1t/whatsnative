@@ -34,7 +34,9 @@ prints a human sentence in `--json`, and none exits zero after a failure.
 Three commands write raw text rather than a DTO: `completion` (a shell
 script), `mcp` (a usage spec) and `accounts use` (an `eval` line). They
 refuse `--json`/`--events` with `output_mode_unsupported` and a nonzero
-exit instead of putting non-JSON on stdout.
+exit instead of putting non-JSON on stdout. The `mcp` command is only a KDL
+usage spec printer today. It is not an MCP server. The plan for one is in
+`docs/mcp-plan.md`.
 
 `--events` subscribes the connection to lifecycle events. `sync --follow`
 prints one `DaemonEvent` per line as NDJSON and nothing else, so a follower

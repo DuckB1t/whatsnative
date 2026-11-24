@@ -30,7 +30,7 @@
 - [x] Wave 2, message actions with real APIs
 - [x] Wave 3, privacy and settings with real mutations
 - [ ] Wave 4, multi-account V2
-- [ ] MCP planning
+- [x] MCP planning
 
 Waves 1.1 through 1.5 are implemented, reviewed, green and cleared for push
 after their waves. Wave 2 is also implemented, reviewed and green: four slices,
@@ -260,7 +260,8 @@ these waves.
 
 ### After Wave 4
 
-Plan the MCP work. Nothing in this document pre-empts that design.
+The MCP plan is in `docs/mcp-plan.md`. It is a plan, not a shipped server.
+Implementation needs an explicit go ahead and keeps the first tool set read only.
 
 ## Process rules for every wave
 

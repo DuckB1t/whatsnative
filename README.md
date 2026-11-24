@@ -51,10 +51,10 @@ Progress snapshot, not a live counter:
 | Investigation and plan | 100% |
 | Wave 1, daily drivers | 100%, Calls, chat info, new chat, media gallery and local picker search done |
 | Wave 2, message actions | 100%, A through D done with real APIs only |
-| Wave 3, privacy and settings | 0% |
+| Wave 3, privacy and settings | 100%, pushed after v0.2.0 and not in that release |
 | Wave 4, multi-account | 0% |
-| MCP planning | 0% |
-| Whole program | about 50%, Waves 1.1 through 2 released in v0.2.0 |
+| MCP planning | 100%, a written plan only and no MCP server shipped |
+| Whole program | about 65%, Waves 1 through 3 pushed and MCP planned; v0.2.0 carries Waves 1 and 2 |
 
 Checklist:
 
@@ -65,9 +65,9 @@ Checklist:
 - [x] Wave 1: media gallery
 - [x] Wave 1: local GIF and sticker search
 - [x] Wave 2: message actions with real APIs
-- [ ] Wave 3: privacy and settings with real mutations
+- [x] Wave 3: privacy and settings with real mutations
 - [ ] Wave 4: multi-account V2
-- [ ] MCP planning
+- [x] MCP planning
 
 Calls, chat info, new chat, the media gallery and local picker search are
 implemented and green locally. None of it was in v0.1.0. v0.2.0 carries it. The log shows only
@@ -228,6 +228,7 @@ There are no macOS or Windows release assets.
 | [Architecture](docs/architecture.md) | Crate map, theme, one number that drives layout |
 | [Building](docs/building.md) | Web, plugin and profiling builds |
 | [CLI](docs/cli.md) | The scriptable front end |
+| [MCP plan](docs/mcp-plan.md) | What a real MCP server would be, and why the current command is not one |
 | [Localization](docs/localization.md) | English and Portuguese |
 | [Web](docs/web.md) | The browser build and its hard limits |
 | [Plugin ABI](docs/plugin-abi.md) | The contract plugin authors must obey |

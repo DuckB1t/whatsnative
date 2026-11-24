@@ -1166,6 +1166,33 @@ verified v0.2.0 Linux tarballs are still the installed binaries.
 **Gates.** The three workflow files parse as valid YAML. The full gates listed
 in section 33 ran on this same tree.
 
+### 35. MCP got a plan, not a fake server
+
+**Problem.** `oxidezap-cli mcp` printed a KDL usage spec and ignored its own
+`--spec` flag. Calling that an MCP interface would be nonsense. There was no
+design for a real tool surface, no decision on transport, and no rule for writes
+that could actually message an account.
+
+**Change.** `docs/mcp-plan.md` now says the honest thing. A future
+`oxidezap-mcp` crate is a stdio JSON-RPC server that connects to the daemon
+through `IpcClient`, holds no session, store, media or account state, and starts
+with a read only tool set. The first tools are bounded reads such as account
+status, chat and message listing, message and contact search, call log, privacy
+reads and store stats. Writes wait for a separate approved wave with an explicit
+switch, per call confirmation tokens, a narrow tool set and a local audit line
+with no message bodies or phone numbers. README, feature plan and CLI docs now
+point at the plan and say plainly that no MCP server ships today.
+
+**Not changed.** No new crate, no code, no protocol frame, no release and no
+tag. No MCP server was launched. No real account, message, call, post, vote or
+reaction was touched. No installed binary changed.
+
+**Gates.** Docs only after the pushed Wave 3 gates, so the build and test
+numbers in section 33 still describe the code. `git diff --check` is clean and
+the added-line audit found no em or en dashes, no phone-shaped fixtures, no real
+JID namespaces, no account paths and no secrets. CI on `95bc5e8` passed the
+Linux Check job; Nightly and Pages were still running when last checked.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).
