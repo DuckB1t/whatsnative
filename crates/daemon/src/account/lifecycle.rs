@@ -607,6 +607,189 @@ mod tests {
         assert!(taken_live.try_recv().is_err());
     }
 
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    async fn concurrent_create_reset_remove_keep_effects_scoped_and_final_state_stable() {
+        let registry = AccountRegistry::new();
+        let shared_stores = stores();
+        let first = AccountId::new(6).unwrap();
+        let second = AccountId::new(7).unwrap();
+        let first_old = synthetic(first, commands_for_drop());
+        assert!(registry.insert(Arc::clone(&first_old)));
+        assert!(registry.insert(synthetic(second, commands_for_drop())));
+
+        let (starts_tx, mut starts_rx) = mpsc::unbounded_channel::<AccountId>();
+        let (forgets_tx, mut forgets_rx) =
+            mpsc::unbounded_channel::<(AccountId, AccountDisposition)>();
+        let start: Arc<StartFn> = Arc::new(move |registry, id, _, _| {
+            let starts = starts_tx.clone();
+            Box::pin(async move {
+                assert!(registry.insert(synthetic(id, commands_for_drop())));
+                let _ = starts.send(id);
+            })
+        });
+        let forget: Arc<ForgetFn> = Arc::new(move |id, _, _, disposition| {
+            let forgets = forgets_tx.clone();
+            Box::pin(async move {
+                let _ = forgets.send((id, disposition));
+                disposition.completed()
+            })
+        });
+        let lifecycle = EmbeddedLifecycle::with_hooks(
+            Arc::clone(&registry),
+            Arc::clone(&shared_stores),
+            Arc::new(|stores| {
+                Box::pin(async move { stores.create_account().await.map_err(anyhow::Error::from) })
+            }),
+            start,
+            forget,
+        );
+
+        let (created, reset, removed) = tokio::join!(
+            lifecycle.create_account(),
+            lifecycle.reset_account(first),
+            lifecycle.remove_account(second),
+        );
+        let created = created.expect("a synthetic account was allocated");
+        assert_eq!(reset, LifecycleOutcome::Accepted);
+        assert_eq!(removed, LifecycleOutcome::Accepted);
+        assert_ne!(created, first);
+        assert_ne!(created, second);
+
+        let mut forgets = Vec::new();
+        for _ in 0..2 {
+            forgets.push(forgets_rx.recv().await.expect("one forget per request"));
+        }
+        forgets.sort_by_key(|(id, _)| id.get());
+        assert_eq!(
+            forgets,
+            vec![
+                (first, AccountDisposition::Reset),
+                (second, AccountDisposition::Remove)
+            ]
+        );
+
+        let mut starts = Vec::new();
+        for _ in 0..2 {
+            starts.push(starts_rx.recv().await.expect("one start per surviving id"));
+        }
+        starts.sort_by_key(|id| id.get());
+        let mut expected = vec![first, created];
+        expected.sort_by_key(|id| id.get());
+        assert_eq!(starts, expected);
+
+        let mut ids: Vec<_> = registry
+            .runtimes()
+            .iter()
+            .map(|runtime| runtime.id())
+            .collect();
+        ids.sort_by_key(|id| id.get());
+        assert_eq!(ids, expected);
+        let replacement = registry.get(first).expect("the reset id came back");
+        assert!(
+            !Arc::ptr_eq(&replacement, &first_old),
+            "the reset inserted a fresh runtime, not the old one"
+        );
+        assert_eq!(replacement.lifecycle().disposition(), None);
+        assert!(registry.get(second).is_none());
+        let stored = shared_stores.accounts().await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, created);
+    }
+
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    async fn reset_racing_remove_performs_one_forget_and_one_storage_completion() {
+        let registry = AccountRegistry::new();
+        let shared_stores = stores();
+        let id = shared_stores
+            .create_account()
+            .await
+            .expect("a synthetic account row");
+        let account = synthetic(id, commands_for_drop());
+        assert!(registry.insert(Arc::clone(&account)));
+        let mut accounts = registry.subscribe();
+        accounts.borrow_and_update();
+
+        let calls = Arc::new(portable_atomic::AtomicUsize::new(0));
+        let (completions_tx, mut completions_rx) =
+            mpsc::unbounded_channel::<(AccountId, AccountDisposition, AccountExit)>();
+        let forget_stores = Arc::clone(&shared_stores);
+        let forget_calls = Arc::clone(&calls);
+        let forget: Arc<ForgetFn> = Arc::new(move |id, _, _, disposition| {
+            let stores = Arc::clone(&forget_stores);
+            let calls = Arc::clone(&forget_calls);
+            let completions = completions_tx.clone();
+            Box::pin(async move {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                match disposition {
+                    AccountDisposition::Reset => stores
+                        .reset_account(id)
+                        .await
+                        .expect("real reset of the synthetic row"),
+                    AccountDisposition::Remove => stores
+                        .remove_account(id)
+                        .await
+                        .expect("real removal of the synthetic row"),
+                }
+                let exit = disposition.completed();
+                let _ = completions.send((id, disposition, exit));
+                exit
+            })
+        });
+        let lifecycle = EmbeddedLifecycle::with_hooks(
+            Arc::clone(&registry),
+            Arc::clone(&shared_stores),
+            Arc::new(|_| Box::pin(async { Err(anyhow::anyhow!("create is not used")) })),
+            Arc::new(|_, _, _, _| Box::pin(async {})),
+            forget,
+        );
+
+        let lifecycle_for_remove = Arc::clone(&lifecycle);
+        let lifecycle_for_reset = Arc::clone(&lifecycle);
+        let (removed, reset) = tokio::join!(
+            async move { lifecycle_for_remove.remove_account(id).await },
+            async move { lifecycle_for_reset.reset_account(id).await }
+        );
+        assert_eq!(removed, LifecycleOutcome::Accepted);
+        assert_eq!(
+            reset,
+            LifecycleOutcome::Incomplete,
+            "remove owns the disposition, so reset cannot claim a second teardown"
+        );
+        let (completed_id, disposition, exit) = completions_rx
+            .recv()
+            .await
+            .expect("the real storage completion was signalled");
+        assert_eq!(completed_id, id);
+        assert_eq!(disposition, AccountDisposition::Remove);
+        assert_eq!(exit, AccountExit::RemoveCompleted);
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the loser never ran another storage mutation"
+        );
+        assert_eq!(
+            account.lifecycle().disposition(),
+            Some(AccountDisposition::Remove)
+        );
+
+        assert!(registry.get(id).is_none());
+        assert!(
+            accounts.has_changed().unwrap(),
+            "the terminal removal published an AccountsChanged snapshot"
+        );
+        assert!(accounts.borrow_and_update().accounts.is_empty());
+        assert!(
+            !shared_stores
+                .accounts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|stored| stored.id == id)
+        );
+    }
+
     fn commands_for_drop() -> mpsc::Sender<SessionCommand> {
         let (commands, _receiver) = mpsc::channel(4);
         commands

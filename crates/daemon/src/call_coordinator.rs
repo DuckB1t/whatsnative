@@ -271,6 +271,9 @@ impl Drop for CallPermit {
 mod tests {
     use super::*;
 
+    #[cfg(target_family = "wasm")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
     fn id(value: i32) -> AccountId {
         AccountId::new(value).expect("a synthetic positive account id")
     }
@@ -387,5 +390,124 @@ mod tests {
         assert_eq!(*watch.borrow_and_update(), None);
         coordinator.release_account(id(11));
         assert!(!watch.has_changed().unwrap());
+    }
+
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    async fn simultaneous_claims_from_different_accounts_admit_one_and_name_the_winner() {
+        let coordinator = CallCoordinator::new();
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let first = oxidezap_session::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            let barrier = Arc::clone(&barrier);
+            async move {
+                barrier.wait().await;
+                (
+                    id(31),
+                    "call-one".to_string(),
+                    coordinator.claim(id(31), "call-one".into()),
+                )
+            }
+        });
+        let second = oxidezap_session::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            let barrier = Arc::clone(&barrier);
+            async move {
+                barrier.wait().await;
+                (
+                    id(32),
+                    "call-two".to_string(),
+                    coordinator.claim(id(32), "call-two".into()),
+                )
+            }
+        });
+        let first = first.await.expect("the first claim task did not panic");
+        let second = second.await.expect("the second claim task did not panic");
+
+        let attempts = [first, second];
+        let winner = attempts
+            .iter()
+            .find_map(|(account, call, result)| {
+                matches!(result, Ok(Some(_))).then(|| (*account, call.clone()))
+            })
+            .expect("exactly one claim holds the slot");
+        let admitted = attempts
+            .iter()
+            .filter(|(_, _, result)| matches!(result, Ok(Some(_))))
+            .count();
+        let refused: Vec<_> = attempts
+            .iter()
+            .filter_map(|(_, _, result)| result.as_ref().err())
+            .collect();
+        assert_eq!(admitted, 1);
+        assert_eq!(refused.len(), 1);
+        assert_eq!(
+            refused[0].owner(),
+            &CallOwner::new(winner.0, winner.1.clone()),
+            "the refusal names the account and call that won"
+        );
+        assert!(
+            refused[0]
+                .to_string()
+                .contains(&format!("account {}", winner.0))
+        );
+        assert_eq!(
+            coordinator.owner(),
+            Some(CallOwner::new(winner.0, winner.1))
+        );
+    }
+
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    async fn runtime_removal_racing_a_claim_keeps_the_new_owner_and_stale_permit_is_inert() {
+        let coordinator = CallCoordinator::new();
+        let old_permit = coordinator
+            .claim(id(41), "call-old".into())
+            .unwrap()
+            .expect("the old account owns the slot");
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let (removed_tx, removed_rx) = tokio::sync::oneshot::channel::<bool>();
+        let removal = oxidezap_session::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            let barrier = Arc::clone(&barrier);
+            async move {
+                barrier.wait().await;
+                let changed = coordinator.release_account(id(41));
+                let _ = removed_tx.send(changed);
+            }
+        });
+        let claim = oxidezap_session::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            let barrier = Arc::clone(&barrier);
+            async move {
+                barrier.wait().await;
+                assert!(removed_rx.await.expect("the removal signalled completion"));
+                coordinator.claim(id(42), "call-new".into())
+            }
+        });
+        removal.await.expect("the removal task did not panic");
+        let new_permit = claim
+            .await
+            .expect("the claim task did not panic")
+            .expect("the new account can claim after removal")
+            .expect("a new owner gets a fresh permit");
+
+        let owner = coordinator.owner();
+        assert_eq!(owner, Some(CallOwner::new(id(42), "call-new".into())));
+        let mut watch = coordinator.watch_owner();
+        watch.borrow_and_update();
+        drop(old_permit);
+        assert_eq!(
+            coordinator.owner(),
+            owner,
+            "an old permit cannot release the new owner"
+        );
+        assert!(
+            !watch.has_changed().unwrap(),
+            "a stale permit must not publish an owner change"
+        );
+        assert!(coordinator.is_busy());
+        drop(new_permit);
+        assert!(!coordinator.is_busy());
     }
 }

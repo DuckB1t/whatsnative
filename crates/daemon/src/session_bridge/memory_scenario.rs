@@ -13,9 +13,13 @@ use tokio::sync::broadcast::error::TryRecvError;
 
 use super::tests::{bridge, message, received, stored_chat};
 
+// Memory mode takes precedence when both features are on. The process-only
+// build uses the same checkpoints without installing a counting allocator.
 #[cfg(feature = "memory-profiling")]
 use crate::memory_metrics as metrics;
-#[cfg(not(feature = "memory-profiling"))]
+#[cfg(all(feature = "process-profiling", not(feature = "memory-profiling")))]
+use crate::memory_metrics as metrics;
+#[cfg(not(any(feature = "memory-profiling", feature = "process-profiling")))]
 mod metrics {
     pub(super) fn begin() {}
     pub(super) fn checkpoint(_: &str) {}
@@ -23,6 +27,21 @@ mod metrics {
 
 const CHATS: usize = 1_032;
 const MESSAGES: usize = 75_703;
+const DEFAULT_IDLE_MS: u64 = 500;
+const MAX_IDLE_MS: u64 = 60_000;
+
+/// Fixed, event-free wait for the process-mode idle window.
+///
+/// No messages, sessions or network activity happen here. An unparsable,
+/// negative or absurd override falls back or clamps rather than stalling the
+/// workload: the harness records the same value it passes in the env.
+fn idle_duration() -> Duration {
+    let requested = std::env::var("OXIDEZAP_IDLE_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_IDLE_MS);
+    Duration::from_millis(requested.min(MAX_IDLE_MS))
+}
 
 fn chat(index: usize, groups: bool) -> String {
     if groups {
@@ -120,6 +139,12 @@ async fn account_scale(accounts: usize, tag: usize) {
     }
     metrics::checkpoint("clients_ready");
 
+    // A fixed quiet window: no events, no messages, no session and no network.
+    metrics::checkpoint("idle_begin");
+    oxidezap_platform::sleep(idle_duration()).await;
+    metrics::checkpoint("idle_end");
+
+    metrics::checkpoint("shutdown_requested");
     for client in clients {
         assert!(
             client.close(Duration::from_secs(1)).await,

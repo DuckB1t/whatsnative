@@ -1426,12 +1426,29 @@ impl AccountSupervisor {
         {
             return LifecycleOutcome::Incomplete;
         }
+        // A newer decision can supersede this runtime while the storage work
+        // is running. Remember the generation and the exact runtime this
+        // cleanup belongs to, so a late completion cannot retire the newer
+        // incarnation under the same id.
+        let generation = self.generation(id);
         // Invalidate any restart timer before touching storage: it must not
         // resurrect an account this request is retiring or resetting.
         self.bump_generation(id);
         let lifecycle = runtime.lifecycle();
         let _media = lifecycle.drain_media().await;
         let exit = cleanup(runtime.hub()).await;
+        if self.generation(id) != generation.wrapping_add(1)
+            || !self
+                .registry
+                .get(id)
+                .is_some_and(|current| Arc::ptr_eq(&current, &runtime))
+        {
+            log::info!(
+                "account {} was superseded during terminal cleanup; leaving the newer runtime alone",
+                id.get()
+            );
+            return LifecycleOutcome::Accepted;
+        }
         use session_bridge::AccountExit;
         match exit {
             AccountExit::ResetCompleted => {
@@ -2594,5 +2611,389 @@ mod tests {
 
         let _ =
             tokio::time::timeout(std::time::Duration::from_secs(5), supervisor.join_all()).await;
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn in_memory_stores(tag: &str) -> Arc<oxidezap_session::StoreRegistry> {
+        Arc::new(oxidezap_session::StoreRegistry::new(format!(
+            "file:native-race-{tag}-{}?mode=memory&cache=shared",
+            std::process::id()
+        )))
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    type ShutdownFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+    #[cfg(not(target_family = "wasm"))]
+    type ShutdownSignal = Box<dyn Fn() -> ShutdownFuture + Send + Sync>;
+
+    #[cfg(not(target_family = "wasm"))]
+    fn shutdown_gate() -> (Arc<tokio::sync::watch::Sender<bool>>, ShutdownSignal) {
+        let (sender, _) = tokio::sync::watch::channel(false);
+        let gate = Arc::new(sender);
+        let for_signal = Arc::clone(&gate);
+        (
+            gate,
+            Box::new(move || {
+                let mut receiver = for_signal.subscribe();
+                Box::pin(async move {
+                    while !*receiver.borrow_and_update() {
+                        if receiver.changed().await.is_err() {
+                            return;
+                        }
+                    }
+                }) as ShutdownFuture
+            }),
+        )
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    async fn wait_for_shutdown(supervisor: &super::AccountSupervisor) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !supervisor
+                .shutting_down
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("join_all must mark the supervisor shutting down");
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[tokio::test]
+    async fn concurrent_create_spawn_makes_distinct_runtimes_without_duplicate_start() {
+        use super::{AccountSupervisor, RestartPolicy};
+        let registry = AccountRegistry::new();
+        let (shutdown, signal) = shutdown_gate();
+        let supervisor = AccountSupervisor::with_shutdown(
+            Arc::clone(&registry),
+            in_memory_stores("distinct-spawn"),
+            4,
+            RestartPolicy {
+                initial_delay: std::time::Duration::from_secs(60),
+                max_delay: std::time::Duration::from_secs(60),
+                max_attempts: 0,
+                healthy_after: std::time::Duration::from_secs(120),
+            },
+            signal,
+        );
+        let ids: Vec<_> = [9011, 9012, 9013]
+            .iter()
+            .map(|raw| AccountId::new(*raw).expect("positive synthetic id"))
+            .collect();
+
+        let (first, second, third) = tokio::join!(
+            supervisor.spawn(ids[0]),
+            supervisor.spawn(ids[1]),
+            supervisor.spawn(ids[2]),
+        );
+        let spawned = [first, second, third];
+
+        let mut active = supervisor.active_runs.subscribe();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !ids.iter().all(|id| active.borrow().contains(id)) {
+                active
+                    .changed()
+                    .await
+                    .expect("the active set watch must stay open");
+            }
+        })
+        .await
+        .expect("every concurrent spawn must reach the reaper");
+
+        {
+            let tracked = supervisor
+                .run_tasks
+                .read()
+                .unwrap_or_else(|error| error.into_inner());
+            for id in &ids {
+                assert_eq!(
+                    tracked.values().filter(|account| *account == id).count(),
+                    1,
+                    "account {id} must have exactly one tracked run task"
+                );
+            }
+        }
+
+        assert_eq!(registry.runtimes().len(), ids.len());
+        for (id, runtime) in ids.iter().zip(spawned.iter()) {
+            assert_eq!(runtime.id(), *id);
+            assert_eq!(runtime.hub().account_id(), *id);
+            assert!(Arc::ptr_eq(
+                &registry.get(*id).expect("registered"),
+                runtime
+            ));
+        }
+        assert!(!Arc::ptr_eq(&spawned[0], &spawned[1]));
+        assert!(!Arc::ptr_eq(&spawned[0], &spawned[2]));
+        assert!(!Arc::ptr_eq(&spawned[1], &spawned[2]));
+
+        shutdown.send_replace(true);
+        tokio::time::timeout(std::time::Duration::from_secs(5), supervisor.join_all())
+            .await
+            .expect("shutdown must finish after every spawned task");
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[tokio::test]
+    async fn reset_racing_remove_runs_one_storage_mutation_and_refuses_the_loser() {
+        use super::{AccountSupervisor, LifecycleOutcome, RestartPolicy};
+        use crate::session_bridge::{AccountDisposition, AccountExit, Action, CommandOutcome};
+
+        let registry = AccountRegistry::new();
+        let stores = in_memory_stores("reset-remove");
+        let _seed = stores.create_account().await.expect("seed account");
+        let id = stores.create_account().await.expect("synthetic account");
+        let hub = StateHub::for_account(id);
+        let (commands, mut receiver) = tokio::sync::mpsc::channel(4);
+        let plugins = Arc::new(oxidezap_plugin_host::Plugins::nothing_loaded(Arc::new(
+            |_| {},
+        )));
+        let account = Arc::new(AccountRuntime::new_with_registry(
+            id,
+            hub,
+            plugins,
+            commands,
+            Arc::clone(&stores),
+        ));
+        let bits = account.lifecycle();
+        let (taken_tx, taken_rx) = tokio::sync::oneshot::channel::<AccountDisposition>();
+        oxidezap_session::spawn(async move {
+            if let Some(crate::session_bridge::SessionCommand { action, reply }) =
+                receiver.recv().await
+                && let Action::ForgetSession(disposition) = action
+            {
+                let _ = bits.set_disposition(disposition);
+                let _ = taken_tx.send(disposition);
+                let _ = reply.send(CommandOutcome::Accepted);
+            }
+        });
+        assert!(registry.insert(account));
+
+        let (shutdown, signal) = shutdown_gate();
+        let supervisor = AccountSupervisor::with_shutdown(
+            Arc::clone(&registry),
+            Arc::clone(&stores),
+            4,
+            RestartPolicy::production(),
+            signal,
+        );
+        let supervisor_for_remove = Arc::clone(&supervisor);
+        let supervisor_for_reset = Arc::clone(&supervisor);
+        let (removed, reset) = tokio::join!(
+            async move { supervisor_for_remove.remove_account(id).await },
+            async move { supervisor_for_reset.reset_account(id).await }
+        );
+        assert_eq!(removed, LifecycleOutcome::Accepted);
+        assert_eq!(
+            reset,
+            LifecycleOutcome::Incomplete,
+            "remove claimed the live runtime first, so reset lost"
+        );
+        assert_eq!(
+            taken_rx.await.expect("one forget reached the session"),
+            AccountDisposition::Remove
+        );
+
+        let mutations = Arc::new(portable_atomic::AtomicUsize::new(0));
+        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<AccountExit>();
+        let cleanup_stores = Arc::clone(&stores);
+        let outcome = supervisor
+            .finish_terminal_with(id, AccountDisposition::Remove, |_| {
+                let stores = Arc::clone(&cleanup_stores);
+                let mutations = Arc::clone(&mutations);
+                async move {
+                    mutations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    stores.remove_account(id).await.expect("real row removal");
+                    let exit = AccountExit::RemoveCompleted;
+                    let _ = exit_tx.send(exit);
+                    exit
+                }
+            })
+            .await;
+        assert_eq!(outcome, LifecycleOutcome::Accepted);
+        assert_eq!(
+            exit_rx.await.expect("the real exit was observed"),
+            AccountExit::RemoveCompleted
+        );
+        assert_eq!(
+            mutations.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the loser never ran a second storage mutation"
+        );
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        assert!(registry.get(id).is_none(), "a remove does not respawn");
+        assert!(
+            !stores
+                .accounts()
+                .await
+                .expect("list accounts")
+                .iter()
+                .any(|account| account.id == id)
+        );
+
+        shutdown.send_replace(true);
+        tokio::time::timeout(std::time::Duration::from_secs(5), supervisor.join_all())
+            .await
+            .expect("shutdown must finish");
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[tokio::test]
+    async fn a_stale_terminal_completion_cannot_clear_a_newer_runtime() {
+        use super::{AccountSupervisor, LifecycleOutcome, RestartPolicy};
+        use crate::session_bridge::{AccountDisposition, AccountExit};
+
+        let registry = AccountRegistry::new();
+        let stores = in_memory_stores("stale-terminal");
+        let id = stores.create_account().await.expect("synthetic account");
+        let old = runtime(id.get());
+        assert!(registry.insert(Arc::clone(&old)));
+        let (shutdown, signal) = shutdown_gate();
+        let supervisor = AccountSupervisor::with_shutdown(
+            Arc::clone(&registry),
+            Arc::clone(&stores),
+            4,
+            RestartPolicy::production(),
+            signal,
+        );
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let cleanup_stores = Arc::clone(&stores);
+        let cleanup = tokio::spawn({
+            let supervisor = Arc::clone(&supervisor);
+            async move {
+                supervisor
+                    .finish_terminal_with(id, AccountDisposition::Remove, |_| {
+                        let stores = Arc::clone(&cleanup_stores);
+                        async move {
+                            let _ = started_tx.send(());
+                            release_rx.await.expect("the stale cleanup was released");
+                            stores
+                                .remove_account(id)
+                                .await
+                                .expect("the old generation's row removal");
+                            AccountExit::RemoveCompleted
+                        }
+                    })
+                    .await
+            }
+        });
+        started_rx
+            .await
+            .expect("the old cleanup reached storage work");
+
+        supervisor.bump_generation(id);
+        registry.remove(id);
+        let newer = runtime(id.get());
+        assert!(registry.insert(Arc::clone(&newer)));
+        release_tx.send(()).expect("the cleanup is still waiting");
+
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(5), cleanup)
+            .await
+            .expect("stale cleanup must finish")
+            .expect("the cleanup task did not panic");
+        assert_eq!(outcome, LifecycleOutcome::Accepted);
+        let current = registry.get(id).expect("the newer runtime survives");
+        assert!(Arc::ptr_eq(&current, &newer));
+        assert!(!current.is_stopping());
+        assert_eq!(current.lifecycle().disposition(), None);
+        assert!(
+            !stores
+                .accounts()
+                .await
+                .expect("list accounts")
+                .iter()
+                .any(|account| account.id == id)
+        );
+
+        shutdown.send_replace(true);
+        tokio::time::timeout(std::time::Duration::from_secs(5), supervisor.join_all())
+            .await
+            .expect("shutdown must finish");
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[tokio::test]
+    async fn join_all_racing_respawn_and_create_leaves_no_runtime_after_shutdown() {
+        use super::{AccountRun, AccountSupervisor, RestartPolicy};
+        use crate::session_bridge::AccountExit;
+
+        let registry = AccountRegistry::new();
+        let stores = in_memory_stores("join-all-race");
+        let id = AccountId::new(9041).expect("positive synthetic id");
+        assert!(registry.insert(runtime(id.get())));
+        let (shutdown, signal) = shutdown_gate();
+        let supervisor = AccountSupervisor::with_shutdown(
+            Arc::clone(&registry),
+            Arc::clone(&stores),
+            4,
+            RestartPolicy::production(),
+            signal,
+        );
+
+        let (gate_tx, gate_rx) = tokio::sync::watch::channel(false);
+        let reset = tokio::spawn({
+            let supervisor = Arc::clone(&supervisor);
+            let mut gate = gate_rx.clone();
+            async move {
+                while !*gate.borrow_and_update() {
+                    if gate.changed().await.is_err() {
+                        break;
+                    }
+                }
+                supervisor
+                    .handle_exit(AccountRun {
+                        terminal_cleanup: false,
+                        id,
+                        exit: AccountExit::ResetCompleted,
+                        ran_for: std::time::Duration::from_secs(1),
+                    })
+                    .await;
+            }
+        });
+        let create = tokio::spawn({
+            let supervisor = Arc::clone(&supervisor);
+            let mut gate = gate_rx.clone();
+            async move {
+                while !*gate.borrow_and_update() {
+                    if gate.changed().await.is_err() {
+                        break;
+                    }
+                }
+                supervisor.create_and_spawn().await
+            }
+        });
+        let joined = tokio::spawn({
+            let supervisor = Arc::clone(&supervisor);
+            async move { supervisor.join_all().await }
+        });
+
+        wait_for_shutdown(&supervisor).await;
+        gate_tx.send_replace(true);
+
+        let created = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let _ = reset.await;
+            let created = create.await.expect("the create task did not panic");
+            let _ = joined.await;
+            created
+        })
+        .await
+        .expect("reset, create and join_all must all settle");
+        assert!(created.is_err(), "create after shutdown must be refused");
+        assert!(
+            registry.get(id).is_none(),
+            "a reset completion after shutdown must not respawn"
+        );
+        assert!(
+            registry.runtimes().is_empty(),
+            "no runtime may be resurrected after shutdown"
+        );
+        let _ = shutdown;
     }
 }

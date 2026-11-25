@@ -375,19 +375,30 @@ encerrar a chamada ao trocar de conta.
       de conta, com aviso explícito antes de agir. O registry web usa a mesma
       checagem; o que resta é provar em navegador e medir, não inventar
       outra política.
-- [ ] **10. Hardening/performance**, matriz de races, testes de isolamento,
+- [x] **10. Hardening/performance**, matriz de races, testes de isolamento,
        stress de writer, benchmark 1/2/4/8 contas, web, docs e CI completo.
-       **Gate de release, não item adiável:** cada `WhatsAppClient` ainda cria
-       um runtime Tokio multi-thread próprio mais uma thread que faz
-       `block_on`, então 4 contas não são 4 sessões e sim possivelmente 4
-       runtimes e seus pools. A Wave 4.4 acrescentou um harness sintético com
-       um `StoreRegistry` e N clients nunca iniciados, cenários 1/2/4/8 e
-       contadores Linux de threads e FDs no driver isolado. Isso cobre só a
-       construção e o teardown desses clients. Ainda faltam a matriz de races,
-       o stress de writer e medições de processo para 1/2/4/8 contas, com
-       RSS/PSS, CPU ociosa, FDs, startup a frio e shutdown. History sync e
-       reconexão não têm substituto sintético honesto e não podem ser
-       reivindicadas sem uma conta de teste autorizada.
+       **Gate sintético local fechado, não uma medição de contas conectadas.**
+       Cada `WhatsAppClient` ainda cria um runtime Tokio multi-thread próprio
+       mais uma thread que faz `block_on`, então 4 contas não são 4 sessões e
+       sim 4 runtimes e seus pools. A Wave 4.4 acrescentou o harness com um
+       `StoreRegistry` e N clients nunca iniciados. Esta rodada completou o
+       que faltava: quatro races no supervisor nativo, duas no lifecycle
+       embutido e duas no `CallCoordinator`, todas com barreiras ou oneshots em
+       vez de sleeps. O `finish_terminal_with` agora guarda geração e ponteiro
+       exato da runtime antes da limpeza, então uma conclusão terminal atrasada
+       não apaga uma runtime mais nova com o mesmo id. O teste de writer usa um
+       arquivo SQLite temporário real, 1/2/4/8 contas e writers concorrentes,
+       e prova que ids iguais ficam isolados por conta. O modo `process` mediu
+       1/2/4/8 contas com binário limpo, sem allocator de contagem, e passou a
+       registrar startup frio, idle, shutdown, CPU, RSS/PSS, threads e FDs.
+       Os números e os limites estão em `docs/daemon-memory.md`: threads e FDs
+       crescem oito e quatro por conta adicional, mas CPU em ticks de 10 ms não
+       sustenta custo por conta, e idle zero é apenas menor que um tick.
+       History sync, reconexão, browser wasm, contas autenticadas, chamadas e
+       mídia não têm substituto sintético honesto e continuam fora da
+       reivindicação. A "Definition of done" abaixo mantém os itens que exigem
+       contas reais e artefato instalado como pendentes, sem fingir que um
+       client nunca iniciado prova isso.
 
 ## Definition of done
 

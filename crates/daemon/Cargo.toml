@@ -14,8 +14,14 @@ path = "src/main.rs"
 
 [features]
 test-support = ["oxidezap-session/test-support"]
-# Instrument only native test binaries; production allocators are unchanged.
-memory-profiling = []
+# Native test instrumentation only. Neither feature changes a production
+# binary: both modules are compiled solely into native test targets (see
+# lib.rs), so release executables keep the ordinary system allocator.
+# Process probes read /proc and clocks without a counting allocator.
+process-profiling = []
+# Requested-heap counters on top of the same process probes. This implies
+# process-profiling so one build can emit both kinds of checkpoint.
+memory-profiling = ["process-profiling"]
 
 [dependencies]
 chrono = { workspace = true, features = ["std"] }

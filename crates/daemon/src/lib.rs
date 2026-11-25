@@ -34,7 +34,12 @@ pub mod server;
 pub mod session_bridge;
 pub mod state;
 
-#[cfg(all(test, feature = "memory-profiling", not(target_family = "wasm")))]
+// Native tests only, for either profiling feature. A page never links probes.
+#[cfg(all(
+    test,
+    any(feature = "memory-profiling", feature = "process-profiling"),
+    not(target_family = "wasm")
+))]
 mod memory_metrics;
 
 /// The ways in, which are a platform each.

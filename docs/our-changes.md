@@ -1492,6 +1492,65 @@ real JID namespaces, account paths or secrets.
 not claimed. Correct local lifecycle is not a performance result, and it does
 not prove history sync or reconnect without an authorized test account.
 
+### 45. Wave 4 hardening stopped lying about scale
+
+**Problem.** Wave 4.4 counted clients but did not race create, reset and
+remove, did not stress writers over one real SQLite file, and had no clean
+process measurement for 1/2/4/8 accounts. A chart made from a never-started
+client is still just a chart. Calling it a connected-account benchmark is
+snake oil, and this codebase has had enough of that kind of noise.
+
+**Change.** `account/mod.rs` adds four bounded native races: concurrent create
+and spawn, reset racing remove, a stale terminal completion against a newer
+runtime, and join-all racing respawn and create across shutdown. The real fix
+is in `finish_terminal_with`: it records the generation and the exact
+`Arc<AccountRuntime>` before cleanup, then ignores a late completion when a
+newer runtime owns that id. `account/lifecycle.rs` adds the embedded races,
+so the page path cannot quietly lose the same fight. `call_coordinator.rs`
+proves that simultaneous claims admit one owner and name the winner, and that
+runtime removal racing a claim keeps the new owner while a stale permit stays
+inert. `crates/chat-store/tests/multi_account_writer_stress.rs` puts 1, 2, 4
+and 8 accounts on one temporary SQLite file and shows that writers keep the
+same ids scoped to each account. The process slice adds stage clocks and
+`/proc` probes, idle and shutdown checkpoints, a v2 driver schema, derived
+windows, a separate build mode and strict marker checks. The counting
+allocator stays out of this mode, because CPU and idle claims taken with it
+would be garbage.
+
+The synthetic process run used one immutable `process-profiling` binary, copied
+under two names so the driver's alternating order was exercised without
+pretending a baseline change existed. All 112 samples passed marker validation.
+Threads and fds were exact at every scale: 13/19 for one client, 21/23 for two,
+37/31 for four and 69/47 for eight. Each additional never-started client adds
+eight threads and four fds in this harness. Idle CPU was below one 100 Hz tick,
+and cold wall medians overlapped, so nobody gets a latency scaling story from
+this. The full table and its hard limits are in `docs/daemon-memory.md`.
+
+**Not changed.** No `PROTOCOL_VERSION` bump, no protocol frame, no GUI call API
+shape change, no new runtime dependency and no MCP code. No app, daemon, CLI or
+MCP server was launched. No real account, message, call, post, vote, reaction,
+setting or piece of PII was touched. The races use barriers and oneshots, not
+sleeps, and the fixtures use local ids and throwaway SQLite paths.
+
+**Gates.** fmt, `git diff --check`, workspace clippy with warnings denied,
+workspace nextest with and without all features, doctests and xtask fmt,
+clippy and tests pass on Rust 1.100.0. The Python driver has 10 passing tests.
+The focused Rust checks pass 19 native supervisor tests, 5 embedded lifecycle
+tests, 8 call coordinator tests and the writer stress test. The all-features
+daemon lib and test check passes. The driver's end-to-end fake process run
+passes, and mixed `--instrument --process` is rejected with exit 2. The added
+line audit found no em or en dashes, account paths, real JID namespaces,
+phone-shaped fixtures or secrets.
+
+**Limit.** This is the end of local Wave 4 hardening, not the end of reality.
+Browser wasm tests were not run because `wasm-pack` and
+`wasm-bindgen-test-runner` are not installed. Durable OPFS execution, history
+sync, reconnect, authenticated accounts, calls, media and whole-daemon cold
+startup are not claimed. RSS/PSS here is whole-process, not per-account
+attribution, and no allocator retention is inferred from RSS deltas. The
+Wave 4 release artifact still has to be built and installed from a published
+Linux tarball.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).
