@@ -1570,6 +1570,44 @@ attribution, and no allocator retention is inferred from RSS deltas. The
 Wave 4 release artifact still has to be built and installed from a published
 Linux tarball.
 
+### 46. MCP Phase 1 put one honest read on stdio
+
+**Problem.** `oxidezap-cli mcp` still prints a KDL usage spec. Calling that an
+MCP interface would be inaccurate. The frozen contracts had nine tools, but no
+MCP binary, SDK dependency or protocol test existed. Shipping all nine at once
+would have turned untested reads into traps.
+
+**Change.** `crates/mcp` is a workspace member and builds `oxidezap-mcp`. `rmcp`
+is pinned to exactly 3.11.0 with only `server`, `macros` and `transport-io`. The
+process speaks stdio JSON-RPC, binds one local account at startup from
+`--local-account` or `OXIDEZAP_LOCAL_ACCOUNT`, opens one wire connection with
+`read_only: true`, `account_selection: true` and no session events, and keeps
+the blocking `IpcClient` on one worker thread. `tools/list` advertises only
+`account_status`. `tools/call` implements only that tool and returns the frozen
+CLI envelope in structured content and one text item. Failures use fixed
+messages, so daemon text carrying a phone number, JID, token or local path does
+not reach a model. Startup binding failures are cached: the server still
+answers `tools/list`, and each call returns the failure envelope. The legacy
+plane is not implemented and no legacy tool is advertised. The README was
+rewritten in plain language without the old slogan.
+
+**Not changed.** No write tool, no logout, no pairing, no account creation,
+removal or reset, no session, store or media in the MCP process, no HTTP
+listener, no websocket, no outbound fetch and no change to `oxidezap-cli mcp`.
+No protocol bump. No app, installed daemon, CLI or installed MCP server was
+launched against a real account. The test binary talks only to a fake on a
+temporary Unix socket. Fixtures use local ids and `.invalid` values.
+
+**Gates.** fmt, focused `oxidezap-mcp` tests, workspace nextest,
+`git diff --check` and the added-line dash audit pass. The workspace clippy and
+all-features nextest run was stopped after the README cleanup request, so this
+commit does not claim the full gate set. The agent's focused clippy run with
+warnings denied passed before that point.
+
+**Limit.** This is one read, not the nine tool set. The legacy plane, the other
+eight reads, the write switch, confirmation tokens and audit lines are still
+planned. No claim is made about a real daemon, a real account or network reads.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

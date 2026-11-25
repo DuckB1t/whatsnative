@@ -11,6 +11,7 @@ members = [
     "crates/gui",
     "crates/ipc",
     "crates/logging",
+    "crates/mcp",
     "crates/platform",
     "crates/plugin-abi",
     "crates/plugin-host",

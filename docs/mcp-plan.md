@@ -1,9 +1,10 @@
 # MCP plan, before somebody ships a fake server
 
-> This is a plan, not a promise that a model gets to drive somebody's WhatsApp
-> account. The current `oxidezap-cli mcp` prints a KDL usage spec. It does not
-> speak MCP, it does not open a session, and its `--spec` flag is dead code.
-> Calling that an MCP interface would be bullshit with a help screen.
+> This is a plan plus the first implemented slice, not a promise that a model
+> gets to drive somebody's WhatsApp account. The current `oxidezap-cli mcp`
+> prints a KDL usage spec. It does not speak MCP, it does not open a session,
+> and its `--spec` flag is unused. Calling that an MCP interface would be
+> inaccurate.
 
 ## The blunt version
 
@@ -12,14 +13,13 @@ stdio, opens two typed line protocol connections to `oxidezapd`, and exposes a
 small set of reads. No session, no store, no media and no account state in the
 MCP process. The daemon still owns all of that.
 
-Fuck Electron, fuck webview. This is a Rust binary with stdin and stdout.
+This is a Rust binary with stdin and stdout.
 
-Phase 0 is done as docs only. The SDK, tool names, input schemas, output data,
-limits and error codes are frozen in [docs/mcp-tools.md](mcp-tools.md). The user
-later approved a write scope, frozen in
-[docs/mcp-write-plan.md](mcp-write-plan.md), but no MCP crate, dependency,
-socket code, tool or write exists yet. The approved writes wait for repo Wave 4
-multi-account.
+Phase 0 froze the contracts in [docs/mcp-tools.md](mcp-tools.md). Phase 1 added
+the `oxidezap-mcp` crate, stdio skeleton and one read, `account_status`, with
+fake daemon tests only. The user later approved a write scope, frozen in
+[docs/mcp-write-plan.md](mcp-write-plan.md). No write tool exists. The approved
+writes wait for their own gated slices.
 
 ## Decisions
 
@@ -122,7 +122,7 @@ Calls land last, after Wave 4 has a real global call coordinator.
 
 ## Layout
 
-- New crate `crates/mcp` with binary `oxidezap-mcp`.
+- The crate is `crates/mcp` with binary `oxidezap-mcp`.
 - Dependencies stay thin: `oxidezap-ipc`, `oxidezap-wire`, `oxidezap-core`,
   `serde`, `serde_json` and `rmcp` with the exact feature set in
   `docs/mcp-tools.md`.
@@ -136,9 +136,10 @@ Calls land last, after Wave 4 has a real global call coordinator.
 0. **Tool contract and SDK choice.** Done in docs. `docs/mcp-tools.md` freezes
    the nine tools, schemas, limits, transport contract and error codes. No
    network code yet.
-1. **Stdio skeleton.** `initialize`, `tools/list`, structured errors and one
-   honest tool, `account_status`, against a fake daemon. Tests cover malformed
-   JSON-RPC, unknown tools and missing daemon.
+1. **Stdio skeleton.** Done. `initialize`, `tools/list`, structured errors and
+   one honest tool, `account_status`, run against a fake daemon. Tests cover
+   malformed JSON-RPC, unknown methods and tools, bad params, missing daemon,
+   account binding, frame mismatch, redaction and the 1 MiB cap.
 2. **Wire read tools.** Add the six other wire-backed reads with page limits
    and synthetic fixtures only. Full gates before any legacy tool lands.
 3. **Legacy read tools.** Add contact search and privacy reads with the
@@ -159,12 +160,14 @@ Calls land last, after Wave 4 has a real global call coordinator.
   calls, malformed frames and structured refusals.
 - Legacy tests cover unaddressed frames arriving before acks, duplicate frames
   and a refused unknown request.
-- Read only default is tested by trying a write tool with the switch off.
+- The write wave will test the read only default by calling a write tool with
+  the switch off.
 - Write tests prove preview tokens are single use, bound to tool, account and
   payload, and that a failed account switch restores the old binding. No test
   logs out, pairs, resets or removes an account.
 - No app, daemon or CLI launch during validation. The fake daemon is a test
-  double, not the installed service.
+  double, not the installed service. The MCP test binary runs only against that
+  fake.
 - Repository gates still apply: fmt, clippy `-D warnings`, workspace nextest,
   doctests, xtask tests, `git diff --check`, no added em or en dashes and the
   no account leak audit.

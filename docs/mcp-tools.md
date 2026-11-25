@@ -1,13 +1,13 @@
 # MCP tool contracts, frozen in Phase 0
 
-> No MCP server ships. This file freezes the tool shapes so the next wave cannot
-> quietly invent a tool, widen a limit, or pretend a local read came from the
-> server. If a contract changes, this file changes first and the reason goes in
-> `docs/our-changes.md`.
+> Phase 1 ships one honest tool, `account_status`. This file freezes all nine
+> tool shapes so later waves cannot quietly invent a tool, widen a limit, or
+> claim a local read came from the server. If a contract changes, this file
+> changes first and the reason goes in `docs/our-changes.md`.
 
-The server name is still `oxidezap-mcp`, a native Rust stdio JSON-RPC process.
-It holds no session, no store, no media and no account state. The daemon owns
-all of that. Fuck electron, fuck webview.
+The server name is `oxidezap-mcp`, a native Rust stdio JSON-RPC process. It
+holds no session, no store, no media and no account state. The daemon owns all
+of that. This is a Rust binary with stdin and stdout.
 
 ## Ground rules
 
@@ -127,8 +127,8 @@ server stdio transport. Do not enable `auth`, `client`, `server-side-http`,
 `transport-child-process`, `skills-fs`, `reqwest` or any TLS feature. No HTTP
 listener, no OAuth stack and no outbound fetch belong in this binary.
 
-This is a dependency decision only. Phase 0 adds no crate, no manifest edit
-and no lockfile change.
+Phase 1 adds the crate and the exact lockfile entries with that feature set.
+It adds no auth, HTTP, client or outbound fetch dependency.
 
 ## Tool index
 
@@ -682,14 +682,16 @@ flag named in the message, and `too_many_clients` to `too_busy`. Wire `ApiError`
 codes pass through unchanged when they are in this table. An unknown daemon
 code becomes `internal_error`, never a made up synonym.
 
-## Proof expected in the implementation wave
+## Proof expected in the implementation waves
 
 - Fake daemon only. Every JID and phone fixture uses `.invalid`.
-- Schema tests pin all nine tool names, input bounds and `additionalProperties`.
-- A fake wire daemon covers hello, account selection, every response shape and
-  each mapped error.
-- A fake legacy daemon covers the three allowed request names, an unaddressed
-  data frame before its ack, duplicate frames, and a refused unknown request.
+- Phase 1 pins the one implemented tool schema, its input bounds and
+  `additionalProperties`. Later waves pin the other eight tool schemas.
+- A fake wire daemon covers hello, account selection, response shapes and the
+  mapped errors used by the tools present in that wave.
+- A fake legacy daemon will cover the three allowed request names, an
+  unaddressed data frame before its ack, duplicate frames, and a refused
+  unknown request when the legacy plane lands.
 - No app, daemon, CLI or MCP binary launch against a real account. No pairing,
   message, call, reaction, vote, post or setting is touched during validation.
 - Repository gates still apply: fmt, clippy with warnings denied, workspace

@@ -4,10 +4,10 @@
 
 <br><br>
 
-# FUCK ELECTRON. FUCK WEBVIEW.
+# A native WhatsApp client for Linux
 
-**WhatsNative is a WhatsApp client that actually runs on your desktop.**
-Rust, GPUI, one daemon, zero browser engines hiding in the background.
+**WhatsNative is a desktop WhatsApp client built in Rust.**
+Rust, GPUI, one daemon, no embedded browser runtime.
 
 <a href="https://github.com/DuckB1t/whatsnative/actions/workflows/ci.yml"><img src="https://github.com/DuckB1t/whatsnative/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 <a href="https://github.com/DuckB1t/whatsnative/actions/workflows/build.yml"><img src="https://github.com/DuckB1t/whatsnative/actions/workflows/build.yml/badge.svg" alt="Build"></a>
@@ -20,28 +20,27 @@ Rust, GPUI, one daemon, zero browser engines hiding in the background.
 
 ---
 
-## No bullshit version
+## The short version
 
 This is a native app. The interface is drawn by your GPU from Rust code. There
-is no Chromium process, no DOM, no JavaScript framework, no 400 MB of browser
-runtime so you can send "ok". One background daemon holds the session, the
-keys and the history. Windows are dumb clients on top of it.
+is no Chromium process, no DOM, no JavaScript framework and no browser runtime
+shipped for everyday chat. One background daemon holds the session, the keys
+and the history. Windows are thin clients on top of it.
 
-It is unofficial. It is not affiliated with WhatsApp or Meta. Do not expect us
-to pretend otherwise.
+This project is unofficial and is not affiliated with WhatsApp or Meta. We
+state that clearly.
 
-It is also a fork of [oxidezap/client](https://github.com/oxidezap/client).
-We kept the `oxidezap*` crate and binary names because renaming them would be
-bullshit work with no payoff. The product is WhatsNative. The protocol, Signal,
-media and call machinery come from
+It is also a fork of [oxidezap/client](https://github.com/oxidezap/client). We
+kept the `oxidezap*` crate and binary names to avoid needless churn. The product
+is WhatsNative. The protocol, Signal, media and call machinery come from
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust).
 
-## Program status, blunt version
+## Program status
 
 We did a deep audit of what a normal user notices and wrote it in
 [docs/feature-plan.md](docs/feature-plan.md). The audit found no Calls tab, no
 chat info panel, a disabled new chat button, a media jump list and a local-only
-GIF/sticker picker with no search. Those five gaps are closed, and Wave 2's real
+GIF/sticker picker with no search. Those five gaps are closed, and Wave 2
 message actions are in too. None of this was in v0.1.0. It is in v0.2.0.
 
 Progress snapshot, not a live counter:
@@ -53,8 +52,8 @@ Progress snapshot, not a live counter:
 | Wave 2, message actions | 100%, A through D done with real APIs only |
 | Wave 3, privacy and settings | 100%, shipped in v0.3.0 after v0.2.0 |
 | Wave 4, multi-account | 100%, native and web lifecycle, race matrix, writer stress and synthetic process measurements done locally; release artifact still pending |
-| MCP planning | 100%, SDK, nine reads and the approved write scope frozen, no MCP server shipped |
-| Whole program | about 75%, Waves 1 through 4 done locally but Wave 4 has no installed artifact, and MCP is still unimplemented |
+| MCP Phase 1 | 1 of 9 reads, stdio skeleton with initialize, tools/list, structured errors and account_status, fake daemon only |
+| Whole program | about 76%, Waves 1 through 4 and MCP Phase 1 done locally, with the Wave 4 artifact and the other MCP reads still pending |
 
 Checklist:
 
@@ -68,48 +67,50 @@ Checklist:
 - [x] Wave 3: privacy and settings with real mutations
 - [x] Wave 4: multi-account V2
 - [x] MCP planning
+- [x] MCP Phase 1 stdio skeleton
 
 Calls, chat info, new chat, the media gallery and local picker search are
-implemented and green locally. None of it was in v0.1.0. v0.2.0 carries it. The log shows only
-finalized calls from this daemon start, capped at 100, and the pane says so on
-screen. Chat info is a mirror of local state: name, raw JID, authoritative
-roster, loaded-history media count and working mute and archive controls. It does
-not invent About text, last seen, phone labels or a server-wide media total. The
-gallery is bounded to the last 50 stored media rows. It shows the kind, filename,
-dimensions and availability facts the stored proto actually carries, groups those
-rows by chat and filters only what is already in hand. A thumbnail appears only
-when this window already holds decodable bytes. No server-wide total,
-downloaded-only claim or fake fetch sits behind those chips. The picker searches
-only the tiles it already loaded: GIFs by chat, caption and file name, recent
-stickers by the chat they came from. Favorites carry no text and are honestly not
-searchable. Every surface says what it is on screen.
+implemented and green locally. None of it was in v0.1.0. v0.2.0 carries it. The
+log shows only finalized calls from this daemon start, capped at 100, and the
+pane says so on screen. Chat info is a mirror of local state: name, raw JID,
+authoritative roster, loaded-history media count and working mute and archive
+controls. It does not invent About text, last seen, phone labels or a
+server-wide media total. The gallery is bounded to the last 50 stored media
+rows. It shows the kind, filename, dimensions and availability facts the stored
+proto actually carries, groups those rows by chat and filters only what is
+already in hand. A thumbnail appears only when this window already holds
+decodable bytes. No server-wide total, downloaded-only claim or fake fetch sits
+behind those chips. The picker searches only the tiles it already loaded: GIFs
+by chat, caption and file name, recent stickers by the chat they came from.
+Favorites carry no text and are therefore not searchable. Every surface says
+what it is on screen.
 
 Wave 2 closes the message-action gaps with real local APIs. Stars and pins set
 in an earlier session survive a reload because the durable row now reaches the
 timeline. A pin change seen after load beats that row, including an explicit
 unpin, so the window does not argue with the store. The reacted table opens from
-the quick strip for the emoji nobody thought to put in six buttons, and mention
-candidates stop quietly dropping after fifty names. The send sheet lets each
-pending file go as image, video or document without touching its bytes, and
-large outgoing photos get scaled down locally with the header describing what
-was actually sent. Protocol 62 adds a real pinned listing and a local contact
-search, so the pinned panel finds rows outside this window's loaded page and a
-forward can reach someone saved in the address book who is not a chat yet. There
-is no server-wide directory, no pin forever, no cloud GIF search and no real
-account was touched. `v0.3.0` is the current release; `v0.2.0` is the previous one.
+the quick strip for emoji outside the six-button strip, and mention candidates
+are no longer lost after fifty names. The send sheet lets each pending file go
+as image, video or document without touching its bytes, and large outgoing
+photos get scaled down locally with the header describing what was actually
+sent. Protocol 62 adds a real pinned listing and a local contact search, so the
+pinned panel finds rows outside this window's loaded page and a forward can
+reach someone saved in the address book who is not a chat yet. There is no
+server-wide directory, no pin forever, no cloud GIF search and no real account
+was touched. `v0.3.0` is the current release; `v0.2.0` is the previous one.
 Releases are Linux only. No macOS or Windows binaries are built or published.
 
 UI target: familiar layout, original design. No copied proprietary assets or
 trade dress. The checklist gets updated after every wave.
 
-## What actually works
+## Current features
 
-| Thing | Status |
+| Feature | Status |
 | --- | --- |
 | Chats, groups, communities, channels, statuses | Working, with durable local history |
 | Search | Everywhere, plus inside one conversation |
 | Saved and starred messages | Working. Pinning capped at 30 days because that is what upstream allows |
-| Media send and receive | Working. Local media gallery over stored history, no pretence of a cloud gallery |
+| Media send and receive | Working. Local media gallery over stored history, with no claim of a cloud gallery |
 | Voice and video calls | 1:1 validated. Group calls draw a grid but have not been live tested |
 | Calls and chat details | Call log since daemon start, capped at 100. Details come from local state, not server profiles |
 | Plugins | Sandboxed `.wasm`, per-capability approval, no filesystem, no sockets |
@@ -178,9 +179,9 @@ flowchart LR
 ```
 
 The daemon is the only thing that holds a WhatsApp session. A window holds no
-session and no media cache. You can attach as many windows as you like. If that
-sounds familiar, good, it is the right design. Read
-[docs/architecture.md](docs/architecture.md) for the details.
+session and no media cache. You can attach as many windows as you like. That is
+the intended design. Read [docs/architecture.md](docs/architecture.md) for the
+details.
 
 | Crate | What it does |
 | --- | --- |
@@ -211,38 +212,38 @@ cargo build --release --bin oxidezap --bin oxidezapd --bin oxidezap-cli
 ```
 
 Keep the three binaries together. The window starts the daemon beside itself.
-The first build compiles the whole GPUI tree, so go get a coffee.
+The first build compiles the whole GPUI tree and takes a while.
 
 Prebuilt Linux AppImage, `.deb`, `.rpm` and tarballs are on the
 [releases page](https://github.com/DuckB1t/whatsnative/releases). The Linux
 packages are described in [docs/linux-packaging.md](docs/linux-packaging.md).
 There are no macOS or Windows release assets.
 
-## Docs, if you want the ugly details
+## Documentation
 
 | Guide | What is in it |
 | --- | --- |
 | [Our changes](docs/our-changes.md) | What we changed slice by slice, with the gates each passed |
 | [Feature plan](docs/feature-plan.md) | Investigation, feasibility, waves and current progress |
-| [Roadmap](docs/roadmap.md) | What is missing and why we refuse to fake it |
+| [Roadmap](docs/roadmap.md) | What is missing and why it is missing |
 | [Architecture](docs/architecture.md) | Crate map, theme, one number that drives layout |
 | [Building](docs/building.md) | Web, plugin and profiling builds |
 | [CLI](docs/cli.md) | The scriptable front end |
-| [MCP plan](docs/mcp-plan.md) | What a real MCP server would be, and why the current command is not one |
+| [MCP plan](docs/mcp-plan.md) | The MCP design and the current CLI command's scope |
 | [MCP tool contracts](docs/mcp-tools.md) | The nine frozen tool schemas, limits, transport split and error codes |
 | [MCP write plan](docs/mcp-write-plan.md) | The approved write tools, exclusions, gates and order after Wave 4 |
 | [Localization](docs/localization.md) | English and Portuguese |
 | [Web](docs/web.md) | The browser build and its hard limits |
 | [Plugin ABI](docs/plugin-abi.md) | The contract plugin authors must obey |
 | [Gotchas](docs/gotchas.md) | Non-obvious behaviour and the reasoning behind it |
-| [AGENTS.md](AGENTS.md) | The decisions that keep this thing from falling over |
+| [AGENTS.md](AGENTS.md) | The decisions behind the architecture |
 
-## Data and privacy, without the marketing
+## Data and privacy
 
 Everything lives in one SQLite file under the platform data directory
 (`~/.local/share/oxidezap/whatsapp.db` on Linux). Device identity, Signal state
-and chat history are in that same file. Delete it and you unlink the device and
-lose local history. That is the whole story.
+and chat history are in that same file. Deleting it unlinks the device and
+removes local history.
 
 There is no account data, no message content and no paired identity in this
 repository. Every JID, phone number and message in tests and screenshots is a
@@ -257,24 +258,25 @@ plugin cannot read your disk or open a socket. Sending, marking read and typing
 each need separate approval, and you can take it back. Start from
 `examples/template` or read [docs/plugin-abi.md](docs/plugin-abi.md).
 
-## What we will not pretend to support
+## Known limits
 
-- Group calling is implemented and has a grid, but nobody has live tested it.
+- Group calling is implemented and has a grid, but it has not been live tested.
   1:1 calls have been tested.
 - Meta AI, Private Processing, ads, channel subscriptions, business catalogs,
   passkeys, cross-platform chat transfer, story audience editing, arbitrary
   member tags, status read receipts and channel role admin are not here. Some
-  are server owned, some have no public upstream API. We would rather say so
-  than draw a switch that does nothing. The full list is in
-  [docs/roadmap.md](docs/roadmap.md).
+  depend on server support this client does not control, and some have no public
+  upstream API. We would rather document the gap than add a switch that does
+  nothing. The full list is in [docs/roadmap.md](docs/roadmap.md).
 - The privacy pane has seven real account controls: DM read receipts plus last
   seen, online, profile photo, About, group add and who can message me. Each new
-  control uses a public upstream setter and shows only the server's fresh answer,
-  never a local guess. The rest is a documented gap, not a lying toggle.
+  control uses a public upstream setter and shows only the server's fresh
+  answer, not a local guess. The rest are documented gaps, not toggles that
+  imply support.
 - A browser tab with its own session shares one plugin agent. Attaching to
   `oxidezapd` gives each plugin a thread.
 
-## Credits, because we did not write all of this
+## Credits
 
 - [oxidezap/client](https://github.com/oxidezap/client), the client we forked
   (MIT, copyright João Lucas de Oliveira Lopes).
@@ -288,5 +290,4 @@ each need separate approval, and you can take it back. Start from
 
 ## License
 
-MIT. The upstream copyright notice is still in [LICENSE](LICENSE). We are not
-stealing anybody's work and pretending it is ours.
+MIT. The upstream copyright notice is preserved in [LICENSE](LICENSE).

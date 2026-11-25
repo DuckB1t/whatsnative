@@ -1,14 +1,13 @@
 # MCP write plan, approved but blocked on Wave 4
 
 > Phase 0 froze nine reads in `docs/mcp-tools.md`. This file records the write
-> tools the user later approved. Nothing here is implemented yet. No write tool
-> ships until repo Wave 4 multi-account is done and each tool passes its own
-> gates. Fuck electron, fuck webview.
+> tools the user later approved. Nothing here is implemented yet. Wave 4 is
+> green, but no write tool ships until each tool passes its own gates.
 
 ## Approved scope
 
-The first MCP build stays read only and uses the nine frozen tools. After Wave
-4, a separate approved wave adds these tools, one at a time:
+The first MCP build stays read only and started with one of the nine frozen
+tools. A separate approved wave adds these tools, one at a time:
 
 | Tool | What it does | Daemon surface |
 | --- | --- | --- |
