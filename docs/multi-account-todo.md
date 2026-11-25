@@ -396,10 +396,11 @@ encerrar a chamada ao trocar de conta.
        sustenta custo por conta, e idle zero é apenas menor que um tick.
        History sync, reconexão, contas autenticadas, chamadas e mídia não têm
        substituto sintético honesto e continuam fora da reivindicação. Browser
-       wasm roda no CI, não nesta máquina, e o primeiro sweep mostrou uma
-       assertion global errada no teste de create do lifecycle web; ela agora
-       compara o delta de contas. A "Definition of done" abaixo mantém os itens
-       que exigem contas reais e artefato instalado como pendentes, sem fingir
+       wasm roda no CI, não nesta máquina, e o primeiro sweep mostrou três
+       assertions globais erradas nos testes de lifecycle web; elas agora
+       comparam o delta de contas e os ids preservados. A "Definition of done"
+       abaixo mantém os itens que exigem contas reais e artefato instalado como
+       pendentes, sem fingir
        que um client nunca iniciado prova isso.
 
 ## Definition of done

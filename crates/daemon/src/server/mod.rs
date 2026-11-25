@@ -1308,11 +1308,13 @@ mod lifecycle_tests {
     async fn create_account_uses_the_shared_store_registry() {
         let registry = AccountRegistry::new();
         let shared = stores();
-        let accounts_before = shared
+        let accounts_before: Vec<_> = shared
             .accounts()
             .await
             .expect("the store lists accounts")
-            .len();
+            .into_iter()
+            .map(|account| account.id)
+            .collect();
         let start: Arc<StartFn> = Arc::new(|registry, id, _, _| {
             assert!(registry.insert(runtime_with_commands(id, mpsc::channel(4).0)));
             Box::pin(async {})
@@ -1352,14 +1354,15 @@ mod lifecycle_tests {
         assert_ne!(first_id, second_id);
         assert!(registry.get(first_id).is_some());
         assert!(registry.get(second_id).is_some());
-        assert_eq!(
-            shared
-                .accounts()
-                .await
-                .expect("the store lists accounts")
-                .len(),
-            accounts_before + 2
+        let stored = shared.accounts().await.expect("the store lists accounts");
+        assert_eq!(stored.len(), accounts_before.len() + 2);
+        let stored_ids: Vec<_> = stored.iter().map(|account| account.id).collect();
+        assert!(
+            accounts_before.iter().all(|id| stored_ids.contains(id)),
+            "the two creates did not erase an account left by another test"
         );
+        assert!(stored_ids.contains(&first_id));
+        assert!(stored_ids.contains(&second_id));
         drop(lifecycle);
     }
 

@@ -444,6 +444,13 @@ mod tests {
     async fn create_allocates_distinct_ids_and_starts_each_once() {
         let registry = AccountRegistry::new();
         let shared_stores = stores();
+        let stored_before: Vec<AccountId> = shared_stores
+            .accounts()
+            .await
+            .expect("the store lists accounts")
+            .into_iter()
+            .map(|account| account.id)
+            .collect();
         let started: Arc<RwLock<Vec<AccountId>>> = Arc::new(RwLock::new(Vec::new()));
         let seen = Arc::clone(&started);
         let start: Arc<StartFn> = Arc::new(move |registry, id, stores, _lifecycle| {
@@ -478,7 +485,18 @@ mod tests {
             &[first, second]
         );
         assert_eq!(registry.snapshot().accounts.len(), 2);
-        assert_eq!(shared_stores.accounts().await.unwrap().len(), 2);
+        let stored_after = shared_stores
+            .accounts()
+            .await
+            .expect("the store lists accounts");
+        assert_eq!(stored_after.len(), stored_before.len() + 2);
+        let stored_ids: Vec<AccountId> = stored_after.iter().map(|account| account.id).collect();
+        assert!(
+            stored_before.iter().all(|id| stored_ids.contains(id)),
+            "the two creates did not erase an account left by another test"
+        );
+        assert!(stored_ids.contains(&first));
+        assert!(stored_ids.contains(&second));
     }
 
     #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
@@ -612,6 +630,13 @@ mod tests {
     async fn concurrent_create_reset_remove_keep_effects_scoped_and_final_state_stable() {
         let registry = AccountRegistry::new();
         let shared_stores = stores();
+        let stored_before: Vec<AccountId> = shared_stores
+            .accounts()
+            .await
+            .expect("the store lists accounts")
+            .into_iter()
+            .map(|account| account.id)
+            .collect();
         let first = AccountId::new(6).unwrap();
         let second = AccountId::new(7).unwrap();
         let first_old = synthetic(first, commands_for_drop());
@@ -692,9 +717,17 @@ mod tests {
         );
         assert_eq!(replacement.lifecycle().disposition(), None);
         assert!(registry.get(second).is_none());
-        let stored = shared_stores.accounts().await.unwrap();
-        assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].id, created);
+        let stored = shared_stores
+            .accounts()
+            .await
+            .expect("the store lists accounts");
+        assert_eq!(stored.len(), stored_before.len() + 1);
+        let stored_ids: Vec<AccountId> = stored.iter().map(|account| account.id).collect();
+        assert!(
+            stored_before.iter().all(|id| stored_ids.contains(id)),
+            "the synthetic reset and remove must not erase rows from other tests"
+        );
+        assert!(stored_ids.contains(&created));
     }
 
     #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]

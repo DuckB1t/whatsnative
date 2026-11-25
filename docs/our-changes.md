@@ -1489,7 +1489,7 @@ real JID namespaces, account paths or secrets.
 
 **Limit.** Local browser wasm tests were not run because `wasm-pack` and
 `wasm-bindgen-test-runner` are not installed here. CI does run them, and it
-caught a bad assertion in this section's shared-store test; see section 45.
+caught order-dependent shared-store assertions; see section 45.
 Durable OPFS execution is not claimed. Correct local lifecycle is not a
 performance result, and it does not prove history sync or reconnect without an
 authorized test account.
@@ -1528,13 +1528,14 @@ eight threads and four fds in this harness. Idle CPU was below one 100 Hz tick,
 and cold wall medians overlapped, so nobody gets a latency scaling story from
 this. The full table and its hard limits are in `docs/daemon-memory.md`.
 
-**CI follow-up.** The first CI sweep after the web lifecycle commit caught
-`server::lifecycle_tests::create_account_uses_the_shared_store_registry`
-failing in Chrome with four accounts where it expected two. The wasm test
-helper shares one OPFS database with the other browser tests, so the
-empty-store assertion was simply wrong. It now records the count before the
-two creates and checks the delta. That is a test fix, not a lifecycle behavior
-change.
+**CI follow-up.** The first CI sweep after the web lifecycle commit caught two
+Chrome failures, not one. The server create test saw five accounts where it
+expected two, and the embedded concurrency race saw three where it expected
+one. The wasm test helper shares one OPFS database with every other browser
+test, so all three store-count assertions were order dependent: two creates,
+the shared-store create, and the concurrency race all assumed an empty store.
+They now record the ids present before the test and assert the delta plus the
+retained ids. That is a test fix, not a lifecycle behavior change.
 
 **Not changed.** No `PROTOCOL_VERSION` bump, no protocol frame, no GUI call API
 shape change, no new runtime dependency and no MCP code. No app, daemon, CLI or
