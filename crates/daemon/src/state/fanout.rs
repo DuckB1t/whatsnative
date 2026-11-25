@@ -153,6 +153,7 @@ impl Fanout {
         let (tray, _) = watch::channel(TrayState {
             connected: false,
             unread: 0,
+            call: None,
         });
         Self {
             ordering: Mutex::new(()),
@@ -374,6 +375,7 @@ mod tests {
             TrayState {
                 connected: true,
                 unread: 3,
+                call: None,
             },
         );
 

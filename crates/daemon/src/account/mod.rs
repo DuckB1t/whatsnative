@@ -29,6 +29,7 @@ use oxidezap_core::AccountId;
 use oxidezap_ipc::{AccountOverview, AccountStatus, AccountsSnapshot};
 use tokio::sync::{mpsc, watch};
 
+use crate::call_coordinator::CallCoordinator;
 use crate::session_bridge::{
     self, AccountDisposition, Action, CommandOutcome, Commands, RuntimeLifecycle, SessionCommand,
 };
@@ -156,10 +157,11 @@ impl AccountRuntime {
     /// instead of to this return value can respawn an account whose reset
     /// never actually ran, or forget one whose removal failed against real
     /// SQLite. This return value is the one place that distinction survives.
-    pub async fn run(
+    pub(crate) async fn run(
         &self,
         command_rx: mpsc::Receiver<SessionCommand>,
         shutdown: impl std::future::Future<Output = ()>,
+        calls: Arc<CallCoordinator>,
     ) -> Result<session_bridge::AccountExit> {
         self.set_status(AccountStatus::Running);
         let result = session_bridge::run(
@@ -175,6 +177,7 @@ impl AccountRuntime {
                     () = self.lifecycle.retirement_stop_requested() => {},
                 }
             },
+            Some(calls),
         )
         .await;
         self.set_status(if result.is_ok() {
@@ -198,6 +201,10 @@ enum EmbeddedNext {
 pub struct AccountRegistry {
     relink: tokio::sync::Mutex<()>,
     construction: tokio::sync::Mutex<()>,
+    /// The one call slot shared by every runtime in this registry. A page's
+    /// registry has one runtime, so this is its own slot rather than a claim
+    /// on another tab's session.
+    calls: Arc<CallCoordinator>,
     accounts: RwLock<HashMap<AccountId, Arc<AccountRuntime>>>,
     overview: watch::Sender<Arc<AccountsSnapshot>>,
     retirements: watch::Sender<Vec<(AccountId, AccountId)>>,
@@ -231,6 +238,7 @@ impl AccountRegistry {
         Arc::new(Self {
             relink: tokio::sync::Mutex::new(()),
             construction: tokio::sync::Mutex::new(()),
+            calls: CallCoordinator::new(),
             accounts: RwLock::new(HashMap::new()),
             overview,
             retirements: watch::channel(Vec::new()).0,
@@ -425,6 +433,12 @@ impl AccountRegistry {
         }
     }
 
+    /// The daemon-wide call slot every runtime in this registry shares.
+    #[must_use]
+    pub(crate) fn call_coordinator(&self) -> Arc<CallCoordinator> {
+        Arc::clone(&self.calls)
+    }
+
     /// Remove one runtime after its teardown has completed.
     pub fn remove(&self, id: AccountId) -> Option<Arc<AccountRuntime>> {
         let removed = self
@@ -433,6 +447,10 @@ impl AccountRegistry {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&id);
         if removed.is_some() {
+            // The bridge's own permit also drops on teardown. Releasing here
+            // as well makes the tray stop naming an account whose runtime is
+            // gone, even if the bridge outlives this removal for a moment.
+            self.calls.release_account(id);
             self.publish_snapshot();
         }
         removed
@@ -498,7 +516,7 @@ impl AccountRegistry {
     }
 
     /// Drive one registered runtime while publishing lifecycle transitions.
-    pub async fn run(
+    pub(crate) async fn run(
         &self,
         runtime: Arc<AccountRuntime>,
         command_rx: mpsc::Receiver<SessionCommand>,
@@ -506,7 +524,9 @@ impl AccountRegistry {
     ) -> Result<session_bridge::AccountExit> {
         let id = runtime.id();
         self.set_status(id, AccountStatus::Running);
-        let result = runtime.run(command_rx, shutdown).await;
+        let result = runtime
+            .run(command_rx, shutdown, self.call_coordinator())
+            .await;
         self.set_status(
             id,
             if result.is_ok() {

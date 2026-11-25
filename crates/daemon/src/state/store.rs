@@ -19,7 +19,19 @@ use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Mutex;
 
+use oxidezap_core::{AccountId, CallId};
 use oxidezap_ipc::{ChatSummary, ConnectionState, DaemonEvent, StateSnapshot, StateVersion};
+
+/// The one call the whole daemon is carrying, for the tray only.
+///
+/// The owning account is part of the marker because a tray sits above every
+/// account: "a call is up" cannot say which one has the microphone. The call
+/// id is here so a state that changes owner is visibly a different state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayCall {
+    pub account: AccountId,
+    pub call_id: CallId,
+}
 
 /// What the tray renders. Small and comparable so `watch` can drop
 /// no-op updates before they reach the icon.
@@ -27,6 +39,7 @@ use oxidezap_ipc::{ChatSummary, ConnectionState, DaemonEvent, StateSnapshot, Sta
 pub struct TrayState {
     pub connected: bool,
     pub unread: u32,
+    pub call: Option<TrayCall>,
 }
 
 impl TrayState {
@@ -56,11 +69,15 @@ impl TrayState {
     /// What the icon has to say, in one sentence.
     #[must_use]
     pub fn description(&self) -> String {
-        match (self.connected, self.shown_unread()) {
+        let base = match (self.connected, self.shown_unread()) {
             (false, _) => "Disconnected".to_string(),
             (true, 0) => "Connected".to_string(),
             (true, 1) => "1 unread message".to_string(),
             (true, n) => format!("{n} unread messages"),
+        };
+        match self.call.as_ref() {
+            Some(call) => format!("{base}; call in progress on account {}", call.account),
+            None => base,
         }
     }
 
@@ -582,6 +599,7 @@ impl Inner {
         TrayState {
             connected: self.connection.is_connected(),
             unread: self.attention.total.min(u128::from(u32::MAX)) as u32,
+            call: None,
         }
     }
 }
@@ -950,7 +968,8 @@ mod tests {
             second.tray,
             TrayState {
                 connected: true,
-                unread: 2
+                unread: 2,
+                call: None
             },
             "the tray value travels with the change that produced it"
         );
@@ -1024,7 +1043,11 @@ mod tests {
     /// What every tray says, whatever it draws with: the words live here so
     /// no platform can disagree with another about them.
     fn tray(connected: bool, unread: u32) -> TrayState {
-        TrayState { connected, unread }
+        TrayState {
+            connected,
+            unread,
+            call: None,
+        }
     }
 
     #[test]

@@ -59,7 +59,11 @@ mod tests {
     use super::*;
 
     fn state(connected: bool, unread: u32) -> TrayState {
-        TrayState { connected, unread }
+        TrayState {
+            connected,
+            unread,
+            call: None,
+        }
     }
 
     /// The report Linux got first: messages waiting behind an icon that

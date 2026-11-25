@@ -95,6 +95,14 @@ impl Bridge {
                 self.hub.calls(|s| admission = s.set_incoming(call.clone()));
                 if admission == oxidezap_core::Admission::Refused {
                     answer = Answer::Decline(call.call_id.clone());
+                } else if self.claim_call(&call.call_id).is_err() {
+                    // The offer was put on screen before the whole daemon was
+                    // consulted. Take it back as well as refusing it, or this
+                    // account would draw a call the session is about to drop.
+                    self.hub.calls(|s| {
+                        s.end(&call.call_id);
+                    });
+                    answer = Answer::Decline(call.call_id.clone());
                 }
             }
             UiEvent::OutgoingCallStarted {
@@ -118,6 +126,9 @@ impl Bridge {
                         s.set_outgoing_ringing(call_id);
                     }
                 });
+                if adopted {
+                    self.rename_call(placeholder_id, call_id);
+                }
             }
             // Answered, from either side: the call becomes live rather than
             // being cleared. A front end attaching now has to find a call in
@@ -133,9 +144,11 @@ impl Bridge {
             UiEvent::CallAnswered { call_id, is_video } => self.hub.calls(|s| {
                 s.answered_as(call_id, *is_video);
             }),
-            UiEvent::CallEnded(id) => self.hub.calls(|s| {
-                s.end(id);
-            }),
+            UiEvent::CallEnded(id) => {
+                self.end_call_and_follow_promotion(id, |s| {
+                    s.end(id);
+                });
+            }
             // The session correcting a mute the peer was never told about.
             // The front end drew what it asked for; this is what the device
             // is actually doing. Nothing is published when the two agree, so
@@ -161,17 +174,21 @@ impl Bridge {
             // end writes the conversation's call record off the stage it was
             // holding, and an incoming stage that simply vanishes reads as
             // missed.
-            UiEvent::CallEndedElsewhere(id) => self.hub.calls(|s| {
-                s.end_elsewhere(id);
-            }),
+            UiEvent::CallEndedElsewhere(id) => {
+                self.end_call_and_follow_promotion(id, |s| {
+                    s.end_elsewhere(id);
+                });
+            }
             // Marked before it is ended, because ending is what publishes the
             // removal and the explanation has to be in that same frame — a
             // reason arriving after the record it was meant to change is no
             // reason at all.
-            UiEvent::CallUnrecorded(id) => self.hub.calls(|s| {
-                s.mark_unrecorded(id);
-                s.end(id);
-            }),
+            UiEvent::CallUnrecorded(id) => {
+                self.end_call_and_follow_promotion(id, |s| {
+                    s.mark_unrecorded(id);
+                    s.end(id);
+                });
+            }
             // The connection the calls run over is gone, and nothing else
             // says so: no session event ends a call when the socket dies, so
             // the stage stood, `is_busy` went on refusing every new call after
@@ -184,6 +201,7 @@ impl Bridge {
                 self.hub.calls(|s| {
                     s.end_all();
                 });
+                self.release_account_calls();
                 if matches!(event, UiEvent::LoggedOut(_)) {
                     self.reads().forget_all();
                 }
@@ -198,9 +216,20 @@ impl Bridge {
             // The stage empties for good here — nothing is about to replace
             // a call that never got placed — so a second caller parked behind
             // it comes forward, the same as when a call ends.
-            UiEvent::OutgoingCallFailed { recipient_jid, .. } => self.hub.calls(|s| {
-                s.fail_outgoing_to(recipient_jid);
-            }),
+            UiEvent::OutgoingCallFailed { recipient_jid, .. } => {
+                let mut failed = None;
+                self.hub.calls(|s| {
+                    failed = s
+                        .outgoing()
+                        .filter(|call| call.recipient_jid == recipient_jid.as_str())
+                        .map(|call| call.call_id.clone());
+                });
+                if let Some(failed) = failed {
+                    self.end_call_and_follow_promotion(&failed, |s| {
+                        s.fail_outgoing_to(recipient_jid);
+                    });
+                }
+            }
             _ => {}
         }
 

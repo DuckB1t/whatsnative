@@ -4,23 +4,29 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 
 use crate::account::AccountRegistry;
-use crate::state::{StateHub, TrayState};
+use crate::call_coordinator::CallOwner;
+use crate::state::{StateHub, TrayCall, TrayState};
 
 pub struct TrayHub {
     registry: Arc<AccountRegistry>,
     state: watch::Sender<TrayState>,
+    /// The daemon-wide call marker, separate from any one account's state.
+    calls: watch::Receiver<Option<CallOwner>>,
     empty: Arc<StateHub>,
 }
 
 impl TrayHub {
     pub fn new(registry: Arc<AccountRegistry>) -> Arc<Self> {
+        let calls = registry.call_coordinator().watch_owner();
         let (state, _) = watch::channel(TrayState {
             connected: false,
             unread: 0,
+            call: None,
         });
         Arc::new(Self {
             registry,
             state,
+            calls,
             empty: StateHub::new(),
         })
     }
@@ -72,7 +78,11 @@ impl TrayHub {
             .iter()
             .map(|hub| hub.watch_tray().borrow().clone())
             .collect();
-        let state = aggregate(&values);
+        let call = self.calls.borrow().as_ref().map(|owner| TrayCall {
+            account: owner.account,
+            call_id: owner.call_id.clone(),
+        });
+        let state = aggregate(&values, call);
         self.state.send_if_modified(|previous| {
             if *previous == state {
                 false
@@ -86,6 +96,7 @@ impl TrayHub {
     pub async fn follow(self: Arc<Self>) {
         let mut accounts = self.registry.subscribe();
         let mut retirements = self.registry.watch_retirements();
+        let mut calls = self.calls.clone();
         let (changed, mut changes) = mpsc::channel(1);
         let mut watchers = tokio::task::JoinSet::new();
         loop {
@@ -93,6 +104,7 @@ impl TrayHub {
             while watchers.join_next().await.is_some() {}
             accounts.borrow_and_update();
             retirements.borrow_and_update();
+            calls.borrow_and_update();
             for hub in self.current_hubs(false) {
                 let mut state = hub.watch_tray();
                 let changed = changed.clone();
@@ -115,18 +127,23 @@ impl TrayHub {
                         break;
                     }
                     Some(()) = changes.recv() => self.publish(),
+                    result = calls.changed() => {
+                        if result.is_err() { return; }
+                        self.publish();
+                    }
                 }
             }
         }
     }
 }
 
-fn aggregate(states: &[TrayState]) -> TrayState {
+fn aggregate(states: &[TrayState], call: Option<TrayCall>) -> TrayState {
     TrayState {
         connected: states.iter().any(|state| state.connected),
         unread: states.iter().fold(0u32, |total, state| {
             total.saturating_add(state.shown_unread())
         }),
+        call,
     }
 }
 
@@ -198,44 +215,81 @@ mod tests {
         following.abort();
     }
 
+    fn state(connected: bool, unread: u32) -> TrayState {
+        TrayState {
+            connected,
+            unread,
+            call: None,
+        }
+    }
+
     #[test]
     fn disconnected_retained_history_does_not_hide_connected_successor() {
         assert_eq!(
-            aggregate(&[
-                TrayState {
-                    connected: false,
-                    unread: 100
-                },
-                TrayState {
-                    connected: true,
-                    unread: 7
-                },
-            ]),
-            TrayState {
-                connected: true,
-                unread: 7
-            }
+            aggregate(&[state(false, 100), state(true, 7)], None),
+            state(true, 7)
         );
+        assert_eq!(aggregate(&[], None), state(false, 0));
         assert_eq!(
-            aggregate(&[]),
-            TrayState {
-                connected: false,
-                unread: 0
-            }
-        );
-        assert_eq!(
-            aggregate(&[
-                TrayState {
-                    connected: true,
-                    unread: u32::MAX
-                },
-                TrayState {
-                    connected: true,
-                    unread: 1
-                },
-            ])
-            .unread,
+            aggregate(&[state(true, u32::MAX), state(true, 1)], None).unread,
             u32::MAX
         );
+    }
+
+    #[test]
+    fn aggregate_publishes_the_one_global_call_marker() {
+        let call = TrayCall {
+            account: AccountId::new(4).unwrap(),
+            call_id: "synthetic-call".into(),
+        };
+        let merged = aggregate(&[state(true, 2), state(false, 9)], Some(call.clone()));
+        assert_eq!(merged.call, Some(call));
+        assert!(
+            merged
+                .description()
+                .contains("call in progress on account 4")
+        );
+    }
+
+    #[tokio::test]
+    async fn call_marker_follows_claims_and_runtime_removal() {
+        let registry = AccountRegistry::new();
+        let account = runtime(4);
+        account
+            .hub()
+            .apply(crate::state::Change::live(DaemonEvent::ConnectionChanged(
+                ConnectionState::Connected,
+            )));
+        registry.insert(Arc::clone(&account));
+        let tray = TrayHub::new(Arc::clone(&registry));
+        let mut watch = tray.watch_tray();
+        let following = tokio::spawn(Arc::clone(&tray).follow());
+        tokio::time::timeout(std::time::Duration::from_secs(5), watch.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        watch.borrow_and_update();
+
+        let permit = registry
+            .call_coordinator()
+            .claim(account.id(), "synthetic-call".into())
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), watch.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        let state = watch.borrow_and_update();
+        assert_eq!(state.call.as_ref().unwrap().account, account.id());
+        assert_eq!(state.call.as_ref().unwrap().call_id, "synthetic-call");
+        drop(state);
+
+        registry.remove(account.id());
+        tokio::time::timeout(std::time::Duration::from_secs(5), watch.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(watch.borrow_and_update().call.is_none());
+        drop(permit);
+        following.abort();
     }
 }

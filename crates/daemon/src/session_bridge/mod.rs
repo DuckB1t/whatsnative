@@ -19,10 +19,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use oxidezap_core::UiEvent;
+use oxidezap_core::{CallId, UiEvent};
 use oxidezap_session::{StoreRegistry, WhatsAppClient};
 use tokio::sync::Semaphore;
 
+use crate::call_coordinator::{CallCoordinator, CallPermit};
 use crate::state::StateHub;
 
 mod act;
@@ -313,7 +314,8 @@ pub enum DispositionOutcome {
 /// Returns the [`AccountExit`] the teardown actually produced, never the
 /// [`AccountDisposition`] that was merely asked for — see that type's own
 /// doc for why a caller must not conflate the two.
-pub async fn run(
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run(
     account_id: oxidezap_core::AccountId,
     stores: Arc<StoreRegistry>,
     hub: Arc<StateHub>,
@@ -321,6 +323,7 @@ pub async fn run(
     mut commands: tokio::sync::mpsc::Receiver<SessionCommand>,
     lifecycle: RuntimeLifecycle,
     shutdown: impl std::future::Future<Output = ()>,
+    calls: Option<Arc<CallCoordinator>>,
 ) -> Result<AccountExit> {
     debug_assert_eq!(hub.account_id(), account_id);
     // Kept alive past the client's own close: the teardown below calls back
@@ -338,7 +341,7 @@ pub async fn run(
     // camera and one call, and what decides whether a frame is *serialized*
     // is whether anybody is subscribed to the hub's video channel.
     let mut video = client.video_events();
-    let mut bridge = Bridge::with_lifecycle(hub, plugins, lifecycle, avatar_recorder);
+    let mut bridge = Bridge::with_lifecycle(hub, plugins, lifecycle, avatar_recorder, calls);
 
     // Set when every sender is gone. A closed channel yields `None`
     // immediately and forever, so leaving the branch enabled would spin the
@@ -687,6 +690,14 @@ const FORGET_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 struct Bridge {
     devices: call_devices::Devices,
     hub: Arc<StateHub>,
+    /// The daemon-wide call slot. `None` only where a bridge has no registry
+    /// to attach to, which refuses a call rather than pretending one account
+    /// can own the whole daemon's slot.
+    coordinator: Option<Arc<CallCoordinator>>,
+    /// Held from the first claim until the call ends or this runtime drops.
+    /// A server-renamed call keeps the same permit, because the token rather
+    /// than the call id is what releases it.
+    call_permit: Option<CallPermit>,
     lifecycle: RuntimeLifecycle,
     /// The plugins, fed the same events the front ends get.
     ///
@@ -738,8 +749,12 @@ impl Bridge {
             plugins,
             RuntimeLifecycle::new(),
             oxidezap_session::AvatarRecorder::detached(),
+            Some(CallCoordinator::new()),
         );
-        bridge.devices = call_devices::Devices::isolated(&bridge.hub);
+        let coordinator = bridge
+            .coordinator()
+            .expect("a folded-event bridge still has a local call fence");
+        bridge.devices = call_devices::Devices::isolated(&bridge.hub, coordinator);
         bridge
     }
 
@@ -748,6 +763,7 @@ impl Bridge {
         plugins: Arc<oxidezap_plugin_host::Plugins>,
         lifecycle: RuntimeLifecycle,
         avatar_recorder: oxidezap_session::AvatarRecorder,
+        calls: Option<Arc<CallCoordinator>>,
     ) -> Self {
         // Unbounded, and the bound that matters is upstream: the only producer
         // is the event loop draining the session's own unbounded channel, so a
@@ -755,11 +771,18 @@ impl Bridge {
         // events no client could then recover.
         let (publish, queue) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
         let publisher = crate::publisher::start(Arc::clone(&hub), queue);
-        let calls = hub.call_log_handle();
+        let call_log = hub.call_log_handle();
+        // A bridge with no daemon coordinator still gets a local slot for
+        // the camera fence. It cannot claim a call: the refusal it returns
+        // says so rather than pretending one account owns the daemon's slot.
+        let fence = calls.clone().unwrap_or_else(CallCoordinator::new);
+        let devices = call_devices::Devices::new(&hub, fence);
 
         Self {
-            devices: call_devices::Devices::new(&hub),
+            devices,
             hub,
+            coordinator: calls,
+            call_permit: None,
             lifecycle,
             plugins,
             publish: Some(publish),
@@ -767,7 +790,7 @@ impl Bridge {
             reads: Arc::new(Mutex::new(ReadTracker::default())),
             in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
             downloads: downloads::Downloads::default(),
-            calls,
+            calls: call_log,
             avatar_recorder,
         }
     }
@@ -790,6 +813,82 @@ impl Bridge {
         self.reads
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[cfg(test)]
+    fn coordinator(&self) -> Option<Arc<CallCoordinator>> {
+        self.coordinator.clone()
+    }
+
+    /// Claim the one daemon-wide slot before this runtime changes call state.
+    /// `Some(permit)` is a new claim, `None` is this account's existing claim.
+    fn claim_call(&mut self, call_id: &CallId) -> std::result::Result<(), String> {
+        let Some(coordinator) = self.coordinator.clone() else {
+            return Err(
+                "call coordination is unavailable; this runtime cannot start a call".into(),
+            );
+        };
+        match coordinator.claim(self.hub.account_id(), call_id.clone()) {
+            Ok(permit) => {
+                if let Some(permit) = permit {
+                    self.call_permit = Some(permit);
+                }
+                Ok(())
+            }
+            Err(refusal) => Err(refusal.to_string()),
+        }
+    }
+
+    /// Release only if this call still owns the slot. A late end must not
+    /// clear another account's newer call.
+    fn release_call(&mut self, call_id: &CallId) {
+        let Some(coordinator) = self.coordinator.clone() else {
+            return;
+        };
+        if coordinator.release_call(self.hub.account_id(), call_id) {
+            self.call_permit = None;
+        }
+    }
+
+    /// End a named call, then keep the slot with the caller promoted behind
+    /// it. `CallState` brings a waiting offer forward when the stage empties,
+    /// so the daemon-wide owner has to follow that offer. Otherwise another
+    /// account is told the slot is free while this one is still ringing.
+    fn end_call_and_follow_promotion(
+        &mut self,
+        call_id: &CallId,
+        apply: impl FnOnce(&mut oxidezap_core::CallState),
+    ) {
+        let next = {
+            let mut next = None;
+            self.hub.calls(|calls| {
+                apply(calls);
+                next = calls.stage().map(|stage| stage.call_id().to_owned());
+            });
+            next
+        };
+        if let Some(next) = next.filter(|next| next.as_str() != call_id.as_str()) {
+            self.rename_call(call_id, &next);
+        } else {
+            self.release_call(call_id);
+        }
+    }
+
+    fn release_account_calls(&mut self) {
+        let Some(coordinator) = self.coordinator.clone() else {
+            return;
+        };
+        if coordinator.release_account(self.hub.account_id()) {
+            self.call_permit = None;
+        }
+    }
+
+    /// The server renames an outgoing placeholder after admission. Keep the
+    /// permit, but let the tray and later ends name the call they can see.
+    fn rename_call(&self, from: &CallId, to: &CallId) {
+        if let Some(coordinator) = &self.coordinator {
+            coordinator.rename(self.hub.account_id(), from, to.clone());
+        }
     }
 }
 

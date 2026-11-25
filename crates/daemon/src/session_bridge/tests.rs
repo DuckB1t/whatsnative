@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use oxidezap_core::{Chat, ChatMessage, UiEvent, fixtures};
+use oxidezap_core::{AccountId, Chat, ChatMessage, UiEvent, fixtures};
 use oxidezap_ipc::{ConnectionState, DaemonMessage};
 
 use super::translate::deadline_ms;
@@ -85,6 +85,118 @@ pub(super) fn bridge() -> Bridge {
             |_| {},
         ))),
     )
+}
+
+fn bridge_for(account: AccountId, calls: Option<Arc<CallCoordinator>>) -> Bridge {
+    Bridge::with_lifecycle(
+        StateHub::for_account(account),
+        Arc::new(oxidezap_plugin_host::Plugins::nothing_loaded(Arc::new(
+            |_| {},
+        ))),
+        RuntimeLifecycle::new(),
+        oxidezap_session::AvatarRecorder::detached(),
+        calls,
+    )
+}
+
+fn synthetic_offer(call_id: &str) -> UiEvent {
+    UiEvent::IncomingCall(oxidezap_core::IncomingCall {
+        call_id: call_id.into(),
+        caller_name: "Synthetic Caller".into(),
+        caller_jid: "synthetic-peer".into(),
+        group_jid: None,
+        group: None,
+        is_video: false,
+        is_offline: false,
+        received_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
+    })
+}
+
+#[test]
+fn one_coordinator_admits_one_account_and_refuses_the_next() {
+    let calls = CallCoordinator::new();
+    let mut first = bridge_for(AccountId::new(11).unwrap(), Some(Arc::clone(&calls)));
+    let mut second = bridge_for(AccountId::new(22).unwrap(), Some(Arc::clone(&calls)));
+
+    assert_eq!(
+        first.observe(synthetic_offer("synthetic-call-one")),
+        Answer::Nothing
+    );
+    assert_eq!(
+        calls.owner(),
+        Some(crate::call_coordinator::CallOwner {
+            account: AccountId::new(11).unwrap(),
+            call_id: "synthetic-call-one".into(),
+        })
+    );
+    assert_eq!(
+        second.observe(synthetic_offer("synthetic-call-two")),
+        Answer::Decline("synthetic-call-two".into())
+    );
+    assert!(!second.hub.call_state().holds("synthetic-call-two"));
+
+    first.observe(UiEvent::CallEnded("synthetic-call-one".into()));
+    assert!(!calls.is_busy());
+    assert_eq!(
+        second.observe(synthetic_offer("synthetic-call-two")),
+        Answer::Nothing
+    );
+    assert_eq!(calls.owner().unwrap().account, AccountId::new(22).unwrap());
+
+    calls.release_account(AccountId::new(22).unwrap());
+    assert!(!calls.is_busy());
+}
+
+#[test]
+fn ending_the_stage_keeps_the_slot_for_a_promoted_caller() {
+    let calls = CallCoordinator::new();
+    let mut bridge = bridge_for(AccountId::new(11).unwrap(), Some(Arc::clone(&calls)));
+
+    assert_eq!(
+        bridge.observe(synthetic_offer("synthetic-first")),
+        Answer::Nothing
+    );
+    assert_eq!(
+        bridge.observe(synthetic_offer("synthetic-second")),
+        Answer::Nothing,
+        "a parked offer stays with the account that owns the slot"
+    );
+    assert_eq!(calls.owner().unwrap().call_id, "synthetic-first");
+
+    bridge.observe(UiEvent::CallEnded("synthetic-first".into()));
+    assert_eq!(
+        calls.owner().unwrap().call_id,
+        "synthetic-second",
+        "the promoted caller inherits the daemon-wide slot"
+    );
+
+    bridge.observe(UiEvent::CallEnded("synthetic-second".into()));
+    assert!(!calls.is_busy());
+}
+
+#[test]
+fn a_bridge_without_a_coordinator_refuses_instead_of_pretending() {
+    let mut bridge = bridge_for(AccountId::new(11).unwrap(), None);
+    assert_eq!(
+        bridge.observe(synthetic_offer("synthetic-call-one")),
+        Answer::Decline("synthetic-call-one".into())
+    );
+    assert!(!bridge.hub.call_state().holds("synthetic-call-one"));
+}
+
+#[test]
+fn a_renamed_outgoing_call_releases_under_its_server_id() {
+    let calls = CallCoordinator::new();
+    let mut bridge = bridge_for(AccountId::new(11).unwrap(), Some(Arc::clone(&calls)));
+    bridge.claim_call(&"synthetic-placeholder".into()).unwrap();
+    bridge.rename_call(&"synthetic-placeholder".into(), &"synthetic-real".into());
+    bridge.release_call(&"synthetic-placeholder".into());
+    assert!(
+        calls.is_busy(),
+        "the old placeholder cannot release a renamed call"
+    );
+    bridge.release_call(&"synthetic-real".into());
+    assert!(!calls.is_busy());
 }
 
 #[cfg(all(feature = "test-support", not(target_family = "wasm")))]

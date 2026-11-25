@@ -32,7 +32,7 @@ use tokio::sync::{broadcast, watch};
 use crate::session_bridge::call_log::CallLog;
 
 pub use fanout::Delivery;
-pub use store::{Change, StateStore, TrayState};
+pub use store::{Change, StateStore, TrayCall, TrayState};
 
 use fanout::{Claim, Fanout};
 use store::Published;

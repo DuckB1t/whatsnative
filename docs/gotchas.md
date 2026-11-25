@@ -408,6 +408,17 @@ Non-obvious behaviour, and the reasoning behind it. Read the entry before changi
   it was wrong about which thing was missing. MLow is pure Rust and is what
   WhatsApp's own clients negotiate. What a page has no such thing as is a
   socket.
+- **One call slot is daemon-wide, not per window.** Every account keeps its own
+  `CallState`, but the daemon owns the devices and one call at a time in
+  practice. `CallCoordinator` takes the first claim and refuses another
+  account with the owner id in the reason. A second offer on the owning
+  account is parked by that account's own state and does not take a second
+  permit. A server rename changes the owner's call id without changing the
+  permit token, because the placeholder id is not the id a later end will
+  carry. Ends, declines, cancels, failures, account removal and runtime drop
+  all release conditionally, so a late end cannot free a newer call on another
+  account. The tray reads the same owner mirror, so it can name the account
+  holding the call. A page has no tray and no reader for that mirror.
 - **A plugin is a front end that does not draw, and it runs in the daemon.**
   It sees the account's events and acts through the same command channel a
   window's requests go onto, so it has no privileged path to the session. It

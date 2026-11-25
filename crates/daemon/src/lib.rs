@@ -18,6 +18,8 @@
 
 pub mod account;
 pub mod avatar;
+/// The one daemon-wide call owner, separate from each account's call state.
+mod call_coordinator;
 mod claim;
 pub mod embedded;
 pub mod media;

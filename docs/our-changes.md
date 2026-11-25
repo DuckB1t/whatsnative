@@ -1368,6 +1368,48 @@ scheduler assertion as the base commit; nextest is the honest local gate.
 The added-line audit found no em or en dashes, long digit strings, real JID
 namespaces, account paths or secrets.
 
+### 42. Wave 4.3 gave the daemon one call slot
+
+**Problem.** Wave 4.2 made the GUI switch accounts safely, but each runtime
+still had only its own `CallState`. Two accounts could both think they owned a
+call, and the tray could only say that some account was connected. The camera
+preview fence already spanned runtimes, but it had no explicit call owner to
+consult, and an outgoing placeholder renamed by the server could escape a
+release keyed by its first id.
+
+**Change.** A new pure `call_coordinator.rs` owns one daemon-wide slot. The
+first claim wins and refuses a different account with the owner id in the
+reason. A second offer on the owning account stays in that account's parked
+state and keeps the same permit. A server rename changes the owner's call id
+without changing the permit token. Ends, declines, cancels, failures and
+account removal release conditionally, so a late end cannot clear a newer
+call on another account. Ending a stage that promotes a parked caller renames
+the slot to that caller instead of freeing it while a phone is still ringing.
+`AccountRegistry` owns the coordinator and releases an account on removal.
+Bridge call admission, accept and release paths all go through it. The camera
+preview fence asks the coordinator before opening hardware, while keeping the
+older local scan as the fallback for direct state tests. `TrayState` gained a
+`TrayCall` marker, and `TrayHub::follow` watches the owner mirror, so the icon
+can say which account has the call instead of only whether one is connected.
+
+**Not changed.** No protocol frame, no `PROTOCOL_VERSION` bump, no GUI call
+API shape change, no new dependency and no MCP code. The tray reader is native
+only because a page has no tray. No app, daemon, CLI or MCP server was
+launched. No real account, message, call, post, vote, reaction, setting or
+piece of PII was touched.
+
+**Gates.** fmt, `git diff --check`, workspace clippy with warnings denied,
+workspace nextest, doctests and xtask fmt, clippy and tests all pass on Rust
+1.100.0. Nextest ran 2787 tests with 35 skipped and one pre-existing leaky
+daemon test. Wasm daemon lib tests compile, and the nightly web GUI check
+passes with only pre-existing warnings. The added-line audit found no em or en
+dashes, long digit strings, real JID namespaces, account paths or secrets.
+
+**Known edge.** A duplicate or very late session end can leave the slot held
+until a matching release or runtime teardown arrives. Conditional releases and
+account removal keep that stale holder from being attributed to a different
+account.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

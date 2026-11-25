@@ -2926,6 +2926,15 @@ impl Bridge {
                                 "a call is already up; end it before placing another".to_string(),
                             );
                         }
+                        // The account-local stage is free, but another account
+                        // may hold the daemon's one call slot. Claim before
+                        // drawing an outgoing card nobody can hang up.
+                        if let Err(error) = self.claim_call(&placeholder_id) {
+                            self.hub
+                                .calls(|calls| calls.mark_unrecorded(&placeholder_id));
+                            self.hub.republish_calls();
+                            return CommandOutcome::Refused(error);
+                        }
                         // The name off the chat list, the same place a front
                         // end would look.
                         let name = self
@@ -2954,6 +2963,12 @@ impl Bridge {
                             return CommandOutcome::Refused(
                                 "a call is already up; end it before placing another".to_string(),
                             );
+                        }
+                        if let Err(error) = self.claim_call(&placeholder_id) {
+                            self.hub
+                                .calls(|calls| calls.mark_unrecorded(&placeholder_id));
+                            self.hub.republish_calls();
+                            return CommandOutcome::Refused(error);
                         }
                         let name = self
                             .hub
@@ -2993,6 +3008,12 @@ impl Bridge {
                                 "a call is already up; end it before placing another".to_string(),
                             );
                         }
+                        if let Err(error) = self.claim_call(&placeholder_id) {
+                            self.hub
+                                .calls(|calls| calls.mark_unrecorded(&placeholder_id));
+                            self.hub.republish_calls();
+                            return CommandOutcome::Refused(error);
+                        }
                         // The token goes only to the session. It is not a JID
                         // and there is no chat to look its name up in: the row
                         // is the ordinary outgoing placeholder under the fixed
@@ -3023,11 +3044,15 @@ impl Bridge {
                         // changed, no window was told anything, and the audio
                         // came up anyway — as voice, since the kind was read
                         // off a stage that had moved on.
+                        if let Err(error) = self.claim_call(&call_id) {
+                            return CommandOutcome::Refused(error);
+                        }
                         let mut with_video = None;
                         self.hub.calls(|calls| {
                             with_video = calls.accept(&call_id);
                         });
                         let Some(with_video) = with_video else {
+                            self.release_call(&call_id);
                             return CommandOutcome::Refused(format!(
                                 "no call is ringing under {call_id}"
                             ));
@@ -3041,7 +3066,7 @@ impl Bridge {
                     // call its owner had just refused. Said in the state
                     // frame, so it cannot arrive after the record it prevents.
                     CallAction::Decline { call_id } => {
-                        self.hub.calls(|calls| {
+                        self.end_call_and_follow_promotion(&call_id, |calls| {
                             calls.end(&call_id);
                             calls.mark_ended_as(&call_id, CallOutcome::Declined);
                         });
@@ -3053,7 +3078,7 @@ impl Bridge {
                     // daemon's state — which it then published straight back
                     // to the front end that had just ended it.
                     CallAction::Cancel { call_id } => {
-                        self.hub.calls(|calls| {
+                        self.end_call_and_follow_promotion(&call_id, |calls| {
                             calls.end(&call_id);
                         });
                         client.cancel_call(&call_id);

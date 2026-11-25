@@ -198,6 +198,7 @@ pub async fn start(hub: Arc<TrayHub>) -> Result<Box<dyn super::Tray>> {
         state: TrayState {
             connected: false,
             unread: 0,
+            call: None,
         },
         hub,
         click: crate::window::Toggle::default(),
@@ -218,7 +219,11 @@ mod tests {
     /// through left at their defaults — nothing below asks them anything.
     fn item(connected: bool, unread: u32) -> Item {
         Item {
-            state: TrayState { connected, unread },
+            state: TrayState {
+                connected,
+                unread,
+                call: None,
+            },
             hub: TrayHub::new(crate::account::AccountRegistry::new()),
             click: crate::window::Toggle::default(),
         }

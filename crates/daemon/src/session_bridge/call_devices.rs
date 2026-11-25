@@ -1,5 +1,6 @@
 //! Device work is independent of network calls and never blocks the bridge.
 use super::{Outbox, StateHub};
+use crate::call_coordinator::CallCoordinator;
 use oxidezap_core::{
     CallDeviceInventory, CallDevicePreferences, CallDeviceSettings, CameraMode, CameraPreviewId,
 };
@@ -28,6 +29,9 @@ pub(super) struct Devices {
     state: Arc<Mutex<State>>,
     runtime: u64,
     in_flight: Arc<tokio::sync::Semaphore>,
+    /// The daemon-wide owner of the one call slot. A local device fence with
+    /// no coordinator is only used by tests that fold state directly.
+    calls: Option<Arc<CallCoordinator>>,
 }
 #[cfg(test)]
 impl Default for Devices {
@@ -36,20 +40,25 @@ impl Default for Devices {
             state: Default::default(),
             runtime: 0,
             in_flight: Arc::new(tokio::sync::Semaphore::new(2)),
+            calls: None,
         }
     }
 }
 impl Devices {
-    pub(super) fn new(hub: &Arc<StateHub>) -> Self {
+    pub(super) fn new(hub: &Arc<StateHub>, calls: Arc<CallCoordinator>) -> Self {
         static SHARED: std::sync::LazyLock<Arc<Mutex<State>>> =
             std::sync::LazyLock::new(Default::default);
-        Self::with_state(SHARED.clone(), hub)
+        Self::with_state(SHARED.clone(), hub, Some(calls))
     }
     #[cfg(test)]
-    pub(super) fn isolated(hub: &Arc<StateHub>) -> Self {
-        Self::with_state(Default::default(), hub)
+    pub(super) fn isolated(hub: &Arc<StateHub>, calls: Arc<CallCoordinator>) -> Self {
+        Self::with_state(Default::default(), hub, Some(calls))
     }
-    fn with_state(state: Arc<Mutex<State>>, hub: &Arc<StateHub>) -> Self {
+    fn with_state(
+        state: Arc<Mutex<State>>,
+        hub: &Arc<StateHub>,
+        calls: Option<Arc<CallCoordinator>>,
+    ) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let runtime = NEXT.fetch_add(1, Ordering::Relaxed);
         state
@@ -61,6 +70,7 @@ impl Devices {
             state,
             runtime,
             in_flight: Arc::new(tokio::sync::Semaphore::new(2)),
+            calls,
         }
     }
 }
@@ -132,18 +142,24 @@ impl State {
         owner: &Outbox,
         id: CameraPreviewId,
         runtime: u64,
+        calls: Option<&Arc<CallCoordinator>>,
     ) -> Result<Arc<AtomicBool>, String> {
         self.runtimes.retain(|(_, hub)| hub.strong_count() > 0);
         if runtime != 0 && !self.runtimes.iter().any(|(id, _)| *id == runtime) {
             return Err("Preview account runtime ended".into());
         }
-        if !self.transitions.is_empty()
-            || self
+        // The coordinator is the source of truth while a runtime is attached.
+        // The fallback scan is kept for direct state tests and for a closing
+        // runtime whose local stage is still visible after its permit dropped.
+        let busy = match calls {
+            Some(coordinator) => coordinator.is_busy(),
+            None => self
                 .runtimes
                 .iter()
                 .filter_map(|(_, hub)| hub.upgrade())
-                .any(|hub| hub.call_state().is_busy())
-        {
+                .any(|hub| hub.call_state().is_busy()),
+        };
+        if !self.transitions.is_empty() || busy {
             return Err("End the current call before opening a camera preview.".into());
         }
         if owner.is_closed() {
@@ -370,9 +386,10 @@ impl Devices {
         } else {
             None
         };
+        let calls = self.calls.clone();
         oxidezap_session::spawn(async move {
             let _permit = permit;
-            let result = handle_for_runtime(state, action, &owner, runtime)
+            let result = handle_for_runtime(state, action, &owner, runtime, calls)
                 .await
                 .map(Box::new);
             if let Ok(frame) = serde_json::to_string(&DaemonMessage::CallDevices { id, result }) {
@@ -384,7 +401,7 @@ impl Devices {
 
 #[cfg(test)]
 async fn handle(state: Arc<Mutex<State>>, action: Action, owner: &Outbox) -> Result<Reply, String> {
-    handle_for_runtime(state, action, owner, 0).await
+    handle_for_runtime(state, action, owner, 0, None).await
 }
 
 async fn handle_for_runtime(
@@ -392,6 +409,7 @@ async fn handle_for_runtime(
     action: Action,
     owner: &Outbox,
     runtime: u64,
+    calls: Option<Arc<CallCoordinator>>,
 ) -> Result<Reply, String> {
     match action {
         Action::Preferences => {
@@ -479,7 +497,7 @@ async fn handle_for_runtime(
             let cancel = state
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .reserve_preview(owner, preview_id, runtime)?;
+                .reserve_preview(owner, preview_id, runtime, calls.as_ref())?;
             let state_pump = state.clone();
             let owner = owner.clone();
             oxidezap_session::spawn(async move {
@@ -660,12 +678,12 @@ mod tests {
         ));
         let mut state = state.lock().unwrap();
         assert!(
-            state.reserve_preview(&owner, id, 0).is_err(),
+            state.reserve_preview(&owner, id, 0, None).is_err(),
             "late start must be refused before opening hardware"
         );
         assert!(state.preview.is_none());
         assert!(
-            state.reserve_preview(&other, id, 0).is_ok(),
+            state.reserve_preview(&other, id, 0, None).is_ok(),
             "retirement belongs to its connection"
         );
     }
@@ -674,15 +692,19 @@ mod tests {
         let (owner, _rx) = tokio::sync::mpsc::channel(4);
         let mut state = State::default();
         state
-            .reserve_preview(&owner, CameraPreviewId(1), 0)
+            .reserve_preview(&owner, CameraPreviewId(1), 0, None)
             .unwrap();
         state.preview.as_mut().unwrap().finished = true;
         assert!(
             state
-                .reserve_preview(&owner, CameraPreviewId(1), 0)
+                .reserve_preview(&owner, CameraPreviewId(1), 0, None)
                 .is_err()
         );
-        assert!(state.reserve_preview(&owner, CameraPreviewId(2), 0).is_ok());
+        assert!(
+            state
+                .reserve_preview(&owner, CameraPreviewId(2), 0, None)
+                .is_ok()
+        );
     }
     fn fixture(owner: Outbox) -> (Arc<Mutex<State>>, Arc<AtomicBool>) {
         let cancel = Arc::new(AtomicBool::new(false));
@@ -707,14 +729,14 @@ mod tests {
         let shared = Arc::new(Mutex::new(State::default()));
         let hub_a = StateHub::new();
         let hub_b = StateHub::new();
-        let a = Devices::with_state(shared.clone(), &hub_a);
-        let mut b = Devices::with_state(shared.clone(), &hub_b);
+        let a = Devices::with_state(shared.clone(), &hub_a, None);
+        let mut b = Devices::with_state(shared.clone(), &hub_b, None);
         let (owner, _rx) = tokio::sync::mpsc::channel(4);
         let (other, _rx2) = tokio::sync::mpsc::channel(4);
         let cancel = shared
             .lock()
             .unwrap()
-            .reserve_preview(&owner, CameraPreviewId(1), a.runtime)
+            .reserve_preview(&owner, CameraPreviewId(1), a.runtime, None)
             .unwrap();
         assert!(b.release_for_call().is_err());
         assert!(cancel.load(Ordering::Acquire));
@@ -722,7 +744,7 @@ mod tests {
             shared
                 .lock()
                 .unwrap()
-                .reserve_preview(&other, CameraPreviewId(1), b.runtime)
+                .reserve_preview(&other, CameraPreviewId(1), b.runtime, None)
                 .is_err()
         );
         shared.lock().unwrap().preview.as_mut().unwrap().finished = true;
@@ -731,7 +753,7 @@ mod tests {
             shared
                 .lock()
                 .unwrap()
-                .reserve_preview(&other, CameraPreviewId(2), a.runtime)
+                .reserve_preview(&other, CameraPreviewId(2), a.runtime, None)
                 .is_err()
         );
         hub_b.calls(|calls| {
@@ -747,7 +769,7 @@ mod tests {
             shared
                 .lock()
                 .unwrap()
-                .reserve_preview(&other, CameraPreviewId(3), a.runtime)
+                .reserve_preview(&other, CameraPreviewId(3), a.runtime, None)
                 .is_err()
         );
         hub_b.calls(|calls| {
@@ -757,7 +779,7 @@ mod tests {
             shared
                 .lock()
                 .unwrap()
-                .reserve_preview(&other, CameraPreviewId(4), a.runtime)
+                .reserve_preview(&other, CameraPreviewId(4), a.runtime, None)
                 .is_ok()
         );
         let old_runtime = b.runtime;
@@ -776,7 +798,7 @@ mod tests {
             shared
                 .lock()
                 .unwrap()
-                .reserve_preview(&owner, CameraPreviewId(5), old_runtime)
+                .reserve_preview(&owner, CameraPreviewId(5), old_runtime, None)
                 .is_err()
         );
     }

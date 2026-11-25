@@ -280,13 +280,15 @@ de contas no daemon nativo.** O que falta agora é a camada acima:
    supervisor anexado, então as três mutations respondem `Refused` lá,
    correto para hoje, mas item 8 do plano (registry multi-conta próprio pra
    web) segue pendente.
-3. **Coordenação global (tray, calls) está pela metade**: a tray já agrega.
-   `crates/daemon/src/tray/accounts.rs` segue o `AccountRegistry` via
+3. **Coordenação global (tray, calls) está pronta no nativo**: a tray já
+   agrega. `crates/daemon/src/tray/accounts.rs` segue o `AccountRegistry` via
    `TrayHub::follow`, soma unread com `saturating_add` e usa `connected` se
-   qualquer runtime estiver conectado. O fence de hardware de chamadas em
-   `session_bridge/call_devices.rs` também já cobre preview de câmera entre
-   runtimes. Falta um `CallCoordinator` explícito, estado de chamada na tray,
-   sinais cross-account e a política determinística completa.
+   qualquer runtime estiver conectado. A Wave 4.3 acrescentou o
+   `CallCoordinator` explícito em `call_coordinator.rs`, o marker de chamada na
+   tray e o watch do dono em `TrayHub::follow`. O fence de hardware em
+   `session_bridge/call_devices.rs` agora consulta o dono global antes de
+   abrir preview, mantendo o scan local antigo como fallback de teste. O que
+   resta é o registry multi-conta do item 8 e o gate de performance do item 10.
 
 **Decisão de produto do item 9/seção 20 (perguntada e respondida): o que
 acontece com uma chamada ativa quando o usuário troca de conta.** Opção
@@ -297,8 +299,10 @@ explicitamente antes de agir ("trocar de conta vai encerrar sua chamada
 chamada silenciosamente. A Wave 4.2 ligou essa resposta ao switcher nativo:
 `switch_account` checa `call_state(cx).is_busy()`, mostra o aviso, e só
 chama `hang_up` depois da confirmação explícita. Cancelar deixa a chamada e
-a conta ativa intactas. Ainda falta a coordenação global do item 9 para a
-tray e a política determinística completa de hardware entre runtimes.
+a conta ativa intactas. A Wave 4.3 fechou a coordenação global: uma segunda
+conta não pode tomar o slot enquanto a primeira tem uma chamada, e a tray
+nomeia a conta dona. A confirmação continua sendo a única forma de encerrar
+a chamada ao trocar de conta.
 
 ## Sequência de implementação
 
@@ -348,13 +352,14 @@ tray e a política determinística completa de hardware entre runtimes.
       scopes de tab e restauração do conjunto inteiro, plugin-state por conta.
       A `ControlSession` já cobre os quatro transports; o que falta aqui é o
       registry multi-conta do lado do daemon embutido.
-- [~] **9. Global**, tray agregado e fence de preview entre runtimes já
-      prontos; falta `CallCoordinator`, estado de chamada na tray, sinais
-      cross-account e política determinística para hardware de chamadas.
-      Decisão de produto **já tomada** (não mais pendente): opção A, finalizar
-      a chamada ativa ao trocar de conta, com aviso explícito antes de agir,
-      ver a nota no "Bloqueio arquitetural atual" acima. Falta só a
-      implementação, que depende do switcher (item 6/7) existir.
+- [x] **9. Global**, tray agregado, fence de preview entre runtimes,
+      `CallCoordinator`, estado de chamada na tray e sinais cross-account
+      prontos na Wave 4.3. A política determinística é o primeiro claim que
+      vence, com o dono nomeado na recusa; um rename mantém o permit; uma
+      liberação tardia não pode liberar a chamada de outra conta. Decisão de
+      produto **já aplicada**: opção A, finalizar a chamada ativa ao trocar
+      de conta, com aviso explícito antes de agir. Resta apenas integrar
+      isso ao registry web do item 8 quando ele existir.
 - [ ] **10. Hardening/performance**, matriz de races, testes de isolamento,
        stress de writer, benchmark 1/2/4 contas, web, docs e CI completo.
        **Gate de release, não item adiável:** cada `WhatsAppClient` ainda cria
