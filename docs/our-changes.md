@@ -1487,10 +1487,12 @@ compile, and it passes clippy with warnings denied apart from the pre-existing
 warnings. The added-line audit found no em or en dashes, phone-shaped fixtures,
 real JID namespaces, account paths or secrets.
 
-**Limit.** Browser wasm tests were not run because `wasm-pack` and
-`wasm-bindgen-test-runner` are not installed here. Durable OPFS execution is
-not claimed. Correct local lifecycle is not a performance result, and it does
-not prove history sync or reconnect without an authorized test account.
+**Limit.** Local browser wasm tests were not run because `wasm-pack` and
+`wasm-bindgen-test-runner` are not installed here. CI does run them, and it
+caught a bad assertion in this section's shared-store test; see section 45.
+Durable OPFS execution is not claimed. Correct local lifecycle is not a
+performance result, and it does not prove history sync or reconnect without an
+authorized test account.
 
 ### 45. Wave 4 hardening stopped lying about scale
 
@@ -1526,6 +1528,14 @@ eight threads and four fds in this harness. Idle CPU was below one 100 Hz tick,
 and cold wall medians overlapped, so nobody gets a latency scaling story from
 this. The full table and its hard limits are in `docs/daemon-memory.md`.
 
+**CI follow-up.** The first CI sweep after the web lifecycle commit caught
+`server::lifecycle_tests::create_account_uses_the_shared_store_registry`
+failing in Chrome with four accounts where it expected two. The wasm test
+helper shares one OPFS database with the other browser tests, so the
+empty-store assertion was simply wrong. It now records the count before the
+two creates and checks the delta. That is a test fix, not a lifecycle behavior
+change.
+
 **Not changed.** No `PROTOCOL_VERSION` bump, no protocol frame, no GUI call API
 shape change, no new runtime dependency and no MCP code. No app, daemon, CLI or
 MCP server was launched. No real account, message, call, post, vote, reaction,
@@ -1534,17 +1544,21 @@ sleeps, and the fixtures use local ids and throwaway SQLite paths.
 
 **Gates.** fmt, `git diff --check`, workspace clippy with warnings denied,
 workspace nextest with and without all features, doctests and xtask fmt,
-clippy and tests pass on Rust 1.100.0. The Python driver has 10 passing tests.
-The focused Rust checks pass 19 native supervisor tests, 5 embedded lifecycle
-tests, 8 call coordinator tests and the writer stress test. The all-features
-daemon lib and test check passes. The driver's end-to-end fake process run
-passes, and mixed `--instrument --process` is rejected with exit 2. The added
-line audit found no em or en dashes, account paths, real JID namespaces,
-phone-shaped fixtures or secrets.
+clippy and tests pass on Rust 1.100.0. A later all-features nextest rerun
+tripped the pre-existing `sticker_frames_loop_and_stay_cached_across_renders`
+timing test under load; it passed 3/3 in isolation and the full suite passed
+with that one test excluded. The Python driver has 10 passing tests. The
+focused Rust checks pass 19 native supervisor tests, 5 embedded lifecycle
+tests, 8 call coordinator tests, 3 server lifecycle tests and the writer
+stress test. The all-features daemon lib and test check passes. The driver's
+end-to-end fake process run passes, and mixed `--instrument --process` is
+rejected with exit 2. The added line audit found no em or en dashes, account
+paths, real JID namespaces, phone-shaped fixtures or secrets.
 
 **Limit.** This is the end of local Wave 4 hardening, not the end of reality.
-Browser wasm tests were not run because `wasm-pack` and
-`wasm-bindgen-test-runner` are not installed. Durable OPFS execution, history
+Local browser wasm tests were not run because `wasm-pack` and
+`wasm-bindgen-test-runner` are not installed. CI does run them and is the
+authority for that half. Durable OPFS execution, history
 sync, reconnect, authenticated accounts, calls, media and whole-daemon cold
 startup are not claimed. RSS/PSS here is whole-process, not per-account
 attribution, and no allocator retention is inferred from RSS deltas. The

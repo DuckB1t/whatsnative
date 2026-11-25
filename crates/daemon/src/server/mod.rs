@@ -1308,6 +1308,11 @@ mod lifecycle_tests {
     async fn create_account_uses_the_shared_store_registry() {
         let registry = AccountRegistry::new();
         let shared = stores();
+        let accounts_before = shared
+            .accounts()
+            .await
+            .expect("the store lists accounts")
+            .len();
         let start: Arc<StartFn> = Arc::new(|registry, id, _, _| {
             assert!(registry.insert(runtime_with_commands(id, mpsc::channel(4).0)));
             Box::pin(async {})
@@ -1353,7 +1358,7 @@ mod lifecycle_tests {
                 .await
                 .expect("the store lists accounts")
                 .len(),
-            2
+            accounts_before + 2
         );
         drop(lifecycle);
     }

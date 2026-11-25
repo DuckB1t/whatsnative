@@ -394,11 +394,13 @@ encerrar a chamada ao trocar de conta.
        Os números e os limites estão em `docs/daemon-memory.md`: threads e FDs
        crescem oito e quatro por conta adicional, mas CPU em ticks de 10 ms não
        sustenta custo por conta, e idle zero é apenas menor que um tick.
-       History sync, reconexão, browser wasm, contas autenticadas, chamadas e
-       mídia não têm substituto sintético honesto e continuam fora da
-       reivindicação. A "Definition of done" abaixo mantém os itens que exigem
-       contas reais e artefato instalado como pendentes, sem fingir que um
-       client nunca iniciado prova isso.
+       History sync, reconexão, contas autenticadas, chamadas e mídia não têm
+       substituto sintético honesto e continuam fora da reivindicação. Browser
+       wasm roda no CI, não nesta máquina, e o primeiro sweep mostrou uma
+       assertion global errada no teste de create do lifecycle web; ela agora
+       compara o delta de contas. A "Definition of done" abaixo mantém os itens
+       que exigem contas reais e artefato instalado como pendentes, sem fingir
+       que um client nunca iniciado prova isso.
 
 ## Definition of done
 
