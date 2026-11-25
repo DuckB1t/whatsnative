@@ -87,14 +87,27 @@ pub(crate) fn checkpoint(stage: &str) {
         serde_json::json!({
             "stage": stage, "live_bytes": live, "peak_bytes": peak,
             "allocations": allocations, "requested_bytes": requested,
-            "process_kib": process,
+            "process_kib": process.kib, "process_counts": process.counts,
         })
     );
 }
 
 #[cfg(target_os = "linux")]
 mod process {
-    pub(super) fn snapshot() -> serde_json::Value {
+    /// Count entries the kernel exposes in one proc directory. The directory
+    /// descriptor used for the listing is itself counted as an open fd.
+    fn count_entries(path: &str) -> u64 {
+        std::fs::read_dir(path)
+            .map(|entries| entries.filter_map(Result::ok).count() as u64)
+            .unwrap_or(0)
+    }
+
+    pub(super) struct Snapshot {
+        pub(super) kib: serde_json::Value,
+        pub(super) counts: serde_json::Value,
+    }
+
+    pub(super) fn snapshot() -> Snapshot {
         let mut fields = serde_json::Map::new();
         for path in ["/proc/self/smaps_rollup", "/proc/self/status"] {
             if let Ok(contents) = std::fs::read_to_string(path) {
@@ -129,13 +142,27 @@ mod process {
                 }
             }
         }
-        serde_json::Value::Object(fields)
+        Snapshot {
+            kib: serde_json::Value::Object(fields),
+            counts: serde_json::json!({
+                "threads": count_entries("/proc/self/task"),
+                "fds": count_entries("/proc/self/fd"),
+            }),
+        }
     }
 }
 
 #[cfg(not(target_os = "linux"))]
 mod process {
-    pub(super) fn snapshot() -> serde_json::Value {
-        serde_json::Value::Null
+    pub(super) struct Snapshot {
+        pub(super) kib: serde_json::Value,
+        pub(super) counts: serde_json::Value,
+    }
+
+    pub(super) fn snapshot() -> Snapshot {
+        Snapshot {
+            kib: serde_json::Value::Null,
+            counts: serde_json::Value::Null,
+        }
     }
 }

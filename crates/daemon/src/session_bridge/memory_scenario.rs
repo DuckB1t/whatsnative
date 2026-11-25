@@ -1,7 +1,14 @@
 //! Deterministic replay for profiling the bridge and publication path.
-//! No network, media files, plugins or account database are used.
+//! No network, media files or plugins are used. Account fixtures are local
+//! and synthetic; no real account data is touched.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use oxidezap_ipc::DaemonMessage;
+use oxidezap_session::{StoreRegistry, WhatsAppClient};
 use tokio::sync::broadcast::error::TryRecvError;
 
 use super::tests::{bridge, message, received, stored_chat};
@@ -27,6 +34,105 @@ fn chat(index: usize, groups: bool) -> String {
 
 fn message_id(index: usize) -> String {
     format!("M{index:031}")
+}
+
+/// A throwaway directory for one synthetic account construction workload.
+///
+/// Nothing here is a real account path. The directory is removed on every
+/// exit path, including a failed assertion or a cancelled test.
+struct TempDatabase {
+    path: PathBuf,
+}
+
+impl TempDatabase {
+    fn new(tag: usize) -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        loop {
+            let serial = NEXT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "oxidezap-account-scale-{}-{tag}-{serial}",
+                std::process::id()
+            ));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Self { path },
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("cannot create a synthetic database directory: {error}"),
+            }
+        }
+    }
+
+    fn database_path(&self) -> String {
+        self.path
+            .join("synthetic.db")
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+impl Drop for TempDatabase {
+    fn drop(&mut self) {
+        for suffix in ["", "-wal", "-shm"] {
+            let path = self.path.join(format!("synthetic.db{suffix}"));
+            let _ = std::fs::remove_file(path);
+        }
+        let _ = std::fs::remove_dir(&self.path);
+    }
+}
+
+/// Construct N account clients over one shared registry without starting any
+/// of them. No pairing, no network and no real account data are involved.
+async fn account_scale(accounts: usize, tag: usize) {
+    metrics::begin();
+    metrics::checkpoint("startup");
+
+    let database = TempDatabase::new(tag);
+    let stores = Arc::new(StoreRegistry::new(database.database_path()));
+    metrics::checkpoint("registry_ready");
+
+    let mut ids = Vec::with_capacity(accounts);
+    for _ in 0..accounts {
+        ids.push(
+            stores
+                .create_account()
+                .await
+                .expect("a synthetic local account"),
+        );
+    }
+    metrics::checkpoint("accounts_allocated");
+
+    let mut handles = Vec::with_capacity(accounts);
+    for id in &ids {
+        let store = stores.store(*id).await.expect("a synthetic account store");
+        stores
+            .prepare_chat_schema(&store)
+            .await
+            .expect("a synthetic chat schema");
+        handles.push(store);
+    }
+    metrics::checkpoint("stores_opened");
+
+    let mut clients = Vec::with_capacity(accounts);
+    for id in &ids {
+        clients.push(
+            WhatsAppClient::new_for_account_with_registry(*id, Arc::clone(&stores))
+                .expect("an executor for a synthetic account"),
+        );
+    }
+    metrics::checkpoint("clients_ready");
+
+    for client in clients {
+        assert!(
+            client.close(Duration::from_secs(1)).await,
+            "a never-started client closes without waiting on a session"
+        );
+    }
+    metrics::checkpoint("clients_closed");
+
+    drop(handles);
+    drop(ids);
+    drop(stores);
+    drop(database);
+    metrics::checkpoint("released");
 }
 
 async fn replay(messages: usize, attached: bool, read: bool, groups: bool) {
@@ -189,4 +295,28 @@ async fn account_scale_memory_read() {
 #[ignore = "profiling workload; run in an isolated release test process"]
 async fn account_scale_memory_groups() {
     replay(MESSAGES, false, false, true).await;
+}
+
+#[tokio::test]
+#[ignore = "profiling workload; run in an isolated release test process"]
+async fn account_scale_memory_accounts_1() {
+    account_scale(1, 1).await;
+}
+
+#[tokio::test]
+#[ignore = "profiling workload; run in an isolated release test process"]
+async fn account_scale_memory_accounts_2() {
+    account_scale(2, 2).await;
+}
+
+#[tokio::test]
+#[ignore = "profiling workload; run in an isolated release test process"]
+async fn account_scale_memory_accounts_4() {
+    account_scale(4, 4).await;
+}
+
+#[tokio::test]
+#[ignore = "profiling workload; run in an isolated release test process"]
+async fn account_scale_memory_accounts_8() {
+    account_scale(8, 8).await;
 }

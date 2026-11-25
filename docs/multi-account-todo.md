@@ -98,14 +98,15 @@ abaixo para o diagnóstico completo.
       `StoreRegistry::reset_account(id)`" (que também dispara o `ON DELETE
       CASCADE` da migration de chat-store, então as linhas do chat-store
       dessa conta somem de graça na mesma transação).
-- [x] **Plugin state namespaced por conta (nativo).** `approvals`/`settings`
-      de plugin agora vivem em `plugin-state/{account_id}/`
-      (`crates/daemon/src/plugins/mod.rs::account_state_dir`), não mais num
-      diretório único compartilhado, sem isso, uma segunda conta real
+- [x] **Plugin state namespaced por conta.** `approvals`/`settings` de plugin
+      vivem em `plugin-state/{account_id}/` no nativo
+      (`crates/daemon/src/plugins/mod.rs::account_state_dir`) e em chaves de
+      `localStorage` prefixadas por `AccountId` no web
+      (`crates/plugin-host/src/store/web.rs`). Sem isso, uma segunda conta
       herdaria ou sobrescreveria as permissões da primeira. O catálogo de
-      módulos `.wasm` continua global, como a seção 13.3 do plano pede. Web
-      ainda não: `Origin`/`localStorage` continuam com um único prefixo não
-      namespaced por conta, sinalizado como pendência no próprio plano.
+      módulos `.wasm` continua global, como a seção 13.3 do plano pede. O
+      staging de instalação também está separado: chaves `u-` são globais e
+      chaves `a<id>-u-` pertencem a uma conta.
 - [x] **Shutdown agora acorda todas as contas, não só uma.**
       `crate::shutdown::ShutdownSignal` trocou de `tokio::sync::Notify`
       (`notify_one` acorda exatamente um waiter, invisível com uma única
@@ -138,9 +139,10 @@ abaixo para o diagnóstico completo.
       backoff e `SessionLoggedOut` deixa a conta para o usuário parear de novo.
       Gated `#[cfg(not(target_family = "wasm"))]`: `tokio::task::JoinSet`
       exige futures `Send`, e o host de plugin web é construído com closures
-      `wasm-bindgen` deliberadamente `!Send`, `embedded.rs` continua com sua
-      construção manual de uma conta só por esse motivo (item 8 do plano,
-      supervisor `MaybeSend` próprio para web, ainda não feito).
+      `wasm-bindgen` deliberadamente `!Send`. `embedded.rs` já restaura um
+      registry com todas as contas persistidas e compartilha o mesmo
+      `CallCoordinator`, mas ainda falta um caminho de lifecycle web para
+      Create/Reset/Remove (item 8, supervisor `MaybeSend` próprio para web).
 - [x] **`DaemonMessage::AccountCreated { id, account }`** responde
       `ClientRequest::CreateAccount` no wire, nomeando o id que o daemon
       alocou, um cliente pode abrir uma conexão `Account`-scoped a ele
@@ -310,17 +312,15 @@ a chamada ao trocar de conta.
       conta), preparação única do DB, lifecycle completo (`create/reset/
       remove_account`) sobre WR-1, e testes de isolamento A/B no mesmo
       arquivo, incluindo reset/remove.
-- [~] **2. Estado externo por conta**, namespace de media, avatar, wipe e
-      **plugin-state (nativo)** por conta estão prontos; falta plugin state
-      no web (`Origin`/`localStorage` ainda não é keyed por `AccountId,
-      seção 13.3 do plano) e o staging global de instalação de plugin
-      (seção 13.2).
+- [x] **2. Estado externo por conta**, namespace de media, avatar, wipe,
+      plugin-state nativo e web por conta, e staging global de instalação
+      prontos. O catálogo `.wasm` continua global de propósito.
 - [x] **3. `AccountRuntime`**, encapsula `StateHub`, commands, plugin host e
       lifecycle por conta; o daemon/embedded/listeners compartilham um
       `AccountRegistry`, o bridge abre e reseta a sessão com o `AccountId`
       correto, e `AccountSupervisor` liga tudo isso em `main.rs`
-      (spawn/respawn dinâmico, nativo). Falta só web/embedded (item 8) e a
-      coordenação global do item 9 no bloqueio acima.
+      (spawn/respawn dinâmico, nativo). A coordenação global do item 9 está
+      pronta na Wave 4.3; falta só o lifecycle web/embedded (item 8).
 - [x] **4. `AccountRegistry`**, N runtimes e snapshot/status isolados,
       `AccountSupervisor` como supervisor de tarefa por conta, e o
       `Weak<AccountSupervisor>` que deixa `serve_control_client` alcançá-lo
@@ -361,13 +361,18 @@ a chamada ao trocar de conta.
       de conta, com aviso explícito antes de agir. Resta apenas integrar
       isso ao registry web do item 8 quando ele existir.
 - [ ] **10. Hardening/performance**, matriz de races, testes de isolamento,
-       stress de writer, benchmark 1/2/4 contas, web, docs e CI completo.
+       stress de writer, benchmark 1/2/4/8 contas, web, docs e CI completo.
        **Gate de release, não item adiável:** cada `WhatsAppClient` ainda cria
        um runtime Tokio multi-thread próprio mais uma thread que faz
        `block_on`, então 4 contas não são 4 sessões e sim possivelmente 4
-       runtimes e seus pools. Medir 1/2/4/8 contas, threads, RSS/PSS, CPU
-       ociosa, FDs, startup a frio, history sync, reconexão e shutdown, antes
-       de liberar multi-account.
+       runtimes e seus pools. A Wave 4.4 acrescentou um harness sintético com
+       um `StoreRegistry` e N clients nunca iniciados, cenários 1/2/4/8 e
+       contadores Linux de threads e FDs no driver isolado. Isso cobre só a
+       construção e o teardown desses clients. Ainda faltam a matriz de races,
+       o stress de writer e medições de processo para 1/2/4/8 contas, com
+       RSS/PSS, CPU ociosa, FDs, startup a frio e shutdown. History sync e
+       reconexão não têm substituto sintético honesto e não podem ser
+       reivindicadas sem uma conta de teste autorizada.
 
 ## Definition of done
 

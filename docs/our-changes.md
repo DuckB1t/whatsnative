@@ -1410,6 +1410,40 @@ until a matching release or runtime teardown arrives. Conditional releases and
 account removal keep that stale holder from being attributed to a different
 account.
 
+### 43. Wave 4.4 gave account scale a synthetic harness
+
+**Problem.** The release gate kept asking for 1/2/4/8 accounts, but the
+profiling workload only varied bridge traffic. There was no measurement for
+what another local account costs, and no honest count of threads or file
+descriptors. Claiming the gate on that evidence would have been a lie.
+
+**Change.** `session_bridge/memory_scenario.rs` gained ignored tests for one,
+two, four and eight synthetic accounts. Each one puts one `StoreRegistry` in a
+throwaway directory, allocates local ids, opens account stores, constructs
+`WhatsAppClient::new_for_account_with_registry()` for each id, closes them and
+drops everything. No account is started, paired or connected. The Linux
+checkpoints in `memory_metrics.rs` now report `process_counts` with threads and
+fds beside the existing `process_kib` fields. `measure-daemon-memory.py` knows
+the two stage shapes and runs all eight named scenarios, with the base and head
+alternation and strict checkpoint checks unchanged.
+
+**Not changed.** No session start, no pairing, no network, no real account, no
+message, call, post, vote, reaction or setting, and no MCP code. The harness
+uses a temporary synthetic database and removes it on every exit path.
+
+**Gates.** fmt, `git diff --check`, workspace clippy with warnings denied,
+workspace nextest, doctests and xtask fmt, clippy and tests pass. Nextest ran
+2793 tests with 39 skipped and one pre-existing leaky daemon test. The driver's
+own four tests pass. Wasm daemon lib tests compile, the wasm daemon lib passes
+clippy with warnings denied apart from the pre-existing `drop_non_drop` lint,
+and the nightly web GUI check passes with four pre-existing warnings. The
+added-line audit on this wave found no em or en dashes, phone-shaped fixtures,
+real JID namespaces, account paths or secrets.
+
+**Limit.** This measures construction and teardown of never-started clients.
+It is not a connected account benchmark, and it does not close history sync,
+reconnect, race matrix or writer stress.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

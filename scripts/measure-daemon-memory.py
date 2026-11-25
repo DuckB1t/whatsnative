@@ -41,6 +41,24 @@ def wait_for_workload(process, timeout):
         signal.signal(signal.SIGALRM, previous)
 
 
+BRIDGE_STAGES = ["startup", "initialized", "attach", "sync_queued", "drained",
+                 "detached", "queried", "released"]
+ACCOUNT_STAGES = ["startup", "registry_ready", "accounts_allocated", "stores_opened",
+                  "clients_ready", "clients_closed", "released"]
+SCENARIOS = ["headless", "attached", "read", "groups",
+             "accounts_1", "accounts_2", "accounts_4", "accounts_8"]
+SCENARIO_STAGES = {
+    "headless": BRIDGE_STAGES,
+    "attached": BRIDGE_STAGES,
+    "read": BRIDGE_STAGES,
+    "groups": BRIDGE_STAGES,
+    "accounts_1": ACCOUNT_STAGES,
+    "accounts_2": ACCOUNT_STAGES,
+    "accounts_4": ACCOUNT_STAGES,
+    "accounts_8": ACCOUNT_STAGES,
+}
+
+
 def run(binary, scenario, mode, timeout):
     env = os.environ.copy()
     env.pop("OXIDEZAP_MEMORY_REPORT", None)
@@ -65,8 +83,7 @@ def run(binary, scenario, mode, timeout):
         marker = "OXIDEZAP_MEMORY "
         if marker in line:
             stages.append(json.loads(line.split(marker, 1)[1]))
-    expected = ["startup", "initialized", "attach", "sync_queued", "drained",
-                "detached", "queried", "released"]
+    expected = SCENARIO_STAGES[scenario]
     if mode == "memory" and [s["stage"] for s in stages] != expected:
         raise RuntimeError("Missing memory checkpoints; use the instrumented test binary")
     if mode == "timing" and (stages or "OXIDEZAP_ALLOCATOR counting" in output):
@@ -98,6 +115,11 @@ def summarize(records):
                         key: distribution([s["process_kib"][key] for s in samples])
                         for key in first["process_kib"]
                     }
+                    if isinstance(first.get("process_counts"), dict):
+                        stage["process_counts"] = {
+                            key: distribution([s["process_counts"][key] for s in samples])
+                            for key in first["process_counts"]
+                        }
                     data["stages"][first["stage"]] = stage
             result[scenario][variant] = data
     return result
@@ -124,7 +146,7 @@ def main():
     if any(output == binary or (output.exists() and output.samefile(binary))
            for binary in binaries.values()):
         parser.error("--output must not refer to an input binary")
-    scenarios = ["headless", "attached", "read", "groups"]
+    scenarios = SCENARIOS
     records = []
     failure = None
     try:
