@@ -637,8 +637,20 @@ mod tests {
             .into_iter()
             .map(|account| account.id)
             .collect();
-        let first = AccountId::new(6).unwrap();
-        let second = AccountId::new(7).unwrap();
+        // The browser helper shares one OPFS database, so AUTOINCREMENT can
+        // hand out the small ids other tests use as registry-only fixtures.
+        // Stay above every stored id; these two ids never reserve a row.
+        let synthetic_base = stored_before
+            .iter()
+            .map(|account| account.get())
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1000);
+        let first = AccountId::new(synthetic_base).expect("positive account id");
+        let next_synthetic = synthetic_base
+            .checked_add(1)
+            .expect("room for another synthetic id");
+        let second = AccountId::new(next_synthetic).expect("positive account id");
         let first_old = synthetic(first, commands_for_drop());
         assert!(registry.insert(Arc::clone(&first_old)));
         assert!(registry.insert(synthetic(second, commands_for_drop())));

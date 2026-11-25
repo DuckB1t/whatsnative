@@ -1535,7 +1535,11 @@ one. The wasm test helper shares one OPFS database with every other browser
 test, so all three store-count assertions were order dependent: two creates,
 the shared-store create, and the concurrency race all assumed an empty store.
 They now record the ids present before the test and assert the delta plus the
-retained ids. That is a test fix, not a lifecycle behavior change.
+retained ids. The next sweep then caught a third order dependency in the same
+race: its fixed synthetic ids 6 and 7 can be handed out by the shared
+AUTOINCREMENT, so the create hook lost an `insert` when it landed on one of
+them. The test now picks synthetic ids above every stored id it sees at the
+start. These are test fixes, not a lifecycle behavior change.
 
 **Not changed.** No `PROTOCOL_VERSION` bump, no protocol frame, no GUI call API
 shape change, no new runtime dependency and no MCP code. No app, daemon, CLI or
