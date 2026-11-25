@@ -461,56 +461,54 @@ fn account_list(
     let accounts = app.accounts().unwrap_or_default();
     let mut list = div().flex().flex_col().gap(metrics.space_lg());
 
-    if cfg!(target_family = "wasm") {
-        // A page owns one daemon in its address space; the desktop window is
-        // the only front end with a multi-account switcher in this slice.
-        list = list.child(pending(crate::tr!(AccountSwitcherNativeOnly), metrics, cx));
-    } else {
-        list = list
-            .children(accounts.iter().map(|overview| {
-                account_row(
-                    overview,
-                    active,
-                    app.account_request(overview.id),
-                    has_control,
-                    entity.clone(),
-                    metrics,
-                    cx,
-                )
-            }))
-            .when(accounts.is_empty(), |this| {
-                this.child(pending(crate::tr!(NoAccountsReported), metrics, cx))
-            });
-
-        let add = entity.clone();
-        let refresh = entity.clone();
-        list = list
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(metrics.space_md())
-                    .child(
-                        Button::new("accounts-add")
-                            .label(crate::tr!(AddAccount))
-                            .disabled(!has_control)
-                            .on_click(move |_, window, cx| {
-                                add.update(cx, |app, cx| app.add_account(window, cx));
-                            }),
-                    )
-                    .child(
-                        Button::new("accounts-refresh")
-                            .label(crate::tr!(RefreshAccounts))
-                            .disabled(!has_control)
-                            .on_click(move |_, _, cx| {
-                                refresh.update(cx, |app, cx| app.refresh_accounts(cx));
-                            }),
-                    ),
+    // The switcher is no longer hidden just because the target is a page:
+    // the shared registry now has the same lifecycle path on both. It still
+    // needs a control connection, and that is a condition both front ends
+    // share.
+    list = list
+        .children(accounts.iter().map(|overview| {
+            account_row(
+                overview,
+                active,
+                app.account_request(overview.id),
+                has_control,
+                entity.clone(),
+                metrics,
+                cx,
             )
-            .when(!has_control, |this| {
-                this.child(pending(crate::tr!(AccountControlUnavailable), metrics, cx))
-            });
-    }
+        }))
+        .when(accounts.is_empty(), |this| {
+            this.child(pending(crate::tr!(NoAccountsReported), metrics, cx))
+        });
+
+    let add = entity.clone();
+    let refresh = entity.clone();
+    list = list
+        .child(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap(metrics.space_md())
+                .child(
+                    Button::new("accounts-add")
+                        .label(crate::tr!(AddAccount))
+                        .disabled(!has_control)
+                        .on_click(move |_, window, cx| {
+                            add.update(cx, |app, cx| app.add_account(window, cx));
+                        }),
+                )
+                .child(
+                    Button::new("accounts-refresh")
+                        .label(crate::tr!(RefreshAccounts))
+                        .disabled(!has_control)
+                        .on_click(move |_, _, cx| {
+                            refresh.update(cx, |app, cx| app.refresh_accounts(cx));
+                        }),
+                ),
+        )
+        .when(!has_control, |this| {
+            this.child(pending(crate::tr!(AccountSwitcherUnavailable), metrics, cx))
+        });
     list.into_any_element()
 }
 

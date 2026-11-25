@@ -47,7 +47,7 @@ pub use action::{
     AccountDisposition, AccountExit, Action, CommandOutcome, Commands, Outbox, SessionCommand,
 };
 pub(crate) use externalize::externalize_media;
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 pub(crate) use wire_domain::{
     blocked_contact_to_wire, channel_poll_created_to_wire, channel_poll_draft_from_wire,
     channel_react_from_wire, channel_vote_poll_from_wire, community_draft_from_wire,

@@ -56,6 +56,24 @@ use crate::server::MAX_CLIENTS;
 /// tab's one agent, so a full pipe is a yield rather than a deadlock.
 const PIPE: usize = 1 << 18;
 
+/// Whether a staged payload key may be written from a follower tab.
+///
+/// Account owned keys still need a live, non-retiring runtime, because a
+/// retired id must not regain media after its wipe. A global `u-` key is the
+/// plugin install channel and belongs to the origin's module catalog, not to
+/// any one account, so it stays available even when no legacy account exists.
+/// That is the normal shape once all accounts are non-legacy.
+fn staging_key_is_available(registry: &AccountRegistry, key: &str) -> bool {
+    if oxidezap_ipc::is_global_staged_key(key) {
+        return true;
+    }
+    let account = oxidezap_ipc::account_id_of(key).unwrap_or(oxidezap_core::AccountId::LEGACY);
+    registry
+        .get(account)
+        .is_some_and(|runtime| !runtime.is_stopping())
+        && registry.retirement_target(account).is_none()
+}
+
 /// The rendezvous, answered for as long as this is held.
 ///
 /// Dropping it stops this tab answering asks and closes the channel. That is
@@ -409,13 +427,7 @@ fn handler(
                 ) else {
                     return;
                 };
-                let account =
-                    oxidezap_ipc::account_id_of(&key).unwrap_or(oxidezap_core::AccountId::LEGACY);
-                if registry
-                    .get(account)
-                    .is_none_or(|runtime| runtime.is_stopping())
-                    || registry.retirement_target(account).is_some()
-                {
+                if !staging_key_is_available(&registry, &key) {
                     let _ = post_failure(&frames, "staged", id, "account is unavailable");
                     return;
                 }
@@ -548,7 +560,7 @@ mod tests {
     use oxidezap_ipc::{ClientRequest, ClientScope, DaemonMessage, PROTOCOL_VERSION, Request};
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
-    use super::serve;
+    use super::{serve, staging_key_is_available};
     use crate::account::{AccountRegistry, AccountRuntime};
     use crate::state::StateHub;
 
@@ -606,6 +618,17 @@ mod tests {
     /// which says nothing about what went wrong — and it is the first thing
     /// this test did when its own stand-in bridge was missing.
     const PATIENCE: std::time::Duration = std::time::Duration::from_secs(20);
+
+    /// A global plugin payload does not need a legacy account to be present.
+    /// Once every local account is non-legacy, refusing it would make installs
+    /// from a follower tab impossible on the web.
+    #[wasm_bindgen_test]
+    fn global_plugin_staging_needs_no_legacy_account() {
+        let empty = AccountRegistry::new();
+        assert!(staging_key_is_available(&empty, "u-plugin-1"));
+        assert!(!staging_key_is_available(&empty, "f-file-1"));
+        assert!(staging_key_is_available(&a_daemon(), "f-file-1"));
+    }
 
     /// A tab that asks for the account is served, and what it says is heard.
     ///

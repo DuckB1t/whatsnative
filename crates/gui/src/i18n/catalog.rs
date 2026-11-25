@@ -436,7 +436,7 @@ catalog! {
     AccountSwitchCallWarning => ("Switching accounts will end your current call.", "Trocar de conta vai encerrar sua chamada atual.");
     SwitchAndEndCall => ("Switch and end call", "Trocar e encerrar chamada");
     AccountControlUnavailable => ("Account controls need a daemon control connection.", "Os controles de conta precisam de uma conexão de controle do serviço.");
-    AccountSwitcherNativeOnly => ("Account switching is available in the desktop app only.", "A troca de contas está disponível apenas no aplicativo para computador.");
+    AccountSwitcherUnavailable => ("Account switching needs a daemon control connection.", "A troca de contas precisa de uma conexão de controle do serviço.");
     AccountResetRequested => ("Reset requested for account", "Redefinição solicitada para a conta");
     AccountRemoveRequested => ("Removal requested for account", "Remoção solicitada para a conta");
     AccountSwitchFailed => ("Could not switch accounts", "Não foi possível trocar de conta");

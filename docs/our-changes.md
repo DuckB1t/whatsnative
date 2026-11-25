@@ -1444,6 +1444,54 @@ real JID namespaces, account paths or secrets.
 It is not a connected account benchmark, and it does not close history sync,
 reconnect, race matrix or writer stress.
 
+### 44. The page can finally add, reset and remove accounts
+
+**Problem.** The web daemon had a shared registry, a restored account set, a
+Web Lock and tab scopes, but no owner for dynamic lifecycle. The three control
+requests answered `Refused`, and the settings pane hid the switcher behind a
+lie about desktop-only features. The real blocker was a missing path, not a
+platform rule. Fuck that kind of honesty.
+
+**Change.** `account/lifecycle.rs` adds `EmbeddedLifecycle`, the page's answer
+to the native `AccountSupervisor`. `tokio::task::JoinSet` needs `Send` tasks
+and a page's plugin host is deliberately not `Send`, so this path uses
+`oxidezap_session` tasks, `watch` for active runs and a local mutex gate
+instead. `embedded.rs` owns the handle, the registry holds a weak pointer, and
+the server reaches it without threading a second handle through listeners.
+`CreateAccount` allocates through the same `StoreRegistry` and answers
+`AccountCreated` once the runtime is registered. `ResetAccount` and
+`RemoveAccount` answer `Accepted` as an ack and finish in the background;
+`AccountsChanged` is still the completion signal. A live session receives
+`ForgetSession`. A terminal account is cleaned directly only after the old run
+loop has stopped, under the relink lock and retirement checks. Generation
+counters cancel stale restart sleeps, and the run loop takes the rebuild gate
+so a terminal request cannot be undone by a respawn. A failed disposition is
+cleared once the loop is done, so the user can ask again. Follower tabs can
+stage global `u-` plugin payloads without a legacy account, since those keys
+belong to the origin's module catalog and not to one account. The GUI shows
+the switcher on wasm and names the real prerequisite: a daemon control
+connection.
+
+**Not changed.** No protocol frame, no `PROTOCOL_VERSION` bump, no native
+supervisor reuse, no MCP server and no MCP write. No app, daemon, CLI or MCP
+server was launched. No real account, message, call, post, vote, reaction,
+setting or piece of PII was touched. Fixtures use local ids and in-memory
+SQLite URIs.
+
+**Gates.** fmt, `git diff --check`, workspace clippy with warnings denied,
+workspace nextest, doctests and xtask fmt, clippy and tests pass. Nextest ran
+2793 tests with 39 skipped and one pre-existing leaky daemon test. The focused
+lifecycle tests pass on both targets. The wasm daemon lib checks, its tests
+compile, and it passes clippy with warnings denied apart from the pre-existing
+`drop_non_drop` lint. The nightly web GUI check passes with four pre-existing
+warnings. The added-line audit found no em or en dashes, phone-shaped fixtures,
+real JID namespaces, account paths or secrets.
+
+**Limit.** Browser wasm tests were not run because `wasm-pack` and
+`wasm-bindgen-test-runner` are not installed here. Durable OPFS execution is
+not claimed. Correct local lifecycle is not a performance result, and it does
+not prove history sync or reconnect without an authorized test account.
+
 ## Planned (see plan file)
 
 1. ~~Group call plumbing and grid~~ ✅ (above).

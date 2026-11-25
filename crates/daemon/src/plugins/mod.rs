@@ -67,9 +67,10 @@ pub async fn start(hub: &Arc<StateHub>, commands: SessionCommands) -> Arc<Plugin
 /// this module hands to a `Plugins` host, or to [`oxidezap_plugin_host::forget_approvals`],
 /// goes through here rather than through `default_state_dir` directly.
 ///
-/// Native only: a page's plugin state lives in `localStorage` behind
-/// [`oxidezap_plugin_host::Origin`], which is not yet keyed by account (see
-/// the multi-account plan, section 13.3) and has no path to scope.
+/// On wasm there is no per-user directory: the host keeps the same split in
+/// [`oxidezap_plugin_host::Origin`], which stamps and keys `localStorage` by
+/// `AccountId`. The module catalog stays global, approvals and settings do
+/// not.
 #[cfg(not(target_family = "wasm"))]
 #[must_use]
 pub fn account_state_dir(account_id: AccountId) -> Option<std::path::PathBuf> {

@@ -13,6 +13,7 @@
 //! reimplementing the same construction `main.rs` used to do once, inline,
 //! for the one account a single-account daemon ever had.
 
+mod lifecycle;
 mod retirement;
 
 use std::collections::HashMap;
@@ -30,11 +31,15 @@ use oxidezap_ipc::{AccountOverview, AccountStatus, AccountsSnapshot};
 use tokio::sync::{mpsc, watch};
 
 use crate::call_coordinator::CallCoordinator;
-use crate::session_bridge::{
-    self, AccountDisposition, Action, CommandOutcome, Commands, RuntimeLifecycle, SessionCommand,
-};
+use crate::session_bridge::{self, AccountDisposition, Commands, RuntimeLifecycle, SessionCommand};
+#[cfg(not(target_family = "wasm"))]
+use crate::session_bridge::{Action, CommandOutcome};
 use crate::state::StateHub;
 use oxidezap_session::StoreRegistry;
+
+pub use lifecycle::EmbeddedLifecycle;
+#[cfg(test)]
+pub(crate) use lifecycle::{AllocateFn, ForgetFn, StartFn};
 
 /// All daemon-owned state and work queues for one local account.
 ///
@@ -226,10 +231,20 @@ pub struct AccountRegistry {
     /// where `AccountSupervisor` does not exist at all.
     #[cfg(not(target_family = "wasm"))]
     supervisor: std::sync::OnceLock<std::sync::Weak<AccountSupervisor>>,
+    /// The lifecycle used by an embedded host, which cannot own a native
+    /// supervisor. Also `Weak` for the same reason: its owner is the service
+    /// that created the registry and holds the origin claim. `server` reaches
+    /// it through this pointer, so no listener has to thread a second handle.
+    embedded_lifecycle: std::sync::OnceLock<std::sync::Weak<EmbeddedLifecycle>>,
 }
 
 impl AccountRegistry {
     /// Create an empty registry.
+    ///
+    /// The `Arc` is shared by the protocol listeners on every target. On a
+    /// page there is one thread, so the desktop-oriented `Send`/`Sync` lint
+    /// does not describe the lifetime of this handle.
+    #[cfg_attr(target_family = "wasm", allow(clippy::arc_with_non_send_sync))]
     #[must_use]
     pub fn new() -> Arc<Self> {
         let (overview, _) = watch::channel(Arc::new(AccountsSnapshot {
@@ -248,6 +263,7 @@ impl AccountRegistry {
             retirement_ready: RwLock::new(std::collections::HashSet::new()),
             #[cfg(not(target_family = "wasm"))]
             supervisor: std::sync::OnceLock::new(),
+            embedded_lifecycle: std::sync::OnceLock::new(),
         })
     }
 
@@ -258,6 +274,17 @@ impl AccountRegistry {
     #[must_use]
     pub fn supervisor(&self) -> Option<Arc<AccountSupervisor>> {
         self.supervisor.get()?.upgrade()
+    }
+
+    /// Attach the lifecycle an embedded host owns to its registry.
+    pub fn attach_embedded_lifecycle(&self, lifecycle: &Arc<EmbeddedLifecycle>) {
+        let _ = self.embedded_lifecycle.set(Arc::downgrade(lifecycle));
+    }
+
+    /// The embedded lifecycle attached to this registry, if its owner is alive.
+    #[must_use]
+    pub fn embedded_lifecycle(&self) -> Option<Arc<EmbeddedLifecycle>> {
+        self.embedded_lifecycle.get()?.upgrade()
     }
 
     /// Add a runtime, returning `false` when its id is already registered.
@@ -334,11 +361,34 @@ impl AccountRegistry {
             supervisor.spawn(id).await;
             return;
         }
+        if let Some(lifecycle) = self.embedded_lifecycle() {
+            lifecycle.start(id, stores).await;
+            return;
+        }
+        self.start_embedded(id, stores, None).await;
+    }
+
+    /// Build one embedded runtime and drive it, respawning under the same id
+    /// for a completed reset or a recoverable session end.
+    ///
+    /// The optional lifecycle hook is what a page's control plane uses to
+    /// know which accounts still own a command receiver and to cancel a
+    /// restart sleep a lifecycle request has overtaken. A registry with no
+    /// attached lifecycle keeps the older, self-contained loop.
+    pub(crate) async fn start_embedded(
+        self: &Arc<Self>,
+        id: AccountId,
+        stores: Arc<StoreRegistry>,
+        hooks: Option<Arc<EmbeddedLifecycle>>,
+    ) {
         let Some((mut runtime, mut receiver)) =
             self.build_embedded_account(id, Arc::clone(&stores)).await
         else {
             return;
         };
+        if let Some(hooks) = &hooks {
+            hooks.begin_run(id);
+        }
         let registry = Arc::clone(self);
         oxidezap_session::spawn(async move {
             let mut failures = 0u32;
@@ -346,6 +396,9 @@ impl AccountRegistry {
                 let outcome = registry
                     .run(runtime, receiver, crate::shutdown::requested())
                     .await;
+                if let Some(hooks) = &hooks {
+                    hooks.end_run(id);
+                }
                 let next = match outcome {
                     Ok(exit) => registry.finish_embedded_exit(id, exit),
                     Err(error) => {
@@ -362,9 +415,15 @@ impl AccountRegistry {
                             break;
                         }
                         failures += 1;
+                        let generation = hooks.as_ref().map(|hooks| hooks.generation(id));
                         tokio::select! {
                             _ = oxidezap_session::sleep(std::time::Duration::from_secs(u64::from(failures))) => {},
                             _ = crate::shutdown::requested() => break,
+                        }
+                        if let Some(hooks) = &hooks
+                            && generation != Some(hooks.generation(id))
+                        {
+                            break;
                         }
                         registry.remove(id);
                     }
@@ -374,6 +433,16 @@ impl AccountRegistry {
                     _ = crate::shutdown::requested() => break,
                     _ = std::future::ready(()) => {},
                 }
+                // A terminal lifecycle request may have retired this id while
+                // this loop was awaiting its own teardown. The gate is held
+                // across the decision to rebuild so that request has already
+                // removed the runtime before another one is inserted.
+                if let Some(hooks) = &hooks {
+                    let _gate = hooks.rebuild_gate().await;
+                    if registry.get(id).is_some() || registry.has_retirement(id) {
+                        break;
+                    }
+                }
                 let Some(next) = registry
                     .build_embedded_account(id, Arc::clone(&stores))
                     .await
@@ -381,6 +450,12 @@ impl AccountRegistry {
                     break;
                 };
                 (runtime, receiver) = next;
+                if let Some(hooks) = &hooks {
+                    hooks.begin_run(id);
+                }
+            }
+            if let Some(hooks) = &hooks {
+                hooks.end_run(id);
             }
         });
     }
@@ -427,9 +502,20 @@ impl AccountRegistry {
                 self.set_status(id, AccountStatus::Error);
                 EmbeddedNext::Finished
             }
-            AccountExit::Stopped | AccountExit::ResetIncomplete | AccountExit::RemoveIncomplete => {
+            AccountExit::ResetIncomplete | AccountExit::RemoveIncomplete => {
+                // A teardown that did not run left its disposition recorded.
+                // Clear it once the run loop is finished so the user can ask
+                // again, the same way the native supervisor does.
+                if let Some(runtime) = self.get(id)
+                    && runtime.lifecycle().is_quiesced()
+                    && let Some(disposition) = runtime.lifecycle().disposition()
+                {
+                    runtime.lifecycle().retry_failed_disposition(disposition);
+                }
+                self.set_status(id, AccountStatus::Error);
                 EmbeddedNext::Finished
             }
+            AccountExit::Stopped => EmbeddedNext::Finished,
         }
     }
 
@@ -748,6 +834,7 @@ impl RestartPolicy {
     }
 
     /// The wait before attempt `attempt`, counting from zero, capped.
+    #[cfg_attr(target_family = "wasm", allow(dead_code))]
     #[must_use]
     fn delay(self, attempt: u32) -> std::time::Duration {
         let factor = 1u32 << attempt.min(16);

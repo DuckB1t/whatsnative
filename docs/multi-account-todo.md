@@ -141,8 +141,10 @@ abaixo para o diagnóstico completo.
       exige futures `Send`, e o host de plugin web é construído com closures
       `wasm-bindgen` deliberadamente `!Send`. `embedded.rs` já restaura um
       registry com todas as contas persistidas e compartilha o mesmo
-      `CallCoordinator`, mas ainda falta um caminho de lifecycle web para
-      Create/Reset/Remove (item 8, supervisor `MaybeSend` próprio para web).
+      `CallCoordinator`. O lifecycle web não precisou de um supervisor
+      `MaybeSend`: `account/lifecycle.rs` dá o mesmo contrato com tasks do
+      `oxidezap_session` e um gate local, e `embedded.rs` é o dono do handle.
+      Create/Reset/Remove já respondem na página (item 8).
 - [x] **`DaemonMessage::AccountCreated { id, account }`** responde
       `ClientRequest::CreateAccount` no wire, nomeando o id que o daemon
       alocou, um cliente pode abrir uma conexão `Account`-scoped a ele
@@ -270,19 +272,23 @@ segundo `Arc`, `Weak` porque o supervisor já segura um
 nenhum dos dois solta.
 
 **Não sobrou nenhuma peça de arquitetura pendente para o lifecycle dinâmico
-de contas no daemon nativo.** O que falta agora é a camada acima:
+de contas no daemon, nativo ou web.** O que falta agora é medição honesta:
 
-1. **A GUI já fala v30 do jeito multi-conta na parte nativa**: o
+1. **A GUI já fala v30 do jeito multi-conta nos dois alvos**: o
    `AccountWorkspace` troca só a conexão frontal, e o switcher com
-   Add/Reset/Remove vive na aba Accounts das configurações. Web/embedded
-   continuam com o aviso honesto de que o switcher é nativo.
-2. **Web/embedded continuam de fora**: `embedded.rs` continua construindo um
-   `AccountRuntime` único à mão (não usa `AccountSupervisor`, que exige
-   `Send` e o host de plugin web não é); o registry ali nunca tem um
-   supervisor anexado, então as três mutations respondem `Refused` lá,
-   correto para hoje, mas item 8 do plano (registry multi-conta próprio pra
-   web) segue pendente.
-3. **Coordenação global (tray, calls) está pronta no nativo**: a tray já
+   Add/Reset/Remove vive na aba Accounts das configurações. Na página o aviso
+   fala do pré-requisito real, uma conexão de controle, não de um app de
+   desktop que ali não existe.
+2. **Web/embedded têm o próprio lifecycle**: `embedded.rs` ainda constrói
+   runtimes à mão, porque o `AccountSupervisor` exige `Send` e o host de plugin
+   da página não é, mas `account/lifecycle.rs` cobre o mesmo contrato. O
+   `Service` é o dono do handle, o registry guarda só um `Weak`. Create aloca
+   pelo `StoreRegistry` compartilhado e responde `AccountCreated` com a
+   runtime registrada. Reset/Remove respondem `Accepted` como ack e terminam
+   em background; a sessão viva recebe `ForgetSession`, e a conta terminal é
+   limpa só depois que a task antiga parou. Não é uma clone do reaper nativo
+   nem uma promessa de pool de threads, é o caminho que o navegador aguenta.
+3. **Coordenação global (tray, calls) está pronta nos dois**: a tray já
    agrega. `crates/daemon/src/tray/accounts.rs` segue o `AccountRegistry` via
    `TrayHub::follow`, soma unread com `saturating_add` e usa `connected` se
    qualquer runtime estiver conectado. A Wave 4.3 acrescentou o
@@ -290,7 +296,7 @@ de contas no daemon nativo.** O que falta agora é a camada acima:
    tray e o watch do dono em `TrayHub::follow`. O fence de hardware em
    `session_bridge/call_devices.rs` agora consulta o dono global antes de
    abrir preview, mantendo o scan local antigo como fallback de teste. O que
-   resta é o registry multi-conta do item 8 e o gate de performance do item 10.
+   resta é o gate de performance do item 10, não mais o registry.
 
 **Decisão de produto do item 9/seção 20 (perguntada e respondida): o que
 acontece com uma chamada ativa quando o usuário troca de conta.** Opção
@@ -303,8 +309,9 @@ chamada silenciosamente. A Wave 4.2 ligou essa resposta ao switcher nativo:
 chama `hang_up` depois da confirmação explícita. Cancelar deixa a chamada e
 a conta ativa intactas. A Wave 4.3 fechou a coordenação global: uma segunda
 conta não pode tomar o slot enquanto a primeira tem uma chamada, e a tray
-nomeia a conta dona. A confirmação continua sendo a única forma de encerrar
-a chamada ao trocar de conta.
+nomeia a conta dona. A mesma checagem serve a página, agora que o switcher
+não está mais escondido nela. A confirmação continua sendo a única forma de
+encerrar a chamada ao trocar de conta.
 
 ## Sequência de implementação
 
@@ -319,8 +326,9 @@ a chamada ao trocar de conta.
       lifecycle por conta; o daemon/embedded/listeners compartilham um
       `AccountRegistry`, o bridge abre e reseta a sessão com o `AccountId`
       correto, e `AccountSupervisor` liga tudo isso em `main.rs`
-      (spawn/respawn dinâmico, nativo). A coordenação global do item 9 está
-      pronta na Wave 4.3; falta só o lifecycle web/embedded (item 8).
+      (spawn/respawn dinâmico, nativo). A coordenação global do item 9 e o
+      lifecycle web/embedded do item 8 estão prontos; falta só o gate de
+      performance do item 10.
 - [x] **4. `AccountRegistry`**, N runtimes e snapshot/status isolados,
       `AccountSupervisor` como supervisor de tarefa por conta, e o
       `Weak<AccountSupervisor>` que deixa `serve_control_client` alcançá-lo
@@ -346,20 +354,27 @@ a chamada ao trocar de conta.
       mínimo da conta ativa. A lista nativa mostra só id e status, sem nomes
       inventados. Add usa o id devolvido pelo control plane e deixa o pairing
       para o Hello daquela conta. Reset/Remove mostram "requested" e esperam
-      `AccountsChanged`, nunca tratam `Accepted` como conclusão. Web mostra
-      aviso explícito de que o switcher é nativo.
-- [ ] **8. Web/embedded**, registry singleton, Web Lock no daemon, um DB OPFS,
+      `AccountsChanged`, nunca tratam `Accepted` como conclusão. Na web o
+      aviso fala da conexão de controle, que é o pré-requisito verdadeiro.
+- [x] **8. Web/embedded**, registry singleton, Web Lock no daemon, um DB OPFS,
       scopes de tab e restauração do conjunto inteiro, plugin-state por conta.
-      A `ControlSession` já cobre os quatro transports; o que falta aqui é o
-      registry multi-conta do lado do daemon embutido.
+      A `ControlSession` cobre os quatro transports, e
+      `account/lifecycle.rs` fecha o registry multi-conta embutido: Create
+      aloca pelo mesmo `StoreRegistry`, Reset/Remove mandam `ForgetSession`
+      para a sessão viva ou limpam storage depois da task antiga, e a
+      confirmação de chamada ativa é a mesma da GUI nativa. Staging global
+      `u-` de plugin agora funciona sem uma conta legacy viva. Persistência
+      durável de execução em OPFS e testes de browser wasm continuam como
+      gate de hardening, não como desculpa para dizer que isto está pronto.
 - [x] **9. Global**, tray agregado, fence de preview entre runtimes,
       `CallCoordinator`, estado de chamada na tray e sinais cross-account
       prontos na Wave 4.3. A política determinística é o primeiro claim que
       vence, com o dono nomeado na recusa; um rename mantém o permit; uma
       liberação tardia não pode liberar a chamada de outra conta. Decisão de
       produto **já aplicada**: opção A, finalizar a chamada ativa ao trocar
-      de conta, com aviso explícito antes de agir. Resta apenas integrar
-      isso ao registry web do item 8 quando ele existir.
+      de conta, com aviso explícito antes de agir. O registry web usa a mesma
+      checagem; o que resta é provar em navegador e medir, não inventar
+      outra política.
 - [ ] **10. Hardening/performance**, matriz de races, testes de isolamento,
        stress de writer, benchmark 1/2/4/8 contas, web, docs e CI completo.
        **Gate de release, não item adiável:** cada `WhatsAppClient` ainda cria
@@ -381,9 +396,10 @@ a chamada ao trocar de conta.
 - [ ] Switch de conta troca somente a conexão frontend; nenhuma sessão WhatsApp
       é reconectada ou encerrada.
 - [ ] Eventos, unread, mídia, plugins e permissões permanecem account-scoped.
-- [x] Reset/remove de A não altera state, rows ou runtime de B/C no storage
-      (testado); falta provar o mesmo em runtime (spawn dinâmico, item acima).
-      Ids removidos nunca são reutilizados (testado, via `AUTOINCREMENT`), e o
+- [x] Reset/remove de A não altera state, rows ou runtime de B/C, no storage
+      e na runtime (testado no supervisor nativo e no lifecycle embutido, com
+      fixtures sintéticas). Ids removidos nunca são reutilizados (testado, via
+      `AUTOINCREMENT`), e o
       startup não recria um id removido: uma listagem vazia aloca pelo
       `create_account` em vez de fixar `AccountId(1)`.
 - [ ] Operações assíncronas iniciadas em A não publicam em B após switch.

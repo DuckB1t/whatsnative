@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use tokio::io::DuplexStream;
 
-use crate::account::AccountRegistry;
+use crate::account::{AccountRegistry, EmbeddedLifecycle};
 use crate::server;
 use oxidezap_core::AccountId;
 use oxidezap_session::StoreRegistry;
@@ -78,6 +78,10 @@ thread_local! {
 struct Service {
     _claim: crate::claim::Claim,
     registry: Arc<AccountRegistry>,
+    /// Owns the account lifecycle the control plane reaches through
+    /// `registry`. Dropping it would leave lifecycle requests with no path
+    /// to create, reset or remove an account on this host.
+    _lifecycle: Arc<EmbeddedLifecycle>,
     #[cfg(target_family = "wasm")]
     _tabs: Option<crate::listener::tab::Serving>,
 }
@@ -94,6 +98,7 @@ async fn service() -> Result<Arc<AccountRegistry>, StartFailed> {
 
     let registry = AccountRegistry::new();
     let stores = Arc::new(StoreRegistry::new(oxidezap_session::resolve_database_path()));
+    let lifecycle = EmbeddedLifecycle::attach(Arc::clone(&registry), Arc::clone(&stores));
     registry
         .restore_retirements(&stores)
         .await
@@ -131,6 +136,7 @@ async fn service() -> Result<Arc<AccountRegistry>, StartFailed> {
         *cell.borrow_mut() = Some(Service {
             _claim: claim,
             registry: Arc::clone(&registry),
+            _lifecycle: lifecycle,
             #[cfg(target_family = "wasm")]
             _tabs: tabs,
         });
@@ -172,11 +178,17 @@ mod tests {
             assert!(registry.insert(runtime));
             drop(receiver);
         }
+        let stores = Arc::new(StoreRegistry::new(format!(
+            "file:embedded-service-{}?mode=memory&cache=shared",
+            std::process::id()
+        )));
+        let lifecycle = EmbeddedLifecycle::attach(Arc::clone(&registry), stores);
         SERVICE.with(|cell| {
             assert!(cell.borrow().is_none());
             *cell.borrow_mut() = Some(Service {
                 _claim: crate::claim::Claim,
                 registry: Arc::clone(&registry),
+                _lifecycle: lifecycle,
             });
         });
         assert!(Arc::ptr_eq(&running().unwrap(), &registry));

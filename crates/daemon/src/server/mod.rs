@@ -52,12 +52,12 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadHalf, Write
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::account::AccountRegistry;
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 use crate::account::AccountRuntime;
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 use crate::session_bridge::Commands;
 use crate::session_bridge::{Action, Outbox};
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 use crate::state::StateHub;
 
 use handshake::{handshake, read_frame};
@@ -118,7 +118,7 @@ const OUTBOX_CAPACITY: usize = 64;
 /// # Errors
 ///
 /// The connection ended, or the peer said something unrecoverable.
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 pub(crate) async fn serve_client<S>(
     stream: S,
     hub: Arc<StateHub>,
@@ -1055,38 +1055,41 @@ async fn create_account(registry: &AccountRegistry, id: Option<RequestId>) -> Re
         );
     };
     #[cfg(not(target_family = "wasm"))]
-    {
-        match registry.supervisor() {
-            Some(supervisor) => match supervisor.create_and_spawn().await {
-                Ok(account) => Ok(serde_json::to_string(&DaemonMessage::AccountCreated {
-                    id,
-                    account,
-                })?),
-                Err(e) => error_frame(
-                    Some(id),
-                    ProtocolError::Failed {
-                        detail: e.to_string(),
-                        retryable: false,
-                    },
-                ),
-            },
-            None => error_frame(
+    if let Some(supervisor) = registry.supervisor() {
+        return match supervisor.create_and_spawn().await {
+            Ok(account) => Ok(serde_json::to_string(&DaemonMessage::AccountCreated {
+                id,
+                account,
+            })?),
+            Err(e) => error_frame(
                 Some(id),
-                ProtocolError::Refused {
-                    detail: "account lifecycle is not available on this listener".to_string(),
+                ProtocolError::Failed {
+                    detail: e.to_string(),
+                    retryable: false,
                 },
             ),
-        }
+        };
     }
-    #[cfg(target_family = "wasm")]
-    {
-        let _ = registry; // no `AccountSupervisor` exists to reach on this target yet.
-        error_frame(
+    let Some(lifecycle) = registry.embedded_lifecycle() else {
+        return error_frame(
             Some(id),
             ProtocolError::Refused {
-                detail: "account lifecycle is not available on web yet".to_string(),
+                detail: "account lifecycle is not available on this listener".to_string(),
             },
-        )
+        );
+    };
+    match lifecycle.create_account().await {
+        Ok(account) => Ok(serde_json::to_string(&DaemonMessage::AccountCreated {
+            id,
+            account,
+        })?),
+        Err(e) => error_frame(
+            Some(id),
+            ProtocolError::Failed {
+                detail: e.to_string(),
+                retryable: false,
+            },
+        ),
     }
 }
 
@@ -1109,16 +1112,8 @@ async fn change_account(
     disposition: crate::session_bridge::AccountDisposition,
 ) -> Result<String> {
     #[cfg(not(target_family = "wasm"))]
-    {
-        let Some(supervisor) = registry.supervisor() else {
-            return error_frame(
-                id,
-                ProtocolError::Refused {
-                    detail: "account lifecycle is not available on this listener".to_string(),
-                },
-            );
-        };
-        match disposition {
+    if let Some(supervisor) = registry.supervisor() {
+        return match disposition {
             crate::session_bridge::AccountDisposition::Reset => {
                 supervisor.reset_account(account).await
             }
@@ -1126,22 +1121,26 @@ async fn change_account(
                 supervisor.remove_account(account).await
             }
         }
-        .into_answer(id)
+        .into_answer(id);
     }
-    #[cfg(target_family = "wasm")]
-    {
-        let _ = (registry, account, disposition);
-        error_frame(
+    let Some(lifecycle) = registry.embedded_lifecycle() else {
+        return error_frame(
             id,
             ProtocolError::Refused {
-                detail: "account lifecycle is not available on web yet".to_string(),
+                detail: "account lifecycle is not available on this listener".to_string(),
             },
-        )
+        );
+    };
+    match disposition {
+        crate::session_bridge::AccountDisposition::Reset => lifecycle.reset_account(account).await,
+        crate::session_bridge::AccountDisposition::Remove => {
+            lifecycle.remove_account(account).await
+        }
     }
+    .into_answer(id)
 }
 
 /// The wire answer for a [`LifecycleOutcome`].
-#[cfg(not(target_family = "wasm"))]
 impl crate::account::LifecycleOutcome {
     fn into_answer(self, id: Option<RequestId>) -> Result<String> {
         match self {
@@ -1211,4 +1210,251 @@ async fn write_line<W: AsyncWrite + Unpin>(writer: &mut W, line: &str) -> Result
     // bare newline inside a value, which the protocol tests pin.
     writer.write_all(b"\n").await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use crate::account::{AccountRuntime, AllocateFn, EmbeddedLifecycle, ForgetFn, StartFn};
+    use crate::session_bridge::{AccountDisposition, Action, CommandOutcome, SessionCommand};
+    use crate::state::StateHub;
+    use oxidezap_core::AccountId;
+    use oxidezap_session::StoreRegistry;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    #[cfg(target_family = "wasm")]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[cfg(not(target_family = "wasm"))]
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[cfg(not(target_family = "wasm"))]
+    static DB: AtomicUsize = AtomicUsize::new(0);
+
+    #[cfg(not(target_family = "wasm"))]
+    fn stores() -> Arc<StoreRegistry> {
+        let n = DB.fetch_add(1, Ordering::Relaxed);
+        Arc::new(StoreRegistry::new(format!(
+            "file:server-lifecycle-{n}-{}?mode=memory&cache=shared",
+            std::process::id()
+        )))
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn stores() -> Arc<StoreRegistry> {
+        Arc::new(StoreRegistry::new(oxidezap_session::resolve_database_path()))
+    }
+
+    fn bridge() -> (
+        crate::session_bridge::Commands,
+        mpsc::UnboundedReceiver<Action>,
+    ) {
+        let (commands, mut receiver) = mpsc::channel(4);
+        let (seen_tx, seen_rx) = mpsc::unbounded_channel();
+        oxidezap_session::spawn(async move {
+            if let Some(SessionCommand { action, reply }) = receiver.recv().await {
+                let _ = reply.send(CommandOutcome::Accepted);
+                let _ = seen_tx.send(action);
+            }
+        });
+        (commands, seen_rx)
+    }
+
+    fn runtime_with_commands(
+        id: AccountId,
+        commands: crate::session_bridge::Commands,
+    ) -> Arc<AccountRuntime> {
+        Arc::new(AccountRuntime::new_with_registry(
+            id,
+            StateHub::for_account(id),
+            Arc::new(oxidezap_plugin_host::Plugins::nothing_loaded(Arc::new(
+                |_| {},
+            ))),
+            commands,
+            stores(),
+        ))
+    }
+
+    fn real_allocate() -> Arc<AllocateFn> {
+        Arc::new(|stores| {
+            Box::pin(async move { stores.create_account().await.map_err(anyhow::Error::from) })
+        })
+    }
+
+    fn unused_start() -> Arc<StartFn> {
+        Arc::new(|_, _, _, _| Box::pin(async {}))
+    }
+
+    fn no_forget() -> Arc<ForgetFn> {
+        Arc::new(|_, _, _, disposition| {
+            Box::pin(async move {
+                match disposition {
+                    AccountDisposition::Reset => crate::session_bridge::AccountExit::ResetCompleted,
+                    AccountDisposition::Remove => {
+                        crate::session_bridge::AccountExit::RemoveCompleted
+                    }
+                }
+            })
+        })
+    }
+
+    fn parse(frame: &str) -> DaemonMessage {
+        serde_json::from_str(frame).expect("the server speaks this protocol")
+    }
+
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    async fn create_account_uses_the_shared_store_registry() {
+        let registry = AccountRegistry::new();
+        let shared = stores();
+        let start: Arc<StartFn> = Arc::new(|registry, id, _, _| {
+            assert!(registry.insert(runtime_with_commands(id, mpsc::channel(4).0)));
+            Box::pin(async {})
+        });
+        let lifecycle = EmbeddedLifecycle::with_hooks(
+            Arc::clone(&registry),
+            Arc::clone(&shared),
+            real_allocate(),
+            start,
+            no_forget(),
+        );
+
+        let first_request = RequestId::from(31u64);
+        let first = parse(
+            &create_account(&registry, Some(first_request))
+                .await
+                .expect("a create answer is encoded"),
+        );
+        let second_request = RequestId::from(32u64);
+        let second = parse(
+            &create_account(&registry, Some(second_request))
+                .await
+                .expect("a create answer is encoded"),
+        );
+        let (mut first_id, mut second_id) = (None, None);
+        if let DaemonMessage::AccountCreated { id, account } = first {
+            assert_eq!(id, first_request);
+            first_id = Some(account);
+        }
+        if let DaemonMessage::AccountCreated { id, account } = second {
+            assert_eq!(id, second_request);
+            second_id = Some(account);
+        }
+        let (Some(first_id), Some(second_id)) = (first_id, second_id) else {
+            panic!("create account answered with something other than a new account");
+        };
+        assert_ne!(first_id, second_id);
+        assert!(registry.get(first_id).is_some());
+        assert!(registry.get(second_id).is_some());
+        assert_eq!(
+            shared
+                .accounts()
+                .await
+                .expect("the store lists accounts")
+                .len(),
+            2
+        );
+        drop(lifecycle);
+    }
+
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    async fn reset_and_remove_are_acknowledged_and_stay_scoped() {
+        let registry = AccountRegistry::new();
+        let first = AccountId::new(7).unwrap();
+        let second = AccountId::new(8).unwrap();
+        let (commands_first, mut seen_first) = bridge();
+        let (commands_second, mut seen_second) = bridge();
+        assert!(registry.insert(runtime_with_commands(first, commands_first)));
+        assert!(registry.insert(runtime_with_commands(second, commands_second)));
+        let lifecycle = EmbeddedLifecycle::with_hooks(
+            Arc::clone(&registry),
+            stores(),
+            real_allocate(),
+            unused_start(),
+            no_forget(),
+        );
+
+        let reset_request = RequestId::from(33u64);
+        let answer = parse(
+            &change_account(
+                &registry,
+                Some(reset_request),
+                first,
+                AccountDisposition::Reset,
+            )
+            .await
+            .expect("a reset answer is encoded"),
+        );
+        assert!(
+            matches!(answer, DaemonMessage::Accepted { id: Some(got) } if got == reset_request)
+        );
+        assert!(matches!(
+            seen_first
+                .recv()
+                .await
+                .expect("the first account was asked"),
+            Action::ForgetSession(AccountDisposition::Reset)
+        ));
+
+        let remove_request = RequestId::from(34u64);
+        let answer = parse(
+            &change_account(
+                &registry,
+                Some(remove_request),
+                second,
+                AccountDisposition::Remove,
+            )
+            .await
+            .expect("a remove answer is encoded"),
+        );
+        assert!(
+            matches!(answer, DaemonMessage::Accepted { id: Some(got) } if got == remove_request)
+        );
+        assert!(matches!(
+            seen_second
+                .recv()
+                .await
+                .expect("the second account was asked"),
+            Action::ForgetSession(AccountDisposition::Remove)
+        ));
+        assert_eq!(registry.snapshot().accounts.len(), 2);
+        drop(lifecycle);
+    }
+
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_family = "wasm"), tokio::test)]
+    async fn lifecycle_without_an_owner_is_refused() {
+        let registry = AccountRegistry::new();
+        let created = parse(
+            &create_account(&registry, Some(RequestId::from(35u64)))
+                .await
+                .expect("a refusal is still an answer"),
+        );
+        assert!(matches!(
+            created,
+            DaemonMessage::Error {
+                error: ProtocolError::Refused { .. },
+                ..
+            }
+        ));
+        let changed = parse(
+            &change_account(
+                &registry,
+                Some(RequestId::from(36u64)),
+                AccountId::LEGACY,
+                AccountDisposition::Reset,
+            )
+            .await
+            .expect("a refusal is still an answer"),
+        );
+        assert!(matches!(
+            changed,
+            DaemonMessage::Error {
+                error: ProtocolError::Refused { .. },
+                ..
+            }
+        ));
+    }
 }
